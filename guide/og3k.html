@@ -20,6 +20,18 @@
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="../assets/site.css">
+<style>
+/* The credit to Vitaly Li: set apart in the site's accent, above the install
+   steps, the same panel as the RAW-View guide's credit. */
+.credit{background:var(--sig-soft); border:1px solid var(--line); border-left:4px solid var(--sig);
+  border-radius:4px; padding:18px 20px; margin:22px 0 30px}
+.credit-kicker{font-family:var(--mono); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--sig); margin:0 0 4px}
+.credit-h{font-size:1.35rem; line-height:1.3; margin:0 0 6px; color:var(--ink);
+  font-family:var(--sans); text-transform:none; letter-spacing:0}
+.credit-doc{font-size:.95rem; color:var(--ink); margin:0 0 12px}
+.credit p:last-child{margin-bottom:0}
+</style>
 </head>
 <body>
 
@@ -37,12 +49,27 @@
   <p class="lede en">Records the sensor's whole 3:2 area as CinemaDNG &mdash; 3024&times;2010, 8, 10
   or 12-bit, 23.976 to 100 fps &mdash; instead of the 16:9 window the camera normally
   uses. Version <b>v0.2.6a</b>. This is an <b>alpha</b>: treat every take as disposable
-  until you have checked it.</p>
+  until you have checked it.<br>Open gate on the fp was first done by <a href="#credits">Vitaly&nbsp;Li</a>.</p>
   <p class="lede zh">把感光元件<strong>整個 3:2 範圍</strong>錄成 CinemaDNG ——
   3024&times;2010、8/10/12-bit、23.976 到 100 fps ——
   而不是相機平常用的 16:9 範圍。版本 <b>v0.2.6a</b>。<br>
-  這是 <b>alpha</b> 版:每段錄影在你檢查過之前,都當成可能不能用。</p>
+  這是 <b>alpha</b> 版:每段錄影在你檢查過之前,都當成可能不能用。<br>在 fp 上第一個做出 open gate 的是 <a href="#credits">Vitaly&nbsp;Li</a>。</p>
 </header>
+
+<section class="credit" id="credits" aria-labelledby="credits-h">
+  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
+  <h2 id="credits-h" class="credit-h"><span class="en">Thank you, Vitaly Li</span><span class="zh">感謝 Vitaly Li</span></h2>
+  <p class="credit-doc"><span class="en">The first open gate on the SIGMA fp</span><span class="zh">SIGMA fp 上的第一個 open gate</span> &middot; FP3K &middot; <a href="https://www.facebook.com/groups/1124721801045663/permalink/3266113850239770/">Vitaly&nbsp;Li</a></p>
+  <p class="en"><b>Vitaly Li got open gate out of a SIGMA fp first</b>, before OG3K existed. His
+  FP3K records the full 3:2 height of the sensor and does the 2:1 reduction in the ISP.
+  OG3K takes a different route to the same picture &mdash; the sensor's own 2&times;2-binned
+  3:2 mode &mdash; but it was his work that showed the fp could do it at all.
+  <a href="https://www.facebook.com/groups/1124721801045663/permalink/3266113850239770/">His original post</a>.</p>
+  <p class="zh"><b>在 SIGMA fp 上第一個做出 open gate 的是 Vitaly Li</b>,那時 OG3K 還不存在。
+  他的 FP3K 讀出感光元件完整的 3:2 高度,在 ISP 裡做 2:1 縮小。
+  OG3K 走的是另一條路 —— 用感光元件自己的 2&times;2 合併 3:2 模式 —— 但正是他的作品證明了 fp 做得到這件事。
+  <a href="https://www.facebook.com/groups/1124721801045663/permalink/3266113850239770/">他的原始貼文</a>。</p>
+</section>
 
 <!-- 1. INSTALL -->
 <h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
