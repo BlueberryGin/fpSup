@@ -367,7 +367,7 @@ ORDER = ['usbshell', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view']
 # the way gyro's does.
 # raw-view last (2026-09-27): appending changes no existing combination, and its
 # launcher runs after the OG restore, so its stock-word guards see whatever the
-# others installed and it stands down rather than overwrite them.  Its 47
+# others installed and it stands down rather than overwrite them.  Its 48
 # declared sites overlap no section of any other product.
 
 
