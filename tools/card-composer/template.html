@@ -127,6 +127,8 @@ body:not(.simple) .d-short{display:none}
 .sup-card:focus-within{outline:2px solid var(--sig);outline-offset:2px}
 .sup-choice.mod{border:0;border-radius:0;padding:15px;flex:1;margin:0;background:transparent}
 .sup-copy{min-width:0;overflow-wrap:anywhere}
+.sup-guide{display:block;padding:0 15px 13px;font-size:.8rem;color:var(--sig);text-decoration:none}
+.sup-guide:hover{text-decoration:underline}
 .sup-kicker{display:block;font-family:var(--mono);font-size:.65rem;letter-spacing:.06em;
   color:var(--dim);text-transform:uppercase;margin-bottom:6px}
 .sup-choice b{font-size:1rem;line-height:1.3}
@@ -867,6 +869,11 @@ const visibleCards = () => all().filter(c => activeCategory === 'all' || categor
 
 let addTileEl = null;   // the "+ Add a .BIN" tile; kept, because resetting the
                         // grid's innerHTML detaches it and getElementById loses it
+/* A product's how-to page.  The catalogue stores it relative to the site root;
+   on the published site that is two folders up, anywhere else (a file:// copy,
+   the Artifact host) the links go to the published site. */
+const SITE = /github\.io$/.test(location.hostname) ? '../../' : 'https://ijigen.github.io/fpSup/';
+const guideHref = g => SITE + g;
 function renderCatalogue(){
   const addTile = addTileEl || (addTileEl = document.getElementById('drop'));
   const options = categoryOptions();
@@ -911,6 +918,7 @@ function renderCatalogue(){
           ${legacy}
         </span>
       </label>${push}
+      ${c.guide ? `<a class="sup-guide" href="${escapeHTML(guideHref(c.guide))}">How to use &rarr;</a>` : ''}
       ${c.upload ? `<button type="button" class="remove-upload" data-rm="${escapeHTML(c.id)}">Remove uploaded file</button>` : ''}
     </article>`;
   }).join('') || '<p class="catalogue-empty">No SUPs in this category.</p>';
@@ -1179,5 +1187,19 @@ document.getElementById('dl-z').onclick = async () => {
   dl.save({filename: stem + '.zip', data: zip});
 };
 
+/* ?pick=og3k, or ?pick=gyro,og3k: each product's how-to page links here with
+   its product ticked.  Unknown ids are ignored, and a pick naming nothing known
+   keeps the default selection. */
+try {
+  const want = (new URLSearchParams(location.search).get('pick') || '')
+    .split(',').filter(id => all().some(c => c.id === id));
+  if (want.length){
+    on.clear();
+    for (const id of want){
+      for (const other of all().find(c => c.id === id).excl || []) on.delete(other);
+      on.add(id);
+    }
+  }
+} catch (e) {}
 render();
 </script>

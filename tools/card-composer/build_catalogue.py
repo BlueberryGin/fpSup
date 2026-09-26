@@ -304,6 +304,8 @@ RELEASES = ROOT / 'fpSup' / 'releases'
 # "fpGyroSup" while the banner said fpSup-OG3K and the tag said fpsup-og3k --
 # three vocabularies for one product.  What is on the screen when the card boots
 # is what the tick box says now, so the two can be matched without translating.
+# guide: the product's how-to page, relative to the site root (2026-09-27);
+# the tile links to it and the page links back here with ?pick=<id>.
 PRODUCTS = {
     'usbshell': dict(id='shell', name='fpSup-Shell', category='development',
                      shell=True, template='shellpush',
@@ -312,9 +314,11 @@ PRODUCTS = {
                           'to the BIN. EP 0x83 push patches are optional; the '
                           'shared AutoRun does not depend on this selection.'),
     'gyro':     dict(id='gyro', name='fpSup-Gyro', category='shooting', excl=['gyro-base'],
+                     guide='guide/gyro.html',
                      desc='Writes .gcsv and .json into the clip folder while '
                           'recording. The released card, unmodified.'),
     'gyro-base': dict(id='gyro-base', name='fpSup-Gyro-Base', category='shooting',
+                      guide='guide/gyro-base.html',
                       excl=['gyro'],
                       desc='Writes the gyro and accelerometer as a raw .GYR in '
                            '\\GYRO\\ beside every take -- every sample, the camera '
@@ -323,6 +327,7 @@ PRODUCTS = {
                            'to. Same code as the Gyro edition; not with it: they '
                            'hook the same places.'),
     'og3k':     dict(id='og3k', name='fpSup-OG3K', category='shooting', excl=['og2k'],
+                     guide='guide/og3k.html',
                      desc='3024×2010, DNG cropped to 3008×2000, eight frame rates, '
                           '8/10/12-bit CinemaDNG. Sensor modes 98/117 — the sensor\'s '
                           'own 2×2-binned 3:2 modes, so the ISP scales nothing. Native '
@@ -332,6 +337,7 @@ PRODUCTS = {
                           'entry is preserved and called after the gyro launcher '
                           'when the two are combined.'),
     'og2k':     dict(id='og2k', name='fpSup-OG2K', category='shooting', excl=['og3k'],
+                     guide='guide/og2k.html',
                      desc='2016×1344, DNG cropped to 2000×1334 — the same 3:2 field of '
                           'view at a third of the data. Sensor mode 139, the 3×3 '
                           'readout, so all eight frame rates including 100p stay on the '
@@ -340,6 +346,7 @@ PRODUCTS = {
                           'Not with OpenGate 3K: the resolution menu holds three '
                           'entries and each of them takes the third.'),
     'raw-view': dict(id='raw-view', name='fpSup-RAW-View', category='shooting',
+                     guide='guide/raw-view.html',
                      desc='RAW monitoring for CinemaDNG 12-bit: a RAW row (17th) in '
                           'the COLOR menu makes the LCD show what will be recorded -- '
                           'recording gain in standby, sensor saturation as white, two '
@@ -662,6 +669,7 @@ def main():
         out_cards.append(dict(
             id=card['id'], name=card['name'] + ' v' + card['version'],
             desc=card['desc'], excl=card.get('excl', []),
+            guide=card.get('guide', ''),
             category=card.get('category', 'uncategorized'),
             banner=ban, entry=entry, shell=bool(card.get('shell')),
             template=card.get('template', 'plain'),
