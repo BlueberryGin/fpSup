@@ -1,7 +1,7 @@
 # fpSup
 
 [![supMe on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/fpsup)
-[![Join the fpSup Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XeFK5zNZpT)
+[![Join the fpSup Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/WVTCcpGUYC)
 
 **SIGMA fp firmware research and on-camera tools.**
 **SIGMA fp 韌體研究與機身端工具。**
@@ -199,4 +199,4 @@ Each page says what has been proven, what is being worked on, and what is open.
 
 ---
 
-**Support** · [Ko-fi](https://ko-fi.com/fpsup) · [Discord](https://discord.gg/XeFK5zNZpT)
+**Support** · [Ko-fi](https://ko-fi.com/fpsup) · [Discord](https://discord.gg/WVTCcpGUYC)

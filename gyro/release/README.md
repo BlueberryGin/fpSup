@@ -1,7 +1,7 @@
 # fpGyroSup v1.11b
 
 [![supMe on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/fpsup)
-[![Join the fpSup Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/XeFK5zNZpT)
+[![Join the fpSup Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/WVTCcpGUYC)
 
 [English](#english) | [繁體中文](#繁體中文)
 

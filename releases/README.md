@@ -85,4 +85,4 @@ CI(`.github/workflows/pages.yml`)跑的是 `--check`:表格過期就讓部署失
 
 ---
 
-**fpSup** · [Ko-fi](https://ko-fi.com/fpsup) · [Discord](https://discord.gg/XeFK5zNZpT)
+**fpSup** · [Ko-fi](https://ko-fi.com/fpsup) · [Discord](https://discord.gg/WVTCcpGUYC)
