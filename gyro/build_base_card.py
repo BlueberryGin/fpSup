@@ -6,7 +6,7 @@
 WHAT THIS IS
 
 The base is the foundation the rest gets built on: every take writes its own
-\\GYRO\\A001_037.GYR beside the clip, sixty-four bytes of header and then
+A001_037.GYR into the root of the disk the take went to, a header and then
 nothing but interleaved gyro and accelerometer records, straight from the
 buffers the producers filled.  No gcsv on the camera, no lens profile, no
 portrait patch, no USB shell.  Those are separate questions and they were what
@@ -66,30 +66,27 @@ READMES = {}
 READMES['base'] = """fpGyroSup Base {version} -- SIGMA fp firmware Ver.5.02 only
 
 Put AutoRun.txt and fpSup.BIN in the root of the SD card the camera boots
-from, and make sure there is a folder called
-
-    GYRO
-
-in the root of EVERY volume you record to -- the SD card and, if you record
-to one, the USB SSD as well.  The camera writes the log beside the clip, on
-the same disk, and it will not create the folder for you: making a directory
-writes to the file system, and the only two moments it could do that are
-while a take is starting (which froze the camera) or at boot, when it can
-only guess which disk you will actually use.  One empty folder, once, is the
-honest price.
+from.  Nothing has to be prepared on the disks you record to: the log goes
+to the ROOT of the disk the take went to, not into a GYRO folder.  There is
+nothing to create and nothing to put back after a format -- people forgot
+the folder and reported the log missing, and the camera cannot make one for
+them: the only two moments it could are while a take is starting (which
+froze it) or at boot, when it can only guess which disk you will use.  An
+old GYRO folder still on a card is now just an empty folder.
 
 Then record.  Each take writes
 
-    \\GYRO\\A001_037.GYR    beside    \\CINEMA\\A001_037
+    \\A001_037.GYR    in the root of the disk \\CINEMA\\A001_037 went to
 
 64 bytes of header and then nothing but 8-byte records, gyro and
 accelerometer interleaved in the order they happened.  Convert with
 
     ./gyro/gyr7.py A001_037.GYR --gcsv A001_037.gcsv
 
-If a take produces no .GYR, the folder is missing on that volume.  Nothing
-else is wrong and nothing else needs doing.  Formatting a card removes it,
-so put it back after you format.
+If a take produces no .GYR, look in the root of the disk it went to and
+then in the root of the SD card, which is where the log goes when it cannot
+be opened on the other disk.  If it is in neither, the logger did not start:
+check that all four boxes filled at boot.
 
 This card carries the stream and nothing else: no gcsv on the camera, no
 lens profile, no USB shell.  If you would rather the camera wrote the .gcsv and
