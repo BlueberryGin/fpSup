@@ -77,6 +77,17 @@
     combine into.</span><span class="zh">fp 寫給 IMX410 的 161 個值,一個一列 —— 在沒有 datasheet 的情況下,靠「哪些模式共用同一個值」分組,已經解出 150 個。Merge select、位元深度、讀出速度那一區都認出來了,還有 11 個沒解。另附這些值所在的八張 ROM 表,以及它們組合出來的全部 70 個模式。</span></small>
     <span class="m"><span class="en">reference &middot; sortable, filterable, read from Ver.5.02</span><span class="zh">參考 &middot; 可排序、可篩選,從 Ver.5.02 讀出</span></span>
   </a>
+  <a class="row" href="explainers/sensor-mode-tree.html">
+    <b><span class="en">The 70 sensor modes as a talent tree</span><span class="zh">70 個感光元件模式做成天賦樹</span></b>
+    <small><span class="en">The same 70 modes, laid out so you can pick one. Radius is the
+    absolute value on a log scale &mdash; frame rate, or rolling shutter &mdash; so M12&rsquo;s
+    239.76p sits on the rim and M0&rsquo;s 19.1p hugs the core; sectors are sensor coverage,
+    and each of the 22 paths is one geometry family on one analog fingerprint. Every node
+    opens its full parameter set, including the output raster and pixel aspect ratio, so a
+    3&times;6 mode like M12 shows plainly that its picture comes out squashed 2&times;
+    vertically. Presets, filters, a sortable table and a three-way comparison.</span><span class="zh">同樣那 70 個模式,這次排成看得出該選哪一個。半徑是對數尺度上的絕對數值 —— 幀率,或捲簾 —— 所以 M12 的 239.76p 在最外圈、M0 的 19.1p 貼著核心;扇區是感光覆蓋,22 條路徑各是一個幾何家族的一種類比指紋。每個節點點進去就是完整參數,包含輸出光柵與像素長寬比,所以像 M12 這種 3&times;6 模式會直接寫明畫面會被垂直壓扁兩倍。附配點模板、篩選、可排序資料表與三路比較。</span></small>
+    <span class="m"><span class="en">interactive &middot; radius = frame rate or rolling shutter &middot; EN / 中文</span><span class="zh">互動 &middot; 半徑＝幀率或捲簾 &middot; EN / 中文</span></span>
+  </a>
   <a class="row" href="explainers/imx410-binning.html">
     <b><span class="en">What the IMX410&rsquo;s binning actually does</span><span class="zh">IMX410 的像素合併到底做了什麼</span></b>
     <small><span class="en">The menu calls the two open-gate modes 2&times;2 and 3&times;3. Seven frames
