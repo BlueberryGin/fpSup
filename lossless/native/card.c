@@ -47,10 +47,6 @@ static uint32_t card_original_enqueue(uintptr_t creator, uint32_t id, uint32_t a
     typedef uint32_t (*fn)(uintptr_t, uint32_t, uint32_t);
     return ((fn)0xc037dd50u)(creator, id, argument);
 }
-static uint32_t card_tick_us(void) {             /* free-running 1 MHz, ARM */
-    typedef uint32_t (*fn)(void);
-    return ((fn)0xc002b6e0u)();
-}
 /* The frames' own allocator: C037A990 gets every kind-1 frame buffer with
  * C001CFD8(C001CF78(10), &frame[0x68], bytes, 0x400, 0) and C0374180 frees
  * it with C001D3D0. The spare comes from the same place, or the firmware
@@ -91,7 +87,6 @@ static void card_sleep_ms(uint32_t n) {          /* C03705D8 -> tk_dly_tsk */
 #elif defined(FPL_CARD_HOST_TEST)
 extern uint32_t fpl_test_card_prepare(uintptr_t, const uint32_t *);
 extern uint32_t fpl_test_card_enqueue(uintptr_t, uint32_t, uint32_t);
-extern uint32_t fpl_test_card_tick(void);
 extern void fpl_test_card_get_spare(void *, uint32_t);
 extern void fpl_test_card_free_spare(void *);
 extern int32_t fpl_test_card_task_create(uintptr_t, uint32_t);
@@ -100,7 +95,6 @@ extern void fpl_test_card_sleep(uint32_t);
 #define card_sleep_ms fpl_test_card_sleep
 #define card_original_prepare fpl_test_card_prepare
 #define card_original_enqueue fpl_test_card_enqueue
-#define card_tick_us fpl_test_card_tick
 #define card_get_spare fpl_test_card_get_spare
 #define card_free_spare fpl_test_card_free_spare
 #else
@@ -125,26 +119,12 @@ struct fpl_card {
     uint32_t rec_events, rec_admitted, rec_raw, rec_firmware_refused;
     uint32_t rec_hold_refused, hold_init_failed, ring_busy;
     uint32_t stops, finishes, finish_busy, last_finish;
-    /* what actually reaches each site, recorded whether or not a take is
-     * live: the first camera run showed C03A33C8 called 29 times and never
-     * with event 3, so which event starts a recording is measured here */
-    uint32_t req_hist[48];              /* request[0] 0..47; 47 = anything larger */
-    uint32_t req_last[16], req_n;
-    uint32_t arrive_calls, stop_calls, stop_kind_last;
-    /* Why only a third of the frames reach the engine (2026-09-30, card h):
-     * how frames actually arrive, and how long a job stays out. One entry
-     * per arrival of a live take: bits 0..23 the microseconds since the
-     * previous arrival (saturating), 24..27 the slot phase found on arrival,
-     * bit 28 set if this arrival was held. */
-    uint32_t arr_log[64], arr_n, arr_last_us;
-    uint32_t job_start_us, job_us_last, job_us_min, job_us_max, job_seen;
     /* the take's spare for the buffer swap: asked, granted, given back */
     uint32_t spare_bytes, spare_failed, spares_freed;
     uint32_t stale_promises;            /* forgotten at a new take, see start_hold */
     uintptr_t task_entry;               /* card.S task_shim */
     int32_t task_id;                    /* the codec task; < 1: none, and the
                                            card holds frames the old way */
-    volatile uint32_t task_alive;       /* passes, saturating */
     uint32_t lane_b_failed, lane_stop_result;
     /* SHOOT 2 (CINE) Lossless RAW row: memory only, OFF at every boot */
     struct fpl_menu menu;
@@ -314,11 +294,6 @@ static void release_spare(struct fpl_card *c) {
 
 USED uint32_t fpl_card_rec(uintptr_t camera, const uint32_t *request, struct fpl_card *c) {
     uint32_t dispatch;
-    if (card_valid(c) && request) {
-        uint32_t code = request[0];
-        card_saturate(&c->req_hist[code < 47 ? code : 47]);
-        c->req_last[c->req_n++ & 15u] = code;
-    }
     if (!card_valid(c) || !request || !FPL_REC_IS_START(request[0]))
         return card_valid(c) ? fpl_rec_hook_call(camera, request, &c->rec)
                              : card_original_prepare(camera, request);
@@ -350,39 +325,14 @@ USED uint32_t fpl_card_rec(uintptr_t camera, const uint32_t *request, struct fpl
 
 USED uint32_t fpl_card_arrive(uintptr_t creator, uint32_t id, uint32_t argument,
                               struct fpl_card *c) {
-    uint32_t now, dt, phase, held, done, result;
-    if (card_valid(c)) card_saturate(&c->arrive_calls);
     if (!card_valid(c) || !c->hold_live)
         return card_original_enqueue(creator, id, argument);
-
-    now = card_tick_us();
-    dt = c->arr_n ? now - c->arr_last_us : 0;
-    c->arr_last_us = now;
-    phase = c->rec.workspace.pipeline.phase;
-    held = c->hold.held;
-    done = c->hold.compressed + c->hold.no_benefit + c->hold.refused;
-    result = c->task_id > 0 ? fpl_lanes_arrive(c->lane, creator, id, argument)
-                            : fpl_hold_arrive(&c->hold, creator, id, argument);
-    if (c->hold.compressed + c->hold.no_benefit + c->hold.refused != done &&
-        c->job_start_us) {
-        /* a job was collected on this arrival: how long it had been out */
-        uint32_t us = now - c->job_start_us;
-        c->job_us_last = us;
-        if (!c->job_seen || us < c->job_us_min) c->job_us_min = us;
-        if (us > c->job_us_max) c->job_us_max = us;
-        card_saturate(&c->job_seen);
-        c->job_start_us = 0;
-    }
-    if (c->hold.held != held) c->job_start_us = card_tick_us();
-    c->arr_log[c->arr_n++ & 63u] = (dt > 0xFFFFFFu ? 0xFFFFFFu : dt) |
-                                   ((phase & 15u) << 24) |
-                                   ((c->hold.held != held) ? 1u << 28 : 0u);
-    return result;
+    return c->task_id > 0 ? fpl_lanes_arrive(c->lane, creator, id, argument)
+                          : fpl_hold_arrive(&c->hold, creator, id, argument);
 }
 
 USED void fpl_card_stop(struct fpl_card *c, uint32_t kind) {
     struct fpl_rec_workspace *w;
-    if (card_valid(c)) { card_saturate(&c->stop_calls); c->stop_kind_last = kind; }
     if (!card_valid(c) || !c->hold_live || (kind != 1 && kind != 9)) return;
     card_saturate(&c->stops);
     w = &c->rec.workspace;
@@ -423,7 +373,6 @@ USED void fpl_card_task(struct fpl_card *c) {
     for (;;) {
         uint32_t live = card_valid(c) && c->hold_live;
         if (live) fpl_lanes_task(c->lane);
-        if (card_valid(c) && c->task_alive != UINT32_MAX) c->task_alive++;
         card_sleep_ms(live ? 1u : 10u);
 #if defined(FPL_CARD_HOST_TEST)
         return;                                  /* one pass per call */

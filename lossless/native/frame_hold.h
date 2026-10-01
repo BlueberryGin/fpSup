@@ -100,33 +100,14 @@ struct fpl_frame_hold {
     uint32_t swapped, swap_declined, swap_undone;  /* released by swap; held
                                            without a spare that fits; spare
                                            result copied back after all */
-    uint32_t last_capacity;             /* frame+0x6C of the last kind-1 frame:
-                                           the number the first live test reads */
     /* Which check turned a frame away, by the reasons below. The first live
      * compressed take (2026-09-30) found all 133 frames ineligible and no
      * way to say why; these say why. */
     uint32_t refused_by[8];
-    uint32_t mismatch_word, mismatch_frame, mismatch_seen;  /* the first one */
-    /* Where the time goes, microseconds, camera build only (host: 0). */
-    struct {
-        uint32_t copy_last, copy_max;          /* copy-back, or the swap's
-                                                  header prefix             */
-        uint32_t service_last, service_max;    /* a completed collection     */
-        uint32_t submit_last, submit_max;      /* codec_job submit           */
-        uint32_t engine_last, engine_min;      /* submit to first done poll  */
-        uint32_t busy_total, jobs;             /* sum of engine_last, count  */
-        uint32_t first_submit, last_done;      /* the span they fall in      */
-        uint32_t submitted_at;
-        uint32_t held_at, wait_last, wait_max;  /* lane: held to started    */
-        uint32_t gap_last, gap_max, gap_total;  /* other lane done to this
-                                                   lane started, if waiting */
-    } us;
     /* lane mode only */
     volatile uint32_t lane;
     uint32_t lane_result, lane_failed, abandoned;
     uint32_t order;                     /* arrival order among the lanes */
-    uint32_t chained;                   /* started at once: it was waiting when
-                                           the other lane's job finished */
     uint32_t dma_failed;                /* header DMA refused: CPU copy used */
     uint32_t lanes_full;                /* lane 0 only: a frame passed because
                                            every lane was busy */

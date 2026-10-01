@@ -330,7 +330,6 @@ uint32_t fpl_fixture_lane_get(uint32_t n, uint32_t field) {
     case 0: return h->lane;
     case 1: return h->compressed;
     case 2: return h->held;
-    case 3: return h->chained;
     case 4: return h->faults;
     case 5: return (n ? &pipeline_b : &pipeline)->phase;
     case 6: return h->order;
@@ -410,7 +409,6 @@ uint32_t fpl_fixture_get(uint32_t field) {
     case 21: return barrier_n;
     case 22: return published();
     case 24: return hold.direct;
-    case 25: return hold.last_capacity;
     case 26: return hold.job.source_capacity;
     case 27: return hold.workspace.spare.handle ? (uint32_t)(hold.workspace.spare.handle - MEM) : 0;
     case 28: return hold.swapped;

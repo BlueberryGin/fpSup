@@ -50,16 +50,11 @@
 #define poke(a, v) H->write(a, v)
 #define uncached(a) H->uncached(a)
 #define barrier() H->barrier()
-#define now_us() 0u
 #define irq_off() H->irq_off()
 #define irq_restore(m) H->irq_restore(m)
 #define sleep_ms(n) H->sleep_ms(n)
 #define header_dma(to, from, n) H->dma(to, from, n)
 #elif defined(__arm__) && UINTPTR_MAX == UINT32_MAX
-static uint32_t now_us(void) {                    /* free-running 1 MHz, ARM */
-    typedef uint32_t (*fn)(void);
-    return ((fn)0xc002b6e0u)();
-}
 static uintptr_t native_frame(uint32_t id) {
     typedef uintptr_t (*registry)(void);
     typedef uintptr_t (*lookup)(uintptr_t, uint32_t);
@@ -197,7 +192,6 @@ static uint32_t handoff(void *context, const struct fpl_frame_lease *lease,
         /* Reserved at admission; still free because only this task publishes. */
         if (slot < 0 || tiles > FPL_CODEC_TILE_MAX) return FPL_FAULT;
         c = &h->ring[slot];
-        uint32_t t0 = now_us();
         uintptr_t file = lease->buffer;
         uint32_t capacity = lease->capacity;
         if (h->swapping && swap_allowed(h, h->frame)) {
@@ -234,8 +228,6 @@ static uint32_t handoff(void *context, const struct fpl_frame_lease *lease,
             bulk_copy(uncached(lease->buffer + PIXELS_IN_FILE), uncached(output->bytes),
                       output->length);
         }
-        h->us.copy_last = now_us() - t0;
-        if (h->us.copy_last > h->us.copy_max) h->us.copy_max = h->us.copy_last;
         for (uint32_t n = 0; n < tiles; ++n)
             c->tile_bytes[n] = bswap(peek(uncached(h->job.table + 4u * n)));
         c->payload = output->length;
@@ -260,33 +252,15 @@ static uint32_t handoff(void *context, const struct fpl_frame_lease *lease,
 /* Collect the running job if it is done. `wait` spins on the one-tick poll,
  * which is only done at stop. Returns FPL_BUSY if still running. */
 static uint32_t service_done(struct fpl_frame_hold *, struct fpl_pipeline *, uint32_t);
-/* A job was found finished at t0: its time, from submit. */
-static void job_timed(struct fpl_frame_hold *h, uint32_t t0) {
-    /* an upper bound on the engine's own time: submit to the poll that found
-     * it done. The minimum over many jobs is the tightest reading. */
-    h->us.engine_last = t0 - h->us.submitted_at;
-    if (!h->us.engine_min || h->us.engine_last < h->us.engine_min)
-        h->us.engine_min = h->us.engine_last;
-    /* How busy the engine is kept: the sum of submit-to-found-done, over the
-     * span from the first submit to the last collection. */
-    if (h->us.busy_total <= UINT32_MAX - h->us.engine_last) h->us.busy_total += h->us.engine_last;
-    h->us.last_done = t0;
-    if (h->us.jobs != UINT32_MAX) ++h->us.jobs;
-}
-
 static uint32_t service(struct fpl_frame_hold *h, uint32_t wait) {
     struct fpl_pipeline *p = h->pipeline;
-    uint32_t result, polls = 0, t0 = now_us();
+    uint32_t result, polls = 0;
     if (p->phase != FPL_SLOT_ENCODING) return FPL_OK;
     do {
         result = fpl_codec_job_poll(&h->job);
     } while (result == FPL_BUSY && wait && ++polls < STOP_POLLS);
     if (result == FPL_BUSY) return FPL_BUSY;
-    job_timed(h, t0);
-    result = service_done(h, p, result);
-    h->us.service_last = now_us() - t0;
-    if (h->us.service_last > h->us.service_max) h->us.service_max = h->us.service_last;
-    return result;
+    return service_done(h, p, result);
 }
 
 static uint32_t service_done(struct fpl_frame_hold *h, struct fpl_pipeline *p,
@@ -369,19 +343,9 @@ static uint32_t eligible(struct fpl_frame_hold *h, uintptr_t frame,
         descriptor[n] = peek(frame + FRAME_DESCRIPTOR + 4u * n);
     handle = peek(frame + FRAME_HANDLE);
     capacity = peek(frame + FRAME_CAPACITY);
-    h->last_capacity = capacity;
     told = told_source(h);
     if (!fpl_producer_facts_match(h->facts, descriptor)) {   /* planned for
                                                                another format */
-        if (!h->refused_by[FPL_HOLD_R_DESCRIPTOR]) {
-            for (uint32_t n = 0; n < FPL_FACTS_DESCRIPTOR_WORDS; ++n)
-                if (descriptor[n] != h->facts->seen.descriptor[n]) {
-                    h->mismatch_word = n + 1;
-                    h->mismatch_frame = descriptor[n];
-                    h->mismatch_seen = h->facts->seen.descriptor[n];
-                    break;
-                }
-        }
         saturate(&h->refused_by[FPL_HOLD_R_DESCRIPTOR]);
         return 0;
     }
@@ -470,11 +434,7 @@ static uint32_t admit(struct fpl_frame_hold *h, uintptr_t creator, uint32_t nati
 }
 
 static uint32_t submit(struct fpl_frame_hold *h, const struct fpl_codec_input *in) {
-    uint32_t t0 = now_us(), result = fpl_codec_job_submit(&h->job, in);
-    h->us.submitted_at = now_us();
-    if (!h->us.first_submit) h->us.first_submit = h->us.submitted_at | 1u;
-    h->us.submit_last = h->us.submitted_at - t0;
-    if (h->us.submit_last > h->us.submit_max) h->us.submit_max = h->us.submit_last;
+    uint32_t result = fpl_codec_job_submit(&h->job, in);
     fpl_pipeline_submitted(h->pipeline, &h->token, result);
     return result;
 }
@@ -527,7 +487,6 @@ uint32_t fpl_hold_take(struct fpl_frame_hold *h, uintptr_t creator,
     saturate(&h->arrivals);
     if (!admit(h, creator, native_id, argument, &h->lane_in)) return 0;
     h->lane_failed = 0;
-    h->us.held_at = now_us();
     barrier();
     h->lane = FPL_LANE_HELD;
     barrier();
@@ -543,8 +502,6 @@ uint32_t fpl_hold_kick(struct fpl_frame_hold *h) {
     irq_restore(mask);
     barrier();
     result = submit(h, &h->lane_in);
-    h->us.wait_last = h->us.submitted_at - h->us.held_at;
-    if (h->us.wait_last > h->us.wait_max) h->us.wait_max = h->us.wait_last;
     if (result != FPL_OK) {
         h->lane_failed = 1;
         h->lane_result = result;
@@ -559,12 +516,10 @@ uint32_t fpl_hold_kick(struct fpl_frame_hold *h) {
 }
 
 uint32_t fpl_hold_check(struct fpl_frame_hold *h) {
-    uint32_t result, t0;
+    uint32_t result;
     if (!hold_valid(h) || h->lane != FPL_LANE_RUNNING) return 0;
-    t0 = now_us();
     result = fpl_codec_job_poll(&h->job);
     if (result == FPL_BUSY) return 0;
-    job_timed(h, t0);
     h->lane_result = result;
     barrier();
     h->lane = FPL_LANE_FINISHED;
@@ -573,7 +528,7 @@ uint32_t fpl_hold_check(struct fpl_frame_hold *h) {
 }
 
 uint32_t fpl_hold_collect(struct fpl_frame_hold *h) {
-    uint32_t result, t0, mask;
+    uint32_t result, mask;
     if (!hold_valid(h)) return FPL_BUSY;
     /* stop's wait and an arrival may both come for it: one claims it */
     mask = irq_off();
@@ -591,10 +546,7 @@ uint32_t fpl_hold_collect(struct fpl_frame_hold *h) {
         h->lane = FPL_LANE_FAULT;
         return FPL_FAULT;
     }
-    t0 = now_us();
     result = service_done(h, h->pipeline, h->lane_result);
-    h->us.service_last = now_us() - t0;
-    if (h->us.service_last > h->us.service_max) h->us.service_max = h->us.service_last;
     barrier();
     h->lane = result == FPL_OK ? FPL_LANE_IDLE : FPL_LANE_FAULT;
     return result;
@@ -690,7 +642,7 @@ uint32_t fpl_lanes_arrive(struct fpl_frame_hold *const lane[2], uintptr_t creato
 }
 
 uint32_t fpl_lanes_task(struct fpl_frame_hold *const lane[2]) {
-    struct fpl_frame_hold *first, *second, *next = 0, *other;
+    struct fpl_frame_hold *first, *second, *next = 0;
     uint32_t moved = 0;
     if (!lane || !hold_valid(lane[0])) return 0;
     by_age(lane, &first, &second);
@@ -701,17 +653,7 @@ uint32_t fpl_lanes_task(struct fpl_frame_hold *const lane[2]) {
     if (first->lane == FPL_LANE_HELD) next = first;
     else if (second && second->lane == FPL_LANE_HELD) next = second;
     if (!next) return moved;
-    other = next == first ? second : first;
     if (!fpl_hold_kick(next)) return moved;
-    /* Was this frame already waiting when the engine last finished? Then the
-     * gap from that finish to this start is the chain's own cost. */
-    if (other && other->us.jobs && (int32_t)(other->us.last_done - next->us.held_at) >= 0) {
-        uint32_t gap = next->us.submitted_at - other->us.last_done;
-        saturate(&next->chained);
-        next->us.gap_last = gap;
-        if (gap > next->us.gap_max) next->us.gap_max = gap;
-        if (next->us.gap_total <= UINT32_MAX - gap) next->us.gap_total += gap;
-    }
     return moved | 2u;
 }
 

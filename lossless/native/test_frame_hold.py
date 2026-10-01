@@ -877,7 +877,6 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(self.state(), (RUNNING_L, HELD_L))
         self.lib.fpl_fixture_task()                      # 1 done -> 2 started
         self.assertEqual(self.state(), (FINISHED_L, RUNNING_L))
-        self.assertEqual(self.lane(1, L_CHAINED), 1)
         self.assertEqual(self.get(ENQ_N), 0, 'released off the arrival side')
         self.lib.fpl_fixture_lane_arrive(3)              # collects 1, holds 3
         self.assertEqual(self.queued(), [(1, packed(1))])
@@ -900,7 +899,6 @@ class LaneTests(unittest.TestCase):
         packed_ids = [i for i, w in q if w == packed(i)]
         self.assertEqual(packed_ids, sorted(packed_ids), 'compressed out of order')
         self.assertGreater(self.lane(0, L_COMPRESSED) + self.lane(1, L_COMPRESSED), 13)
-        self.assertGreater(self.lane(0, L_CHAINED) + self.lane(1, L_CHAINED), 5)
         self.assertEqual(self.get(OWNERS_DISTINCT), 1)
         for n in (0, 1):
             self.assertEqual(self.lib.fpl_fixture_lane_finish(n), OK)
