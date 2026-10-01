@@ -35,8 +35,6 @@ struct fpl_codec_job {
     uint32_t source_capacity;           /* what the caller vouched readable */
     uint32_t flag, pattern, end_position, total, padded;
     uint32_t request[12];
-    uint32_t *power;                    /* the caller's power word, or NULL */
-    uint32_t opens, kept;               /* started after OPEN / without it */
 };
 
 /* Everything the caller vouches for. `source_capacity` is how many bytes are
@@ -50,16 +48,6 @@ struct fpl_codec_input {
     uint32_t width, height, format;          /* Sigpro format 0..3 */
     uintptr_t source, destination, table;
     uint32_t source_capacity, destination_capacity, table_capacity;
-    /* POWER STAYS ON (2026-10-01). NULL: OPEN before and CLOSE after every
-     * job, as the firmware's encoder does. Otherwise a word shared by every
-     * job on the one engine: 1 = left open by the last job. Then the next job
-     * does only what OPEN does to the engine block itself -- the block reset
-     * C06304F0 (which clears the registers SUBMIT ORs into) and the engine's
-     * interrupt enable C0630480(1) -- and a finished job is not closed.
-     * fpl_codec_power_off() closes at the end of the take. A job also opens
-     * fully if the engine's mode word C37CF87C is not 1: only CLOSE clears it,
-     * so someone else closed the engine. */
-    uint32_t *power;
 };
 
 #if defined(FPL_CODEC_JOB_HOST_TEST)
@@ -74,8 +62,6 @@ struct fpl_codec_natives {
     void (*reset)(void);
     uint32_t (*start)(void);
     uint32_t (*close)(void);
-    uint32_t (*block_reset)(void);
-    uint32_t (*engine_irq)(uint32_t);
     void (*eoi)(uintptr_t, uint32_t);
     void (*tiles)(uintptr_t, uintptr_t, uint32_t);
     uint32_t (*total)(uintptr_t, uint32_t);
@@ -96,6 +82,4 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *, const struct fpl_codec_inp
  * FPL_FAULT when the wait failed any other way or a close failed -- state
  * unknown, so the job and its buffers stay held. */
 uint32_t fpl_codec_job_poll(struct fpl_codec_job *);
-/* End of the take, no job running: CLOSE if a job left the engine open. */
-uint32_t fpl_codec_power_off(uint32_t *power);
 #endif

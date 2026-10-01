@@ -466,7 +466,6 @@ static uint32_t admit(struct fpl_frame_hold *h, uintptr_t creator, uint32_t nati
                                            : h->workspace.output_capacity;
     in->table = h->workspace.table;
     in->table_capacity = h->workspace.table_capacity;
-    in->power = h->workspace.power;
     return 1;
 }
 
@@ -733,10 +732,6 @@ uint32_t fpl_lanes_stop(struct fpl_frame_hold *const lane[2]) {
     }
     if (fpl_hold_abandon(first) != FPL_OK) result = FPL_FAULT;
     if (second && fpl_hold_abandon(second) != FPL_OK) result = FPL_FAULT;
-    /* Every job collected: the engine was left powered for the next one, and
-     * there is none. With a job still out, it stays as it is. */
-    if (result == FPL_OK)
-        lane[0]->power_off_result = fpl_codec_power_off(lane[0]->workspace.power);
     return result;
 }
 

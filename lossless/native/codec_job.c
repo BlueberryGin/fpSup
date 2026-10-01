@@ -14,9 +14,6 @@
                                         computed >=100; that wait is the split */
 #define E_TMOUT        0xffffffceu   /* -50 */
 #define BAND_LIMIT     0x04000000u   /* C062F478: one band holds <= 64 MiB */
-#define ENGINE_MODE    0xc37cf87cu   /* 1 after SUBMIT; only CLOSE clears it */
-#define POWER_ON       1u
-#define POWER_UNKNOWN  2u
 
 #if defined(FPL_CODEC_JOB_HOST_TEST)
 #define N (&fpl_codec_test_natives)
@@ -29,8 +26,6 @@
 #define native_reset() N->reset()
 #define native_start() N->start()
 #define native_close() N->close()
-#define native_block_reset() N->block_reset()
-#define native_engine_irq(on) N->engine_irq(on)
 #define native_eoi(d, e) N->eoi(d, e)
 #define native_tiles(d, t, n) N->tiles(d, t, n)
 #define native_total(t, n) N->total(t, n)
@@ -51,8 +46,6 @@ typedef uint32_t (*fn5)(uint32_t, uint32_t, uint32_t, uint32_t *, uint32_t);
 #define native_reset() ((void)((fn0)0xc062fe91u)())
 #define native_start() ((fn0)0xc062feb1u)()
 #define native_close() ((fn0)0xc062fe81u)()
-#define native_block_reset() ((fn0)0xc06304f1u)()                  /* in OPEN */
-#define native_engine_irq(on) ((fn1)0xc0630481u)(on)              /* in OPEN */
 #define native_eoi(d, e) ((void)((fn2)0xc062f6c1u)(d, e))
 #define native_tiles(d, t, n) ((void)((fn3)0xc062fcf9u)(d, t, n))
 #define native_total(t, n) ((fn2)0xc062f4e1u)(t, n)
@@ -111,11 +104,6 @@ static uint32_t fail(struct fpl_codec_job *j, uint32_t native) {
     j->last_native = native;
     j->phase = FPL_CODEC_FAILED;
     return FPL_FAULT;
-}
-/* CLOSE, and the power word says so. */
-static uint32_t shut(struct fpl_codec_job *j) {
-    if (j->power) *j->power = 0;
-    return native_close();
 }
 static uint32_t refuse(struct fpl_codec_job *j, uint32_t result) {
     j->phase = FPL_CODEC_IDLE;
@@ -190,31 +178,16 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
     j->request[11] = STOCK_CALLBACK;
 
     native_clr_flg(j->flag, 0);
-    j->power = in->power;
-    if (j->power && *j->power == POWER_ON && peek(ENGINE_MODE) == 1) {
-        /* still powered: OPEN's own reset of the engine block, then its
-         * interrupt enable, and nothing else of OPEN */
-        native_block_reset();
-        if ((native = native_engine_irq(1)) != 0) {
-            shut(j);
-            return refuse(j, FPL_NOT_READY);
-        }
-        j->kept++;
-    } else {
-        if (j->power) *j->power = 0;
-        if ((native = native_open()) != 0) return refuse(j, FPL_NOT_READY);
-        if (j->power) *j->power = POWER_ON;
-        j->opens++;
-    }
+    if ((native = native_open()) != 0) return refuse(j, FPL_NOT_READY);
     for (uint32_t n = 0; n < engine[5]; n += 4) poke(band_table + n, 0);
     if ((native = native_submit(j->request)) != 0) {
-        shut(j);
+        native_close();
         return refuse(j, FPL_NOT_READY);
     }
     native_reset();                      /* C062FE90: the firmware pulses the
                                             soft reset before EVERY start */
     if ((native = native_start()) != 0) {
-        shut(j);
+        native_close();
         return refuse(j, FPL_NOT_READY);
     }
 
@@ -255,17 +228,14 @@ uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
     /* Any other wait failure: the firmware returns without closing, and so
      * does this. The engine's state is unknown, so the job -- and whatever
      * source and destination it was given -- stay held. */
-    if (native != 0) {
-        if (j->power) *j->power = POWER_UNKNOWN;     /* never reused */
-        return fail(j, native);
-    }
+    if (native != 0) return fail(j, native);
     if (pattern & 4u) {                              /* C062F90A */
         /* The engine refused this frame: its output would not fit the one
          * frame of room it was told. Measured 2026-09-28, the refusal writes
          * nothing -- 0 bytes out, guards untouched. The firmware closes and
          * its next call reuses the same buffers; so does this. Not a fault:
          * the frame simply goes to the card as it was. */
-        if ((native = shut(j)) != 0) return fail(j, native);
+        if ((native = native_close()) != 0) return fail(j, native);
         j->last_native = pattern;
         j->phase = FPL_CODEC_IDLE;
         return FPL_UNSUPPORTED;
@@ -278,7 +248,7 @@ uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
     total = native_total(j->band_table, j->tiles);
     aligned = align_kib(total);
     if (!total || aligned > j->destination_bytes) {  /* cannot be; never trust */
-        shut(j);
+        native_close();
         return fail(j, total);
     }
     pad = aligned - total;
@@ -292,17 +262,10 @@ uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
     poke(last, bswap(bswap(peek(last)) + pad));
     for (uint32_t n = 0; n < j->tiles * 4u; n += 4)  /* into the engine's table */
         poke(j->table + n, peek(j->band_table + n));
-    /* power stays on: the next job resets the block instead */
-    if (!j->power && (native = native_close()) != 0) return fail(j, native);
+    if ((native = native_close()) != 0) return fail(j, native);
 
     j->total = total;
     j->padded = aligned;
     j->phase = FPL_CODEC_DONE;
     return FPL_OK;
-}
-
-uint32_t fpl_codec_power_off(uint32_t *power) {
-    if (!power || *power != POWER_ON) return FPL_OK;
-    *power = 0;
-    return native_close() == 0 ? FPL_OK : FPL_FAULT;
 }

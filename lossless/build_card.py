@@ -107,8 +107,7 @@ FIELDS = ['magic', 'hold_live', 'rec_events', 'rec_admitted', 'rec_raw',
           'hold_b.us.busy_total', 'hold_b.us.jobs', 'hold_b.us.first_submit',
           'hold_b.us.last_done', 'pipe_b.phase', 'pipe_b.active',
           'hold.dma_failed', 'hold_b.dma_failed', 'hold_b.us.copy_last', 'hold_b.us.copy_max',
-          'codec_power', 'hold.power_off_result', 'hold.job.opens', 'hold.job.kept',
-          'hold_b.job.opens', 'hold_b.job.kept', 'hold_b.us.submit_last', 'hold_b.us.submit_max']
+          'hold_b.us.submit_last', 'hold_b.us.submit_max']
 UNITS = ['control.c', 'frame_pipeline.c', 'native/workspace_layout.c', 'uishare/ui_pool.c',
          'native/menu_page.c',
          'native/raw_workspace.c', 'native/rec_workspace.c', 'native/producer_facts.c',

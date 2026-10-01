@@ -32,13 +32,11 @@ IMAGE_SHA256 = 'aaa5208a028d9c4aebb9cc8614add723d456e96b2a95914f433079954320e622
 OK, INVALID, BUSY, UNSUPPORTED, NOT_READY, FAULT = range(6)
 IDLE, RUNNING, DONE, FAILED = range(4)
 (C_INIT, C_FLAG, C_CLR, C_TWAI, C_OPEN, C_SUBMIT, C_RESET, C_START,
- C_CLOSE, C_EOI, C_TILES, C_TOTAL, C_BRESET, C_IRQ) = range(1, 15)
+ C_CLOSE, C_EOI, C_TILES, C_TOTAL) = range(1, 13)
 SRC, DST, TBL = 0x10000000, 0x20000000, 0x30000000
 E_TMOUT = 0xFFFFFFCE
 (K_INIT, K_FLAG, K_OPEN, K_SUBMIT, K_START, K_CLOSE, K_TWAI, K_PATTERN, K_TOTAL,
- K_DSTLEN, K_TBLLEN, K_SRCCAP, K_DSTCAP, K_TBLCAP, K_ENDPOS, K_SRC,
- K_USE_POWER, K_POWER, K_MODE, K_IRQ) = range(20)
-POWER, OPENS, KEPT, MODE, IRQ_ARG = range(115, 120)
+ K_DSTLEN, K_TBLLEN, K_SRCCAP, K_DSTCAP, K_TBLCAP, K_ENDPOS, K_SRC) = range(16)
 LOG_N, PHASE, TOTAL, PADDED, TILECOUNT, EOI_D, EOI_E, TILES_D, TILES_T, TILES_N, \
     TOTAL_T, TOTAL_N, OOB, BAND_TABLE, LAST_NATIVE = range(100, 115)
 FHD = (1936, 1090, 0)
@@ -55,8 +53,7 @@ def build(directory, source=None, name='codec.dylib'):
                    check=True, capture_output=True, text=True, timeout=60)
     lib = ct.CDLL(str(out))
     for fn, count, ret in (('reset', 3, True), ('set', 2, False), ('submit', 0, True),
-                           ('poll', 0, True), ('get', 1, True), ('source_bytes', 3, True),
-                           ('power_off', 0, True), ('next_job', 0, False)):
+                           ('poll', 0, True), ('get', 1, True), ('source_bytes', 3, True)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = [ct.c_uint32] * count
         f.restype = ct.c_uint32 if ret else None
@@ -259,116 +256,6 @@ class CodecJobTests(unittest.TestCase):
                 self.assertEqual(self.get(OOB), 0)
 
 
-class PowerTests(unittest.TestCase):
-    """Power stays on between jobs: the first job of a take OPENs, a finished
-    job is not CLOSEd, and the next job only resets the engine block and
-    re-enables its interrupt -- what OPEN itself does to the block."""
-    KEPT_ORDER = [C_INIT, C_FLAG, C_CLR, C_BRESET, C_IRQ, C_SUBMIT, C_RESET, C_START]
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory(prefix='fpl-codec-power-')
-        cls.lib = build(cls.tmp.name)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def setUp(self):
-        self.assertEqual(self.lib.fpl_fixture_reset(*FHD), OK)
-        self.lib.fpl_fixture_set(K_USE_POWER, 1)
-
-    def get(self, f): return self.lib.fpl_fixture_get(f)
-    def log(self): return [self.get(i) for i in range(self.get(LOG_N))]
-
-    def first_job(self):
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertEqual(self.lib.fpl_fixture_poll(), OK)
-
-    def test_the_first_job_opens_and_leaves_the_engine_on(self):
-        self.first_job()
-        self.assertIn(C_OPEN, self.log())
-        self.assertNotIn(C_CLOSE, self.log())
-        self.assertEqual((self.get(POWER), self.get(OPENS), self.get(KEPT)), (1, 1, 0))
-
-    def test_the_next_job_resets_the_block_instead_of_opening(self):
-        self.first_job()
-        self.lib.fpl_fixture_next_job()
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertEqual(self.log(), self.KEPT_ORDER)
-        self.assertEqual((self.get(KEPT), self.get(OPENS), self.get(IRQ_ARG)), (1, 0, 1))
-        self.assertEqual(self.lib.fpl_fixture_poll(), OK)
-        self.assertNotIn(C_CLOSE, self.log())
-        self.assertEqual(self.get(PADDED) % 1024, 0)
-
-    def test_an_engine_someone_else_closed_is_opened_again(self):
-        self.first_job()
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_MODE, 0)          # CLOSE clears the mode word
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertIn(C_OPEN, self.log())
-        self.assertNotIn(C_BRESET, self.log())
-
-    def test_power_off_closes_once(self):
-        self.first_job()
-        self.assertEqual(self.lib.fpl_fixture_power_off(), OK)
-        self.assertEqual(self.log().count(C_CLOSE), 1)
-        self.assertEqual(self.get(POWER), 0)
-        self.assertEqual(self.lib.fpl_fixture_power_off(), OK)
-        self.assertEqual(self.log().count(C_CLOSE), 1, 'closed twice')
-
-    def test_a_refusal_closes_and_the_next_job_opens(self):
-        self.first_job()
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_PATTERN, 5)
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertEqual(self.lib.fpl_fixture_poll(), UNSUPPORTED)
-        self.assertIn(C_CLOSE, self.log())
-        self.assertEqual(self.get(POWER), 0)
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_PATTERN, 1)
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertIn(C_OPEN, self.log())
-
-    def test_a_failed_start_closes_and_clears_the_word(self):
-        self.first_job()
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_START, 1)
-        self.assertEqual(self.lib.fpl_fixture_submit(), NOT_READY)
-        self.assertEqual(self.log()[-1], C_CLOSE)
-        self.assertEqual(self.get(POWER), 0)
-
-    def test_a_refused_interrupt_enable_closes(self):
-        self.first_job()
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_IRQ, 1)
-        self.assertEqual(self.lib.fpl_fixture_submit(), NOT_READY)
-        self.assertNotIn(C_SUBMIT, self.log())
-        self.assertEqual(self.log()[-1], C_CLOSE)
-        self.assertEqual(self.get(POWER), 0)
-
-    def test_an_engine_in_an_unknown_state_is_never_reused(self):
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.lib.fpl_fixture_set(K_TWAI, 0xFFFFFFEF)
-        self.assertEqual(self.lib.fpl_fixture_poll(), FAULT)
-        self.assertNotEqual(self.get(POWER), 1)
-        self.lib.fpl_fixture_next_job()
-        self.lib.fpl_fixture_set(K_TWAI, 0)
-        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-        self.assertNotIn(C_BRESET, self.log())
-        self.assertEqual(self.lib.fpl_fixture_power_off(), OK)
-
-    def test_without_a_power_word_every_job_opens_and_closes(self):
-        self.lib.fpl_fixture_set(K_USE_POWER, 0)
-        for _ in range(2):
-            self.lib.fpl_fixture_next_job()
-            self.assertEqual(self.lib.fpl_fixture_submit(), OK)
-            self.assertEqual(self.lib.fpl_fixture_poll(), OK)
-            self.assertEqual(self.log().count(C_OPEN), 1)
-            self.assertEqual(self.log().count(C_CLOSE), 1)
-            self.assertNotIn(C_BRESET, self.log())
-
-
 class FirmwareOrderTests(unittest.TestCase):
     """The order above comes out of the image, not out of this file."""
 
@@ -421,25 +308,7 @@ class FirmwareOrderTests(unittest.TestCase):
         used = {int(m, 16) & ~1 for m in re.findall(r'\(fn\d\)(0x[0-9a-f]+)u', arm)}
         self.assertTrue(used)
         allowed = set(self.calls) | {0xC05A6890}          # F_INIT, the caller's step
-        allowed |= set(self.open_calls())                 # what OPEN does, kept-open path
         self.assertEqual(sorted(hex(a) for a in used - allowed), [])
-
-    @staticmethod
-    def open_calls():
-        import capstone
-        image = IMAGE.read_bytes()
-        md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
-        at = 0xC062FEE8                                   # OPEN, behind C062FE70
-        return [int(i.op_str[1:], 16) for i in md.disasm(image[at - 0xC0000000:
-                at - 0xC0000000 + 0x7C], at) if i.mnemonic in ('bl', 'blx')
-                and i.op_str.startswith('#')]
-
-    def test_the_kept_open_steps_are_opens_own_in_its_order(self):
-        calls = self.open_calls()
-        self.assertIn(0xC06304F0, calls)                  # block reset
-        self.assertIn(0xC0630480, calls)                  # engine interrupt enable
-        self.assertLess(calls.index(0xC06304F0), calls.index(0xC0630480))
-        self.assertEqual(calls[-1], 0xC0630480, 'OPEN does more after the enable')
 
     def test_the_callback_is_the_one_the_encoder_installs(self):
         text = (HERE / 'codec_job.c').read_text()
@@ -466,10 +335,10 @@ class MutationTests(unittest.TestCase):
         'ignores the source capacity': (
             '    if (source_bytes > in->source_capacity) return refuse(j, FPL_NOT_READY);', ''),
         'closes on an unknown wait failure': (
-            '        return fail(j, native);\n    }\n    if (pattern & 4u) {',
-            '        native_close();\n        return fail(j, native);\n    }\n    if (pattern & 4u) {'),
+            '    if (native != 0) return fail(j, native);',
+            '    if (native != 0) { native_close(); return fail(j, native); }'),
         'does not close on the error bit': (
-            '        if ((native = shut(j)) != 0) return fail(j, native);\n'
+            '        if ((native = native_close()) != 0) return fail(j, native);\n'
             '        j->last_native = pattern;',
             '        j->last_native = pattern;'),
         'treats a refusal as a fault': (
@@ -478,19 +347,6 @@ class MutationTests(unittest.TestCase):
         'sends the zero band height': ('    j->request[1] = in->height;',
                                        '    j->request[1] = in->height % (FPL_TILE_HEIGHT * '
                                        'ceil_div(in->height, FPL_TILE_HEIGHT));'),
-        'reuses without the block reset': ('        native_block_reset();\n', ''),
-        'reuses without the interrupt enable': (
-            '        if ((native = native_engine_irq(1)) != 0) {',
-            '        if (0) {'),
-        'ignores the mode word': (' && peek(ENGINE_MODE) == 1) {', ') {'),
-        'closes a kept job': ('    if (!j->power && (native = native_close()) != 0)',
-                              '    if ((native = native_close()) != 0)'),
-        'a close leaves the word on': ('    if (j->power) *j->power = 0;\n    return native_close();',
-                                       '    (void)j;\n    return native_close();'),
-        'reuses after an unknown failure': (
-            '        if (j->power) *j->power = POWER_UNKNOWN;     /* never reused */\n', ''),
-        'power off closes twice': ('    *power = 0;\n    return native_close()',
-                                   '    return native_close()'),
         'clears the flag on a timeout': (
             '    if (native == E_TMOUT) return FPL_BUSY;          /* still encoding */',
             '    if (native == E_TMOUT) { native_clr_flg(j->flag, 0); return FPL_BUSY; }'),
@@ -506,7 +362,7 @@ class MutationTests(unittest.TestCase):
                     source.write_text(text.replace(old, new))
                     lib = build(tmp, source, f'm{index}.dylib')
                     result = unittest.TestResult()
-                    for base in (CodecJobTests, PowerTests):
+                    for base in (CodecJobTests,):
                         class Against(base):
                             @classmethod
                             def setUpClass(cls):
@@ -522,7 +378,7 @@ class MutationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='fpl-codec-real-') as tmp:
             lib = build(tmp)
             result = unittest.TestResult()
-            for base in (CodecJobTests, PowerTests):
+            for base in (CodecJobTests,):
                 class Against(base):
                     @classmethod
                     def setUpClass(cls):

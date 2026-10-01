@@ -69,9 +69,6 @@ struct fpl_hold_workspace {
      * before the enqueue, C038C5F8 -> C00FBB90) is copied. {0,0,0}: no
      * spare, every frame takes the copy-back into its own raster. */
     struct { uintptr_t handle; uint32_t capacity, allocator_class; } spare;
-    /* codec_job's power word, shared by every hold on the engine; NULL: open
-     * and close around every job (fpl_codec_input.power) */
-    uint32_t *power;
 };
 
 /* A lane: one held frame at a time, run by the codec task (see frame_hold.c,
@@ -130,8 +127,7 @@ struct fpl_frame_hold {
     uint32_t order;                     /* arrival order among the lanes */
     uint32_t chained;                   /* started at once: it was waiting when
                                            the other lane's job finished */
-    uint32_t dma_failed;
-    uint32_t power_off_result;          /* lane 0: fpl_codec_power_off at stop */                /* header DMA refused: CPU copy used */
+    uint32_t dma_failed;                /* header DMA refused: CPU copy used */
     uint32_t lanes_full;                /* lane 0 only: a frame passed because
                                            every lane was busy */
     struct fpl_codec_input lane_in;

@@ -804,7 +804,6 @@ class FlushMutationTests(unittest.TestCase):
 IDLE_L, HELD_L, RUNNING_L, FINISHED_L, FAULT_L = range(5)
 (L_STATE, L_COMPRESSED, L_HELD, L_CHAINED, L_FAULTS, L_PHASE, L_ORDER, L_FULL,
  IRQ_DEPTH, IRQ_OFFS, IRQ_BAD, SLEEPS, L_DRAINED, L_SWAPPED, ENGINE_RUNNING) = range(15)
-L_POWER, L_OPENS, L_CLOSES, L_BLOCK_RESETS, L_KEPT = range(18, 23)
 
 
 class LaneTests(unittest.TestCase):
@@ -935,33 +934,6 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(len(self.queued()), 2, 'a frame was queued twice')
         self.assertEqual(self.lane(0, L_STATE), FAULT_L)
         self.assertEqual(self.lib.fpl_fixture_lane_finish(0), BUSY, 'workspace freed under DMA')
-
-    def test_the_engine_stays_powered_through_the_take_and_is_closed_at_stop(self):
-        self.reset(latency=2)
-        ids = list(range(1, 11))
-        self.frames(*ids)
-        for i in ids:
-            self.lib.fpl_fixture_lane_arrive(i)
-            self.task(2)
-        jobs = self.get(STARTS)
-        self.assertGreater(jobs, 3)
-        self.assertEqual(self.lane(0, L_OPENS), 1, 'opened more than once')
-        self.assertEqual(self.lane(0, L_CLOSES), 0, 'closed mid-take')
-        self.assertEqual(self.lane(0, L_BLOCK_RESETS), jobs - 1)
-        self.assertEqual(self.lane(0, L_POWER), 1)
-        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
-        self.assertEqual(self.lane(0, L_CLOSES), 1)
-        self.assertEqual(self.lane(0, L_POWER), 0)
-        self.assert_same_frame()
-        self.assert_clean()
-
-    def test_an_engine_still_running_at_stop_is_not_closed_under_it(self):
-        self.lib.fpl_fixture_mode(MODE_NEVER)
-        self.frames(1)
-        self.lib.fpl_fixture_lane_arrive(1)
-        self.task()
-        self.assertEqual(self.lib.fpl_fixture_lane_stop(), FAULT)
-        self.assertEqual(self.lane(0, L_CLOSES), 0)
 
     def test_a_completion_the_pipeline_refuses_still_gives_the_frame_back(self):
         self.frames(1, 2)
@@ -1151,12 +1123,6 @@ class LaneMutationTests(unittest.TestCase):
             ' { irq_restore(mask); return FPL_BUSY; }\n'),
         'a failed start is left held': (
             '        h->lane_failed = 1;\n', ''),
-        'stop leaves the engine powered': (
-            '        lane[0]->power_off_result = fpl_codec_power_off(lane[0]->workspace.power);',
-            '        lane[0]->power_off_result = 0;'),
-        'closes with a job still out': ('    if (result == FPL_OK)\n        lane[0]->power_off_result',
-                                        '    if (1)\n        lane[0]->power_off_result'),
-        'jobs not told the power word': ('    in->power = h->workspace.power;\n', '    in->power = 0;\n'),
         'refusal points the pipeline at no output': (
             '        out.bytes = h->job.destination;', '        out.bytes = h->workspace.output;'),
         'a failed completion keeps the frame': (
