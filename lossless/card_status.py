@@ -163,6 +163,11 @@ def main():
               f'faults {v["hold_b.faults"]}, swapped {v["hold_b.swapped"]}')
     if v['stale_promises']:
         print(f'  promises a previous take left (frames the firmware dropped): {v["stale_promises"]}')
+    print(f'  engine power: opened {v["hold.job.opens"] + v["hold_b.job.opens"]} times, '
+          f'started still powered {v["hold.job.kept"] + v["hold_b.job.kept"]}; word now '
+          f'{v["codec_power"]}, close at stop {v["hold.power_off_result"]}; submit last/max '
+          f'A {v["hold.us.submit_last"] / 1000:.2f}/{v["hold.us.submit_max"] / 1000:.2f} ms, '
+          f'B {v["hold_b.us.submit_last"] / 1000:.2f}/{v["hold_b.us.submit_max"] / 1000:.2f} ms')
     print(f'  header copy (DMA): A last {v["hold.us.copy_last"] / 1000:.2f} ms, max '
           f'{v["hold.us.copy_max"] / 1000:.2f} ms; B last {v["hold_b.us.copy_last"] / 1000:.2f} ms, '
           f'max {v["hold_b.us.copy_max"] / 1000:.2f} ms; DMA refused '

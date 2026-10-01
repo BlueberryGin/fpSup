@@ -7,7 +7,7 @@
 #include "codec_job.h"
 
 enum { C_INIT = 1, C_FLAG, C_CLR, C_TWAI, C_OPEN, C_SUBMIT, C_RESET, C_START,
-       C_CLOSE, C_EOI, C_TILES, C_TOTAL };
+       C_CLOSE, C_EOI, C_TILES, C_TOTAL, C_BRESET, C_IRQ };
 
 #define SRC 0x10000000u
 #define DST 0x20000000u
@@ -15,8 +15,10 @@ enum { C_INIT = 1, C_FLAG, C_CLR, C_TWAI, C_OPEN, C_SUBMIT, C_RESET, C_START,
 #define ENGINE 0xc302cdd4u
 #define TILECOUNT 0xc302cdecu
 #define ENDPOS 0x300d00f8u
+#define MODE 0xc37cf87cu
 
 static uint32_t log_[64], log_n;
+static uint32_t mode, power, irq_ret, irq_arg;
 static uint32_t engine[6], tilecount, endpos;
 static uint8_t dst[8192];
 static uint32_t tbl[1024];
@@ -52,11 +54,14 @@ static uint32_t f_open(void) { rec(C_OPEN); return open_ret; }
 static uint32_t f_submit(const uint32_t *r) {
     rec(C_SUBMIT);
     memcpy(request_seen, r, sizeof request_seen);
+    if (!submit_ret) mode = 1;           /* C062FFF8 sets C37CF87C */
     return submit_ret;
 }
 static void f_reset(void) { rec(C_RESET); }
 static uint32_t f_start(void) { rec(C_START); return start_ret; }
-static uint32_t f_close(void) { rec(C_CLOSE); return close_ret; }
+static uint32_t f_close(void) { rec(C_CLOSE); mode = 0; return close_ret; }
+static uint32_t f_block_reset(void) { rec(C_BRESET); return 0; }
+static uint32_t f_engine_irq(uint32_t on) { rec(C_IRQ); irq_arg = on; return irq_ret; }
 static void f_eoi(uintptr_t d, uint32_t e) {
     rec(C_EOI); eoi_args[0] = (uint32_t)d; eoi_args[1] = e;
 }
@@ -78,6 +83,7 @@ static uint32_t *slot(uintptr_t a) {
     if (a >= ENGINE && a < ENGINE + 24) return &engine[(a - ENGINE) / 4];
     if (a == TILECOUNT) return &tilecount;
     if (a == ENDPOS) return &endpos;
+    if (a == MODE) return &mode;
     if (a >= DST && a < DST + sizeof dst) return (uint32_t *)(void *)&dst[a - DST];
     if (a >= TBL && a < TBL + sizeof tbl) return &tbl[(a - TBL) / 4];
     return 0;
@@ -88,6 +94,7 @@ static void f_write(uintptr_t a, uint32_t v) { uint32_t *s = slot(a); if (!s) { 
 
 const struct fpl_codec_natives fpl_codec_test_natives = {
     f_init, f_flag, f_clr, f_twai, f_open, f_submit, f_reset, f_start, f_close,
+    f_block_reset, f_engine_irq,
     f_eoi, f_tiles, f_total, f_read, f_write
 };
 
@@ -102,6 +109,7 @@ uint32_t fpl_fixture_reset(uint32_t width, uint32_t height, uint32_t format) {
     memset(request_seen, 0, sizeof request_seen);
     init_ret = 1; flag_id = 42; open_ret = submit_ret = start_ret = close_ret = 0;
     twai_ret = 0; twai_pattern = 1; oob = 0;
+    mode = power = irq_ret = irq_arg = 0; input.power = 0;
     engine_dst_len = 0x2000; engine_tbl_len = 160 * 4;
     total_ret = 0x1234;
     for (uint32_t i = 0; i < 160; ++i) tile_sizes[i] = 100 + i;
@@ -130,10 +138,21 @@ void fpl_fixture_set(uint32_t knob, uint32_t value) {
     case 13: input.table_capacity = value; break;
     case 14: endpos = value; break;
     case 15: input.source = value; break;
+    case 16: input.power = value ? &power : 0; break;
+    case 17: power = value; break;
+    case 18: mode = value; break;
+    case 19: irq_ret = value; break;
     }
 }
 uint32_t fpl_fixture_submit(void) { return fpl_codec_job_submit(&job, &input); }
 uint32_t fpl_fixture_poll(void) { return fpl_codec_job_poll(&job); }
+uint32_t fpl_fixture_power_off(void) { return fpl_codec_power_off(input.power); }
+/* a fresh job on the same engine and power word (the other lane, the next frame) */
+void fpl_fixture_next_job(void) {
+    memset(&job, 0, sizeof job);
+    memset(log_, 0, sizeof log_); log_n = 0;
+    fpl_codec_job_init(&job);
+}
 uint32_t fpl_fixture_source_bytes(uint32_t w, uint32_t h, uint32_t f) {
     return fpl_codec_source_bytes(w, h, f);
 }
@@ -160,6 +179,11 @@ uint32_t fpl_fixture_get(uint32_t field) {
     case 112: return oob;
     case 113: return job.band_table;
     case 114: return job.last_native;
+    case 115: return power;
+    case 116: return job.opens;
+    case 117: return job.kept;
+    case 118: return mode;
+    case 119: return irq_arg;
     default: return 0xFFFFFFFFu;
     }
 }

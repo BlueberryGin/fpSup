@@ -146,6 +146,7 @@ struct fpl_card {
                                            card holds frames the old way */
     volatile uint32_t task_alive;       /* passes, saturating */
     uint32_t lane_b_failed, lane_stop_result;
+    uint32_t codec_power;               /* codec_job's power word, both lanes */
     /* SHOOT 2 (CINE) Lossless RAW row: memory only, OFF at every boot */
     struct fpl_menu menu;
     uintptr_t menu_area;
@@ -221,6 +222,7 @@ static void start_lane_b(struct fpl_card *c, const struct fpl_hold_workspace *a)
     struct fpl_hold_workspace ws;
     ws.output = 0;
     ws.output_capacity = 0;
+    ws.power = a->power;
     ws.table_capacity = a->table_capacity;
     c->table_b.handle = c->table_b.capacity = c->table_b.allocator_class = 0;
     card_get_spare(&c->table_b, ws.table_capacity);
@@ -273,6 +275,10 @@ static void start_hold(struct fpl_card *c) {
     ws.output_capacity = w->layout.output.capacity;
     ws.table = handle + w->layout.codec_sizes.offset;
     ws.table_capacity = w->layout.codec_sizes.capacity + w->layout.codec_scratch.capacity;
+    /* OPEN/CLOSE around every job. Keeping the engine powered (block reset
+     * and interrupt enable only) made the engine refuse every reused job on
+     * the camera (card y, 2026-10-01); codec_job keeps the option. */
+    ws.power = 0;
     /* One frame's worth, exactly what C037A990 asks for: the header reserve
      * plus the raster in 512 B units. Without it, every result is copied
      * back into its own frame. */

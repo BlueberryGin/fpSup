@@ -308,7 +308,11 @@ static uint32_t service_done(struct fpl_frame_hold *h, struct fpl_pipeline *p,
         /* The engine refused: the output would not fit one frame, so the
          * complete DNG cannot be smaller. The frame goes out as it was. */
         saturate(&h->refused);
-        out.bytes = h->workspace.output;
+        /* Where the engine was told to write -- the spare when there is no
+         * output span (2026-10-01: workspace.output 0 made this INVALID, the
+         * frame was never given back, and native stop hung). Nothing is
+         * copied from it: the result is READY_RAW. */
+        out.bytes = h->job.destination;
         out.length = h->job.destination_bytes;
         out.file_bytes = p->lease.stock_file_bytes;
         out.validated = 1;
@@ -327,7 +331,17 @@ static uint32_t service_done(struct fpl_frame_hold *h, struct fpl_pipeline *p,
         }
         return FPL_FAULT;                /* the spare stays ours, and busy */
     }
-    if (result != FPL_OK) { saturate(&h->faults); return result; }
+    if (result != FPL_OK) {
+        /* The engine is done (polled finished or refused) and only ever read
+         * the frame: it goes to the card as it was, or native stop waits on
+         * its 0xB forever. */
+        if (h->frame) {
+            native_enqueue(h->creator, h->native_id, 1);
+            h->frame = 0;
+        }
+        saturate(&h->faults);
+        return result;
+    }
     return fpl_pipeline_handoff(p, &h->token, handoff, h);
 }
 
@@ -452,6 +466,7 @@ static uint32_t admit(struct fpl_frame_hold *h, uintptr_t creator, uint32_t nati
                                            : h->workspace.output_capacity;
     in->table = h->workspace.table;
     in->table_capacity = h->workspace.table_capacity;
+    in->power = h->workspace.power;
     return 1;
 }
 
@@ -718,6 +733,10 @@ uint32_t fpl_lanes_stop(struct fpl_frame_hold *const lane[2]) {
     }
     if (fpl_hold_abandon(first) != FPL_OK) result = FPL_FAULT;
     if (second && fpl_hold_abandon(second) != FPL_OK) result = FPL_FAULT;
+    /* Every job collected: the engine was left powered for the next one, and
+     * there is none. With a job still out, it stays as it is. */
+    if (result == FPL_OK)
+        lane[0]->power_off_result = fpl_codec_power_off(lane[0]->workspace.power);
     return result;
 }
 

@@ -24,11 +24,13 @@
 #define ENGINE     0xc302cdd4u
 #define TILECOUNT  0xc302cdecu
 #define ENDPOS     0x300d00f8u
+#define MODE       0xc37cf87cu
 #define E_TMOUT    0xffffffceu
 #define MAX_ID     24u
 
 static uint8_t mem[MEM_SIZE];
 static uint32_t engine[6], tilecount, endpos, uncached_hits, barriers, oob;
+static uint32_t engine_mode, power, opens, block_resets;
 static uint32_t enq_ids[256], enq_payload[256], enq_state[256], enq_n;
 static uint32_t barrier_log[1024], barrier_n;
 static uint32_t published(void);
@@ -38,6 +40,7 @@ static uint32_t *slot(uintptr_t a, uint32_t count) {
     if (a >= ENGINE && a < ENGINE + 24) return &engine[(a - ENGINE) / 4];
     if (a == TILECOUNT) return &tilecount;
     if (a == ENDPOS) return &endpos;
+    if (a == MODE) return &engine_mode;
     if (a >= MEM + UNCACHED && a < MEM + UNCACHED + MEM_SIZE) {
         if (count) uncached_hits++;
         a -= UNCACHED;
@@ -143,9 +146,10 @@ static uint32_t c_init(const uint32_t *p) {
 }
 static uint32_t c_flag(void) { return 42; }
 static uint32_t c_clr(uint32_t f, uint32_t p) { (void)f; (void)p; return 0; }
-static uint32_t c_open(void) { return open_ret; }
+static uint32_t c_open(void) { if (!open_ret) opens++; return open_ret; }
 static uint32_t c_submit(const uint32_t *r) {
     started_source = r[5]; started_dest = r[7]; band_table = r[9];
+    engine_mode = 1;
     return 0;
 }
 static void c_reset(void) {}
@@ -153,12 +157,15 @@ static uint32_t c_start(void) {
     if (running) oob++;                  /* one engine: started while running */
     running = 1; left = latency; starts++; return 0;
 }
-static uint32_t c_close(void) { running = 0; closes++; return 0; }
+static uint32_t c_close(void) { running = 0; engine_mode = 0; closes++; return 0; }
+static uint32_t c_block_reset(void) { if (running) oob++; block_resets++; return 0; }
+static uint32_t c_engine_irq(uint32_t on) { return on == 1 ? 0 : 1; }
 static uint32_t c_twai(uint32_t f, uint32_t w, uint32_t m, uint32_t *p, uint32_t t) {
     (void)f; (void)w; (void)m; (void)t;
     if (mode == MODE_WAIT_ERROR) return 0xffffffefu;
     if (mode == MODE_NEVER) return E_TMOUT;
     if (left) { left--; return E_TMOUT; }
+    running = 0;                         /* done: the engine is idle, open or not */
     if (mode == MODE_REFUSE) { *p = 5; return 0; }
     /* "encode": the source's marker, then filler, into our output */
     /* compressed marker 0xC00000id, carrying the SOURCE frame's id */
@@ -180,6 +187,7 @@ static uint32_t c_total(uintptr_t t, uint32_t n) {
 }
 const struct fpl_codec_natives fpl_codec_test_natives = {
     c_init, c_flag, c_clr, c_twai, c_open, c_submit, c_reset, c_start, c_close,
+    c_block_reset, c_engine_irq,
     c_eoi, c_tiles, c_total, rd_quiet, wr_quiet
 };
 
@@ -247,6 +255,7 @@ uint32_t fpl_fixture_reset(uint32_t latency_polls, uint32_t payload, uint32_t lo
     memset(&pipeline_b, 0, sizeof pipeline_b); memset(&hold_b, 0, sizeof hold_b);
     irq_depth = irq_offs = irq_bad = sleeps = task_in_sleep = reenter = 0;
     dmas = dma_fail = dma_bad = 0;
+    engine_mode = power = opens = block_resets = 0;
     memset(frame_present, 0, sizeof frame_present);
     enq_n = uncached_hits = barriers = oob = tilecount = endpos = barrier_n = 0;
     memset(&flush_stats, 0, sizeof flush_stats);
@@ -304,7 +313,9 @@ void fpl_fixture_frame_field(uint32_t id, uint32_t offset, uint32_t value) {
 /* Lane mode: a second lane with its own pipeline, spare and table, and the
  * codec task, run by hand (fpl_fixture_task) or inside stop's sleeps. */
 uint32_t fpl_fixture_lanes(uint32_t second) {
-    struct fpl_hold_workspace w = hold.workspace;
+    struct fpl_hold_workspace w;
+    hold.workspace.power = &power;         /* lanes keep the engine powered */
+    w = hold.workspace;
     task_in_sleep = 1;
     if (!second) return FPL_OK;
     if (fpl_pipeline_init(&pipeline_b, 8) != FPL_OK) return 94;
@@ -345,6 +356,11 @@ uint32_t fpl_fixture_lane_get(uint32_t n, uint32_t field) {
     case 15: return h->last_result;
     case 16: { uint32_t m = 0; for (uint32_t i = 0; i < 8; ++i) m |= (h->refused_by[i] != 0) << i; return m; }
     case 17: return h->arrivals;
+    case 18: return power;
+    case 19: return opens;
+    case 20: return closes;
+    case 21: return block_resets;
+    case 22: return h->job.kept;
     default: return 0xFFFFFFFFu;
     }
 }
@@ -355,6 +371,8 @@ uint32_t fpl_fixture_arrive_arg(uint32_t id, uint32_t arg) {
 uint32_t fpl_fixture_stop(void) { return fpl_hold_stop(&hold); }
 uint32_t fpl_fixture_finish(void) { return fpl_pipeline_finish(&pipeline, 1); }
 void fpl_fixture_break(void) { hold.magic = 0; }
+/* the pipeline in a state where completion is refused */
+void fpl_fixture_pipeline_phase(uint32_t v) { pipeline.phase = v; }
 /* The writer's flush for frame `id`: returns the payload it was promised, or
  * 0xFFFFFFFF for none, and consumes the promise when `consume`. */
 uint32_t fpl_fixture_flush(uint32_t id, uint32_t consume) {

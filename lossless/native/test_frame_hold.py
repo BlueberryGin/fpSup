@@ -75,7 +75,7 @@ def build(directory, replace=None, name='hold.dylib'):
                            ('lane_stop', 0, True), ('lane_abandon', 1, True),
                            ('lane_finish', 1, True), ('lane_get', 2, True),
                            ('kick', 1, True), ('reenter', 1, False),
-                           ('dma_fails', 1, False)):
+                           ('dma_fails', 1, False), ('pipeline_phase', 1, False)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = [ct.c_uint32] * count
         f.restype = ct.c_uint32 if ret else None
@@ -547,6 +547,22 @@ class NoOutputTests(unittest.TestCase):
         self.assertEqual(self.queued(), [(1, raw(1))])
         self.assertEqual((self.get(STARTS), self.get(HELD_N)), (0, 0))
 
+    def test_an_engine_refusal_gives_the_frame_back_as_it_was(self):
+        # 2026-10-01 card y: with no output span a refusal faulted and the
+        # frame was never given back, so native stop hung
+        self.assertEqual(self.reset(), OK)
+        self.lib.fpl_fixture_mode(MODE_REFUSE)
+        for i in (1, 2):
+            self.lib.fpl_fixture_frame(i, GRANTED_EXTRA)
+        self.lib.fpl_fixture_arrive(1)
+        self.lib.fpl_fixture_arrive(2)
+        self.assertEqual(self.queued()[0], (1, raw(1)))
+        self.assertEqual((self.get(REFUSED), self.get(FAULTS)), (1, 0))
+        self.lib.fpl_fixture_stop()
+        self.assertEqual(self.queued(), [(1, raw(1)), (2, raw(2))])
+        self.assertEqual(self.get(PHASE), FREE)
+        self.assertEqual(self.lib.fpl_fixture_finish(), OK)
+
     def test_a_clone_made_while_held_is_still_copied_back_from_the_spare(self):
         self.assertEqual(self.reset(), OK)
         self.lib.fpl_fixture_frame(1, GRANTED_EXTRA)
@@ -788,6 +804,7 @@ class FlushMutationTests(unittest.TestCase):
 IDLE_L, HELD_L, RUNNING_L, FINISHED_L, FAULT_L = range(5)
 (L_STATE, L_COMPRESSED, L_HELD, L_CHAINED, L_FAULTS, L_PHASE, L_ORDER, L_FULL,
  IRQ_DEPTH, IRQ_OFFS, IRQ_BAD, SLEEPS, L_DRAINED, L_SWAPPED, ENGINE_RUNNING) = range(15)
+L_POWER, L_OPENS, L_CLOSES, L_BLOCK_RESETS, L_KEPT = range(18, 23)
 
 
 class LaneTests(unittest.TestCase):
@@ -918,6 +935,58 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(len(self.queued()), 2, 'a frame was queued twice')
         self.assertEqual(self.lane(0, L_STATE), FAULT_L)
         self.assertEqual(self.lib.fpl_fixture_lane_finish(0), BUSY, 'workspace freed under DMA')
+
+    def test_the_engine_stays_powered_through_the_take_and_is_closed_at_stop(self):
+        self.reset(latency=2)
+        ids = list(range(1, 11))
+        self.frames(*ids)
+        for i in ids:
+            self.lib.fpl_fixture_lane_arrive(i)
+            self.task(2)
+        jobs = self.get(STARTS)
+        self.assertGreater(jobs, 3)
+        self.assertEqual(self.lane(0, L_OPENS), 1, 'opened more than once')
+        self.assertEqual(self.lane(0, L_CLOSES), 0, 'closed mid-take')
+        self.assertEqual(self.lane(0, L_BLOCK_RESETS), jobs - 1)
+        self.assertEqual(self.lane(0, L_POWER), 1)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assertEqual(self.lane(0, L_CLOSES), 1)
+        self.assertEqual(self.lane(0, L_POWER), 0)
+        self.assert_same_frame()
+        self.assert_clean()
+
+    def test_an_engine_still_running_at_stop_is_not_closed_under_it(self):
+        self.lib.fpl_fixture_mode(MODE_NEVER)
+        self.frames(1)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.task()
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), FAULT)
+        self.assertEqual(self.lane(0, L_CLOSES), 0)
+
+    def test_a_completion_the_pipeline_refuses_still_gives_the_frame_back(self):
+        self.frames(1, 2)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.task(2)
+        self.assertEqual(self.lane(0, L_STATE), FINISHED_L)
+        self.lib.fpl_fixture_pipeline_phase(HELD)      # complete() will refuse
+        self.lib.fpl_fixture_lane_arrive(2)
+        self.assertEqual([i for i, _ in self.queued()].count(1), 1, 'the finished frame was kept')
+        self.assertEqual(self.lane(0, L_FAULTS), 1)
+
+    def test_engine_refusals_in_both_lanes_give_every_frame_back(self):
+        self.reset(latency=1)
+        self.lib.fpl_fixture_mode(MODE_REFUSE)
+        ids = list(range(1, 7))
+        self.frames(*ids)
+        for i in ids:
+            self.lib.fpl_fixture_lane_arrive(i)
+            self.task(2)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assertEqual(sorted(self.queued()), [(i, raw(i)) for i in ids])
+        self.assertEqual(self.lane(0, L_FAULTS) + self.lane(1, L_FAULTS), 0)
+        self.assertEqual(self.state(), (IDLE_L, IDLE_L))
+        for n in range(1 + self.SECOND):
+            self.assertEqual(self.lib.fpl_fixture_lane_finish(n), OK)
 
     def test_a_frame_given_back_at_stop_is_never_started(self):
         self.frames(1)
@@ -1082,6 +1151,18 @@ class LaneMutationTests(unittest.TestCase):
             ' { irq_restore(mask); return FPL_BUSY; }\n'),
         'a failed start is left held': (
             '        h->lane_failed = 1;\n', ''),
+        'stop leaves the engine powered': (
+            '        lane[0]->power_off_result = fpl_codec_power_off(lane[0]->workspace.power);',
+            '        lane[0]->power_off_result = 0;'),
+        'closes with a job still out': ('    if (result == FPL_OK)\n        lane[0]->power_off_result',
+                                        '    if (1)\n        lane[0]->power_off_result'),
+        'jobs not told the power word': ('    in->power = h->workspace.power;\n', '    in->power = 0;\n'),
+        'refusal points the pipeline at no output': (
+            '        out.bytes = h->job.destination;', '        out.bytes = h->workspace.output;'),
+        'a failed completion keeps the frame': (
+            '        if (h->frame) {\n            native_enqueue(h->creator, h->native_id, 1);\n'
+            '            h->frame = 0;\n        }\n        saturate(&h->faults);\n        return result;',
+            '        saturate(&h->faults);\n        return result;'),
         'flush looks in one lane only': (
             'flush_site.c', '        h = h2;                          /* the second lane\'s promise */',
             '        (void)h2;'),
