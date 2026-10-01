@@ -29,6 +29,7 @@ loader's power-off callback writes it back (SUP_BUILD_RULES §4).
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -216,15 +217,19 @@ def build_blob(tmp: pathlib.Path):
                   'defines': defines, 'layout': layout}
 
 
-def og3k_sections(tmp):
-    """OpenGate 3K as its own release builder makes it: every section with a
-    destination (stage2, destination 0, is the shared one this build already
-    has) and its entry. Nothing here knows what the sections do."""
+def og_sections(tmp, target='og3k'):
+    """OpenGate (og3k or og2k) as its own release builder makes it: every
+    section with a destination (stage2, destination 0, is the shared one this
+    build already has) and its entry. Nothing here knows what the sections do.
+    The builder reads OG_TARGET when it is imported, so it is set first."""
+    os.environ['OG_TARGET'] = target
     og = ROOT / 'projects/open-gate/build'
     sys.path.insert(0, str(og))
     import build_og3k_ui_candidate as og3k
-    og3k.build(out=tmp / 'og3k', release=True)
-    blob = (tmp / 'og3k' / 'fpSup.BIN').read_bytes()
+    if og3k.PLAN_TARGET['label'].lower() != target:
+        raise BuildError(f'OpenGate builder made {og3k.PLAN_TARGET["label"]}, not {target}')
+    og3k.build(out=tmp / target, release=True)
+    blob = (tmp / target / 'fpSup.BIN').read_bytes()
     magic, count, entry, _ = struct.unpack_from('<4sIII', blob)
     if magic != b'VBIN' or entry < 0x40000000:
         raise BuildError('OpenGate BIN is not a VBIN with an absolute entry')
@@ -234,7 +239,7 @@ def og3k_sections(tmp):
         if dst:
             if dst < 0x40000000:
                 raise BuildError('OpenGate carries a pool-offset section; not supported here')
-            f = tmp / f'og3k_{i:03d}_{dst:08x}.bin'
+            f = tmp / f'{target}_{i:03d}_{dst:08x}.bin'
             f.write_bytes(blob[off:off + ln])
             args += ['--also-bin', f'0x{dst:08X}:{f}']
         off += ln + (-ln % 4)
@@ -244,11 +249,18 @@ def og3k_sections(tmp):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--out', type=pathlib.Path, required=True)
-    ap.add_argument('--with-og3k', action='store_true',
-                    help='also carry OpenGate 3K (its release build from '
+    ap.add_argument('--with-og3k', action='store_true', help='same as --og og3k')
+    ap.add_argument('--og', choices=('og3k', 'og2k'),
+                    help='also carry OpenGate (its release build from '
                          'projects/open-gate/build, current og3k_ui.S): every fixed '
                          'section and its entry, after the lossless launcher')
+    ap.add_argument('--plain', action='store_true',
+                    help='no Fast Start 2 (a single-product card: plain --loader)')
+    ap.add_argument('--no-shell', action='store_true', help='leave the USB shell out')
+    ap.add_argument('--banner', default=BANNER)
     a = ap.parse_args()
+    if a.with_og3k:
+        a.og = a.og or 'og3k'
     out = a.out.resolve()
     if out.exists() and any(out.iterdir()):
         raise SystemExit(f'{out} is not empty: this never overwrites a build or a card')
@@ -259,15 +271,18 @@ def main():
         blob, facts = build_blob(tmp)
         (tmp / 'lossless.bin').write_bytes(blob)
         cmd = [sys.executable, '-B', str(SHELL / 'build_autorun.py'), '--loader',
-               '--store-boot', '--loader-hook', '--four-box-bar', '--no-ep-patches',
-               '--banner', BANNER, '--boot-bin', f'{tmp / "lossless.bin"}:0',
-               '--out', str(out / 'AutoRun.txt')]
+               '--no-ep-patches', '--banner', a.banner,
+               '--boot-bin', f'{tmp / "lossless.bin"}:0', '--out', str(out / 'AutoRun.txt')]
+        if not a.plain:
+            cmd += ['--store-boot', '--loader-hook', '--four-box-bar']     # Fast Start 2
+        if a.no_shell:
+            cmd += ['--no-shell']
         for site, (stock, _) in sorted(SITES.items()):
             f = tmp / f'site_{site:08x}.bin'
             f.write_bytes(struct.pack('<I', stock))
             cmd += ['--also-bin', f'0x{site:08X}:{f}']
-        if a.with_og3k:
-            cmd += og3k_sections(tmp)
+        if a.og:
+            cmd += og_sections(tmp, a.og)
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=SHELL)
         (out / 'build_autorun.log').write_text(r.stdout + r.stderr)
         if r.returncode:
@@ -294,7 +309,8 @@ def main():
     sums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in produced}
     (out / 'SHA256SUMS').write_text(''.join(f'{h}  {n}\n' for n, h in sums.items()))
     (out / 'build.json').write_text(json.dumps({
-        'product': 'fpLossless TEST card', 'banner': BANNER,
+        'product': 'fpLossless card', 'banner': a.banner,
+        'fast_start_2': not a.plain, 'usb_shell': not a.no_shell, 'opengate': a.og,
         'command': ' '.join(sys.argv), 'blob': facts,
         'sites': {f'0x{s:08X}': {'stock': f'0x{w:08X}', 'what': d}
                   for s, (w, d) in SITES.items()},
