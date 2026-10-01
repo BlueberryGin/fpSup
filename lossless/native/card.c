@@ -34,6 +34,7 @@
 #include "frame_hold.h"
 #include "flush_site.h"
 #include "menu_page.h"
+#include "play_decode.h"
 
 #define FPL_CARD_MAGIC 0x44524143u               /* "CARD" */
 #define USED __attribute__((used))
@@ -126,6 +127,8 @@ struct fpl_card {
     int32_t task_id;                    /* the codec task; < 1: none, and the
                                            card holds frames the old way */
     uint32_t lane_b_failed, lane_stop_result;
+    /* playback: compressed frames decoded back as the player reads them */
+    struct fpl_play play;
     /* SHOOT 2 (CINE) Lossless RAW row: memory only, OFF at every boot */
     struct fpl_menu menu;
     uintptr_t menu_area;
@@ -298,6 +301,7 @@ USED uint32_t fpl_card_rec(uintptr_t camera, const uint32_t *request, struct fpl
         return card_valid(c) ? fpl_rec_hook_call(camera, request, &c->rec)
                              : card_original_prepare(camera, request);
     card_saturate(&c->rec_events);
+    fpl_play_end(&c->play);             /* a scratch playback left: back to the pool */
     if (!fpl_menu_on(&c->menu)) {
         /* Lossless RAW is OFF (the default): the take is exactly stock */
         card_saturate(&c->rec_menu_off);
@@ -378,6 +382,26 @@ USED void fpl_card_task(struct fpl_card *c) {
         return;                                  /* one pass per call */
 #endif
     }
+}
+
+/* C05C0EA4: a frame file the player has just read (play_decode.c). Never
+ * while a take owns the engine. */
+USED void fpl_card_play(uintptr_t slot, struct fpl_card *c) {
+    if (!card_valid(c)) return;
+    fpl_play_frame(&c->play, slot, c->hold_live);
+}
+
+/* C05BDDAC: a clip opens; `size` is its first frame file's. */
+USED uint32_t fpl_card_clip(struct fpl_card *c, uintptr_t player, uintptr_t desc,
+                            uint32_t size) {
+    (void)player;
+    if (!card_valid(c)) return size;
+    return fpl_play_clip(&c->play, desc, size, c->hold_live);
+}
+
+/* C05C2E90: the player frees its buffers. */
+USED void fpl_card_play_end(struct fpl_card *c) {
+    if (card_valid(c)) fpl_play_end(&c->play);
 }
 
 USED uint32_t fpl_card_state_bytes(void) { return sizeof(struct fpl_card); }

@@ -39,6 +39,13 @@
 .equ STOCK_STOP,   0xE92D49F0    /* push {r4-r8, fp, lr}: the entry           */
 .equ SITE_FLUSH,   0xC03A5490
 .equ STOCK_FLUSH,  0xEB0BD652    /* bl C069ADE0                               */
+.equ SITE_PLAY,    0xC05C0EA4    /* the player's frame read, after its f_read */
+.equ STOCK_PLAY,   0xE595201C    /* ldr r2, [r5, #0x1c]                       */
+.equ SITE_CLIP,    0xC05BDDAC    /* clip open: the first frame's size stored  */
+.equ STOCK_CLIP,   0xE58430A0    /* str r3, [r4, #0xa0]                       */
+.equ SITE_END,     0xC05C2E90    /* the player's pool freed: entry            */
+.equ STOCK_END,    0xE92D4070    /* push {r4, r5, r6, lr}                     */
+.equ END_RESUME,   0xC05C2E94
 .equ CREATOR_ENQ,  0xC037DD50
 .equ STOP_RESUME,  0xC0398D8C
 .equ REAL_FLUSH,   0xC069ADE0
@@ -52,10 +59,16 @@
 .endm
 
 /* The resident address of a label: its staging address plus r11, the
- * distance from where the file landed to the block. No immediate to fit. */
+ * distance from where the file landed to the block. The pc-relative distance
+ * is a word beside the code, so any distance assembles (adr's immediate ran
+ * out once the player's three shims were added). */
 .macro RESIDENT reg, label
-    adr     \reg, \label
+    ldr     \reg, 8f
+9:  add     \reg, pc, \reg
     add     \reg, \reg, r11
+    b       7f
+8:  .word   \label - 9b - 8
+7:
 .endm
 
 entry:
@@ -120,6 +133,18 @@ entry:
     LDA     ip, OFF_TASK
     add     ip, r4, ip
     str     ip, [r0]
+    RESIDENT r0, w_play
+    LDA     ip, OFF_PLAY
+    add     ip, r4, ip
+    str     ip, [r0]
+    RESIDENT r0, w_clip
+    LDA     ip, OFF_CLIP
+    add     ip, r4, ip
+    str     ip, [r0]
+    RESIDENT r0, w_end
+    LDA     ip, OFF_END
+    add     ip, r4, ip
+    str     ip, [r0]
 
     LDA     ip, F_DCACHE
     blx     ip
@@ -158,13 +183,29 @@ entry:
     ldr     r2, [r0]
     cmp     r2, r1
     bne     out
+    LDA     r0, SITE_PLAY
+    LDA     r1, STOCK_PLAY
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
+    LDA     r0, SITE_CLIP
+    LDA     r1, STOCK_CLIP
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
+    LDA     r0, SITE_END
+    LDA     r1, STOCK_END
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
 
-    /* 48 bytes off the bump: four veneers and the state record */
+    /* 72 bytes off the bump: four veneers, the state record (+32, where a
+     * host looks for it), and the player's three veneers after it (+48) */
     LDA     r7, CAVE_BUMP
     ldr     r8, [r7]                    @ r8 = our cave block
     tst     r8, #3
     bne     out
-    add     r9, r8, #48
+    add     r9, r8, #72
     LDA     r10, CAVE_END
     cmp     r9, r10
     bhi     out                         @ the cave is full: arm nothing
@@ -191,6 +232,16 @@ entry:
     str     r5, [r8, #40]               @ and the resident base
     LDA     r0, BLOB_LEN
     str     r0, [r8, #44]
+    LDA     r0, VENEER_LDR
+    str     r0, [r8, #48]
+    RESIDENT r1, play_shim
+    str     r1, [r8, #52]
+    str     r0, [r8, #56]
+    RESIDENT r1, clip_shim
+    str     r1, [r8, #60]
+    str     r0, [r8, #64]
+    RESIDENT r1, end_shim
+    str     r1, [r8, #68]
 
     LDA     ip, F_DCACHE
     blx     ip
@@ -213,6 +264,18 @@ entry:
     LDA     r0, SITE_FLUSH
     add     r1, r8, #24
     mov     r2, #0xEB000000             @ bl
+    bl      encode
+    LDA     r0, SITE_PLAY
+    add     r1, r8, #48
+    mov     r2, #0xEB000000             @ bl: lr was spent on the f_read call
+    bl      encode
+    LDA     r0, SITE_CLIP
+    add     r1, r8, #56
+    mov     r2, #0xEB000000             @ bl: lr was spent on the size call
+    bl      encode
+    LDA     r0, SITE_END
+    add     r1, r8, #64
+    mov     r2, #0xEA000000             @ b: the caller's lr must survive
     bl      encode
 
     LDA     ip, F_DCACHE
@@ -278,6 +341,44 @@ flush_shim:
     pop     {r0, r1, r2, r3, ip, lr}
     ldr     pc, flush_real
 
+/* C05C0EA4, right after the player's f_read of a frame file: r5 is its slot
+ * (+0x14 buffer, +0x18 capacity, +0x1c bytes read). Ours first, then the
+ * displaced load, back to C05C0EA8 through the lr the site's bl set. */
+play_shim:
+    push    {r0, r1, r2, r3, ip, lr}
+    mov     r0, r5
+    ldr     r1, g_card
+    ldr     ip, w_play
+    blx     ip
+    pop     {r0, r1, r2, r3, ip, lr}
+    ldr     r2, [r5, #0x1c]             @ STOCK_PLAY, executed here
+    bx      lr
+
+/* C05BDDAC: str r3, [r4, #0xa0] -- r3 the first frame file's size, r4 the
+ * player, r6 the clip's file descriptor. The size stored is ours to say. */
+clip_shim:
+    push    {r0, r1, r2, r3, ip, lr}
+    ldr     r0, g_card
+    mov     r1, r4
+    mov     r2, r6
+    ldr     ip, w_clip
+    blx     ip
+    str     r0, [sp, #12]               @ becomes r3
+    pop     {r0, r1, r2, r3, ip, lr}
+    str     r3, [r4, #0xa0]             @ STOCK_CLIP, executed here
+    bx      lr
+
+/* C05C2E90 entry: the player's buffers are about to be freed. Ours (the
+ * decoder's scratch) first, then the displaced push and the original. */
+end_shim:
+    push    {r0, r1, r2, r3, ip, lr}
+    ldr     r0, g_card
+    ldr     ip, w_end
+    blx     ip
+    pop     {r0, r1, r2, r3, ip, lr}
+    push    {r4, r5, r6, lr}            @ STOCK_END, executed here
+    ldr     pc, end_resume
+
 /* The codec task's entry (tk_sta_tsk). The body takes the state and never
  * returns: a task cannot be ended in this firmware. */
 task_shim:
@@ -292,8 +393,12 @@ w_arrive:    .word 0
 w_stop:      .word 0
 w_flush:     .word 0
 w_task:      .word 0
+w_play:      .word 0
+w_clip:      .word 0
+w_end:       .word 0
 stop_resume: .word STOP_RESUME
 flush_real:  .word REAL_FLUSH
+end_resume:  .word END_RESUME
     .align  3
 c_base:
     /* the compiled C is appended here by build_card.py */

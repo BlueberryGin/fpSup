@@ -59,6 +59,9 @@ SITES = {                           # site: (stock word, what it is)
     0xC038BFF0: (0xE12FFF33, 'creator enqueue: blx r3'),
     0xC0398D88: (0xE92D49F0, 'stop check entry: push {r4-r8, fp, lr}'),
     0xC03A5490: (0xEB0BD652, 'final flush: bl C069ADE0'),
+    0xC05C0EA4: (0xE595201C, 'player frame read: ldr r2, [r5, #0x1c]'),
+    0xC05BDDAC: (0xE58430A0, 'player clip size: str r3, [r4, #0xa0]'),
+    0xC05C2E90: (0xE92D4070, 'player pool free: push {r4, r5, r6, lr}'),
 }
 # The fields a host reads after a test take, by their path in struct fpl_card.
 # Their offsets are taken from the ARM compile itself, never computed on the
@@ -78,15 +81,23 @@ FIELDS = ['magic', 'hold_live', 'rec_events', 'rec_admitted', 'rec_raw',
           'hold_b.magic', 'hold_b.lane', 'hold_b.held', 'hold_b.compressed',
           'hold_b.refused', 'hold_b.no_benefit', 'hold_b.faults', 'hold_b.swapped',
           'hold_b.dma_failed',
-          'flush.applied', 'flush.trailer_failed', 'flush.length_mismatch']
+          'flush.applied', 'flush.trailer_failed', 'flush.length_mismatch',
+          'play.seen', 'play.stock', 'play.decoded', 'play.refused_by', 'play.last_us',
+          'play.max_us', 'play.last_buf', 'play.last_cap', 'play.last_got',
+          'play.clips', 'play.clips_ours', 'play.clip_size_was', 'play.clip_size_set',
+          'play.clip_failed', 'play.scratch_bytes', 'play.scratch_failed',
+          'play.scratch_freed']
 UNITS = ['control.c', 'frame_pipeline.c', 'native/workspace_layout.c', 'uishare/ui_pool.c',
          'native/menu_page.c',
          'native/raw_workspace.c', 'native/rec_workspace.c', 'native/producer_facts.c',
          'native/rec_hook.c', 'native/codec_job.c', 'native/trailer.c',
-         'native/frame_hold.c', 'native/flush_site.c', 'native/card.c']
+         'native/frame_hold.c', 'native/flush_site.c', 'native/play_decode.c',
+         'native/card.c']
 ENTRIES = {'OFF_INIT': 'fpl_card_init', 'OFF_REC': 'fpl_card_rec',
            'OFF_ARRIVE': 'fpl_card_arrive', 'OFF_STOP': 'fpl_card_stop',
-           'OFF_FLUSH': 'fpl_card_flush', 'OFF_TASK': 'fpl_card_task'}
+           'OFF_FLUSH': 'fpl_card_flush', 'OFF_TASK': 'fpl_card_task',
+           'OFF_PLAY': 'fpl_card_play', 'OFF_CLIP': 'fpl_card_clip',
+           'OFF_END': 'fpl_card_play_end'}
 CFLAGS = ['--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb', '-mfloat-abi=soft',
           '-mfpu=none', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-jump-tables',
           '-fropi', '-fno-addrsig', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',

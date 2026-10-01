@@ -66,7 +66,7 @@ def main():
         print(f'record at 0x{block:08X}: state 0x{state:08X}, resident base 0x{base:08X}')
     else:
         state = a.state
-    arrays = {'hold.refused_by': 8}
+    arrays = {'hold.refused_by': 8, 'play.refused_by': 12}
     v = {name: mem_get(state + off, 1)[0] for name, off in fields.items() if name not in arrays}
     arr = {name: mem_get(state + fields[name], n) for name, n in arrays.items() if name in fields}
     for name, value in v.items():
@@ -107,6 +107,18 @@ def main():
           f'{v["spare_bytes"]:,} B, failed {v["spare_failed"]}, freed {v["spares_freed"]}')
     print(f'  stop: stops {v["stops"]}, finished {v["finishes"]}, busy {v["finish_busy"]}, '
           f'lanes now {v["hold.lane"]}/{v["hold_b.lane"]}, result {v["lane_stop_result"]}')
+    pwhy = ['slot', 'not tiff', 'root', 'format', 'tiles', 'ifd0', 'room', 'order', 'scratch',
+            'engine', 'copy', 'take live']
+    print(f'  clips opened {v["play.clips"]}, ours {v["play.clips_ours"]} (frame size '
+          f'{v["play.clip_size_was"]:,} -> {v["play.clip_size_set"]:,}), header unread '
+          f'{v["play.clip_failed"]}; scratch {v["play.scratch_bytes"]:,} B, failed '
+          f'{v["play.scratch_failed"]}, freed {v["play.scratch_freed"]}')
+    prefused = {pwhy[i]: n for i, n in enumerate(arr.get('play.refused_by', [])) if n}
+    print(f'  playback: frames read {v["play.seen"]}, stock {v["play.stock"]}, decoded '
+          f'{v["play.decoded"]} (last {v["play.last_us"] / 1000:.1f} ms, max '
+          f'{v["play.max_us"] / 1000:.1f} ms)' + (f', left alone {prefused}' if prefused else '')
+          + f'; last slot buffer 0x{v["play.last_buf"]:08X} capacity {v["play.last_cap"]:,} '
+          f'read {v["play.last_got"]:,}')
     print(f'  flush: trailers applied {v["flush.applied"]}, trailer refused '
           f'{v["flush.trailer_failed"]}, other length {v["flush.length_mismatch"]}; '
           f'promises a previous take left {v["stale_promises"]}')

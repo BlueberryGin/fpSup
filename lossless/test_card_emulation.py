@@ -32,7 +32,12 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,  # n
                                UC_ARM_REG_R4, UC_ARM_REG_R11)
 
 SITES = {'rec': (0xC03A33C8, 0xEBFFFC1A), 'arrive': (0xC038BFF0, 0xE12FFF33),
-         'stop': (0xC0398D88, 0xE92D49F0), 'flush': (0xC03A5490, 0xEB0BD652)}
+         'stop': (0xC0398D88, 0xE92D49F0), 'flush': (0xC03A5490, 0xEB0BD652),
+         'play': (0xC05C0EA4, 0xE595201C), 'clip': (0xC05BDDAC, 0xE58430A0),
+         'end': (0xC05C2E90, 0xE92D4070)}
+VENEER_AT = {'rec': 0, 'arrive': 8, 'stop': 16, 'flush': 24,      # the record at +32
+             'play': 48, 'clip': 56, 'end': 64}
+CAVE_BYTES = 72
 CAVE_BUMP, CAVE_ARENA, CAVE_END = 0xC072E060, 0xC072E064, 0xC072EFB4
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_card  # noqa: E402
@@ -41,7 +46,12 @@ BLOCK = 0x45300000                    # where our allocation lands in emulation:
                                       # clear of the staging buffer the harness
                                       # hands the loader lower in the same heap
 ORIGINAL = {'prepare': 0xC03A2438, 'enqueue': 0xC037DD50, 'flush': 0xC069ADE0,
-            'stop_resume': 0xC0398D8C, 'tk_cre_tsk': 0xC0016A58, 'tk_sta_tsk': 0xC0016BC0}
+            'stop_resume': 0xC0398D8C, 'tk_cre_tsk': 0xC0016A58, 'tk_sta_tsk': 0xC0016BC0,
+            'end_resume': 0xC05C2E94}
+# A clip's first frame, as fpl_play_clip opens it -- open refused. Installed
+# only after boot: the loader reads fpSup.BIN through the same file API.
+CLIP_FILE = {'clip_volume': 0xC069B930, 'clip_path': 0xC069B9B8, 'f_ctor': 0xC0365E90,
+             'f_open': 0xC0365FB0, 'f_dtor': 0xC0365ED0}
 TASK_ID = 0x5A
 
 
@@ -70,7 +80,9 @@ class CardCamera(T.Camera):
         for name, at in ORIGINAL.items():
             self.by_addr[at] = 'ORIG_' + name
         self.returns = {'ORIG_prepare': 7, 'ORIG_enqueue': 1, 'ORIG_flush': 0,
-                        'ORIG_tk_cre_tsk': TASK_ID, 'ORIG_tk_sta_tsk': 0}
+                        'ORIG_tk_cre_tsk': TASK_ID, 'ORIG_tk_sta_tsk': 0,
+                        'ORIG_clip_volume': 1, 'ORIG_clip_path': 0x45100000,
+                        'ORIG_f_ctor': 0, 'ORIG_f_open': 0, 'ORIG_f_dtor': 0}
         self.task_descriptors = []
 
     def _hook(self, mu, addr, size, _):
@@ -89,7 +101,7 @@ class CardCamera(T.Camera):
             if name == 'ORIG_tk_cre_tsk':
                 d = self.r(UC_ARM_REG_R0)
                 self.task_descriptors.append(struct.unpack('<8I', bytes(mu.mem_read(d, 32))))
-            if name == 'ORIG_stop_resume':
+            if name in ('ORIG_stop_resume', 'ORIG_end_resume'):
                 mu.emu_stop()                 # mid-function: look, do not run on
                 return
             return self._ret(self.returns[name])
@@ -137,7 +149,7 @@ class CardEmulationTests(unittest.TestCase):
         return r0
 
     def cave_block(self, cam):
-        return cam.word(CAVE_BUMP) - 48
+        return cam.word(CAVE_BUMP) - CAVE_BYTES
 
     # ---- the launcher -------------------------------------------------
     def test_the_sites_are_journaled_by_stage2_before_the_entry(self):
@@ -153,14 +165,15 @@ class CardEmulationTests(unittest.TestCase):
         from armasm import symbols
         words = symbols(HERE / 'native' / 'card.S',
                         ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
-                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK')])
+                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
+                                                 'CLIP', 'END')])
         lo, hi = words['g_card'], words['stop_resume']
-        self.assertEqual(hi - lo, 24)
+        self.assertEqual(hi - lo, 36)
         resident = bytes(cam.mu.mem_read(BLOCK, len(self.blob)))
         self.assertEqual(resident[:lo], self.blob[:lo])
         self.assertEqual(resident[hi:], self.blob[hi:])
-        self.assertEqual(self.blob[lo:hi], b'\0' * 24)
-        filled = struct.unpack('<6I', resident[lo:hi])
+        self.assertEqual(self.blob[lo:hi], b'\0' * 36)
+        filled = struct.unpack('<9I', resident[lo:hi])
         self.assertTrue(all(filled), 'a resident word was left empty')
         calls = [c for c in cam.calls if c in ('H_GET', 'H_ADDR', 'DCACHE', 'ICACHE')]
         self.assertEqual(calls, ['H_GET', 'H_ADDR', 'DCACHE', 'ICACHE',
@@ -172,7 +185,8 @@ class CardEmulationTests(unittest.TestCase):
         from armasm import symbols
         words = symbols(HERE / 'native' / 'card.S',
                         ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
-                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK')])
+                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
+                                                 'CLIP', 'END')])
         self.assertEqual(len(cam.task_descriptors), 1)
         exinf, atr, entry, pri, stksz, n0, n1, tail = cam.task_descriptors[0]
         self.assertEqual((exinf, atr, pri, stksz, tail), (0, 0x41, 12, 0x2000, 0))
@@ -193,13 +207,13 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual(cave, CAVE_ARENA)
         for i, (name, (site, _)) in enumerate(SITES.items()):
             word = cam.word(site)
-            op = 0xEA000000 if name == 'stop' else 0xEB000000
+            op = 0xEA000000 if name in ('stop', 'end') else 0xEB000000
             self.assertEqual(word & 0xFF000000, op, name)
             disp = word & 0xFFFFFF
             disp = disp - 0x1000000 if disp & 0x800000 else disp
-            self.assertEqual(site + 8 + 4 * disp, cave + 8 * i, name)
-            self.assertEqual(cam.word(cave + 8 * i), 0xE51FF004, name)
-            shim = cam.word(cave + 8 * i + 4)
+            self.assertEqual(site + 8 + 4 * disp, cave + VENEER_AT[name], name)
+            self.assertEqual(cam.word(cave + VENEER_AT[name]), 0xE51FF004, name)
+            shim = cam.word(cave + VENEER_AT[name] + 4)
             self.assertTrue(BLOCK <= shim < BLOCK + len(self.blob), f'{name} shim {shim:#x}')
         self.assertEqual(cam.word(cave + 32), 0x43504C46)
         self.assertEqual(cam.word(cave + 40), BLOCK)
@@ -224,7 +238,7 @@ class CardEmulationTests(unittest.TestCase):
             self.assertEqual(cam.word(site), stock, name)
 
     # ---- through the veneers ------------------------------------------
-    def enter(self, cam, name, regs, lr=T.DONE):
+    def enter(self, cam, name, regs, lr=T.DONE, r4=0x44444444):
         site = SITES[name][0]
         word = cam.word(site)
         disp = word & 0xFFFFFF
@@ -233,7 +247,7 @@ class CardEmulationTests(unittest.TestCase):
         mu = cam.mu
         for reg, v in zip((UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3), regs):
             mu.reg_write(reg, v)
-        mu.reg_write(UC_ARM_REG_R4, 0x44444444)
+        mu.reg_write(UC_ARM_REG_R4, r4)
         mu.reg_write(UC_ARM_REG_R11, 0xBBBBBBBB)
         mu.reg_write(UC_ARM_REG_SP, T.STACK - 0x2000)
         mu.reg_write(UC_ARM_REG_LR, lr)
@@ -281,6 +295,26 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual((sp, lr), (T.STACK - 0x2000, T.DONE))
         self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444)
 
+    def test_play_does_the_displaced_load_and_returns_through_lr(self):
+        """The player's slot in r5, a stock frame (root on IFD0) in its
+        buffer: the shim leaves the frame alone, loads r2 = slot+0x1c as the
+        site did, keeps the callee-saved registers and returns through lr."""
+        from unicorn.arm_const import UC_ARM_REG_R5, UC_ARM_REG_R2
+        cam = self.armed()
+        slot, buf = T.STACK - 0x3000, 0x45200000
+        frame = b'II*\0' + struct.pack('<I', 8) + b'\x11' * 56
+        cam.mu.mem_write(buf, frame)
+        cam.mu.mem_map(buf + 0x40000000, 0x1000)       # the uncached alias the reads use
+        cam.mu.mem_write(buf + 0x40000000, frame)
+        cam.mu.mem_write(slot, b'\0' * 0x14 + struct.pack('<III', buf, 0x100000, len(frame)))
+        cam.mu.reg_write(UC_ARM_REG_R5, slot)
+        self.enter(cam, 'play', (0xA0, 0xA1, 0xA2, 0xA3))
+        self.assertEqual(cam.r(UC_ARM_REG_R2), len(frame), 'displaced load not done')
+        self.assertEqual(cam.r(UC_ARM_REG_R5), slot)
+        self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444)
+        self.assertEqual(cam.r(UC_ARM_REG_SP), T.STACK - 0x2000)
+        self.assertEqual(bytes(cam.mu.mem_read(buf, len(frame))), frame, 'a stock frame changed')
+
     def test_stop_runs_the_displaced_push_and_continues_into_the_original(self):
         cam = self.armed()
         self.enter(cam, 'stop', (1, 0x77, 0, 0))
@@ -292,6 +326,35 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual(pushed[0], 0x44444444)            # r4
         self.assertEqual(pushed[5], 0xBBBBBBBB)            # fp
         self.assertEqual(pushed[6], T.DONE)                # the caller's lr
+
+
+    def test_clip_stores_the_size_through_the_displaced_store(self):
+        """r3 the first frame's size, r4 the player, r6 the clip: with the
+        first frame unreadable the size is stored as the firmware had it."""
+        from unicorn.arm_const import UC_ARM_REG_R6
+        from unicorn.arm_const import UC_ARM_REG_R3
+        cam = self.armed()
+        for name, at in CLIP_FILE.items():
+            cam.by_addr[at] = 'ORIG_' + name
+        player = T.STACK - 0x3000
+        cam.mu.mem_write(player, b'\0' * 0x100)
+        cam.mu.reg_write(UC_ARM_REG_R6, 0xDE5C)
+        self.enter(cam, 'clip', (0xA0, 0xA1, 0xA2, 0x334000), r4=player)
+        self.assertIn('ORIG_f_open', cam.calls, 'the first frame was not asked for')
+        self.assertEqual(cam.word(player + 0xA0), 0x334000, 'displaced store not done')
+        self.assertEqual(cam.r(UC_ARM_REG_R3), 0x334000)
+        self.assertEqual(cam.r(UC_ARM_REG_R4), player)
+        self.assertEqual(cam.r(UC_ARM_REG_SP), T.STACK - 0x2000)
+
+    def test_end_runs_the_displaced_push_and_continues_into_the_original(self):
+        cam = self.armed()
+        self.enter(cam, 'end', (0x55, 0, 0, 0))
+        (name, regs, sp, _lr), = [o for o in cam.originals if o[0] == 'ORIG_end_resume']
+        self.assertEqual(regs[0], 0x55)
+        self.assertEqual(sp, T.STACK - 0x2000 - 16)          # push {r4, r5, r6, lr}
+        pushed = struct.unpack('<4I', cam.mu.mem_read(sp, 16))
+        self.assertEqual(pushed[0], 0x44444444)
+        self.assertEqual(pushed[3], T.DONE)
 
 
 if __name__ == '__main__':
