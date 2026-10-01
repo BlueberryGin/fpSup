@@ -32,7 +32,7 @@ SOURCES = ['control.c', 'ui_control.c', 'binding/binding.c', 'native/native_port
 # libc, floating point or compiler runtime of its own.
 ALLOWED_UNDEFINED = {'fp_nv_init', 'fp_nv_inspect', 'fp_nv_register_off', 'fp_nv_read',
                      'fp_nv_subscribe', 'fp_nv_set_canonical', 'fp_nv_unsubscribe_locked',
-                     'fpl_binding_notify'}
+                     'fpl_binding_notify', 'fpl_binding_refresh'}
 RESULT = {}
 
 

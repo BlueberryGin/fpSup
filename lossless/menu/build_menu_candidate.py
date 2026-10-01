@@ -115,6 +115,36 @@ PROFILES = {
 PROFILES["pure-fixed-gated"] = deepcopy(PROFILES["pure-select-gated"])
 PROFILES["pure-fixed-gated"]["fixed_popup"] = True
 del PROFILES["pure-fixed-gated"]["private_fields"][0x216CA4D]
+PROFILES["native-permission-gated"] = deepcopy(PROFILES["pure-fixed-gated"])
+PROFILES["native-permission-gated"]["private_permission_bindings"] = True
+# The row a camera showed working (2026-09-30): the MainY4 donor, even hidden,
+# left SHOOT 2 blank on its first draw and the cursor frozen; a clone of the
+# SAME page's Audio row did not. This keeps that clone and gives it its own
+# names: its value, popup staging and lock are private integers the card
+# registers (all 0); the jump that would open the audio submenu becomes the
+# stock no-op "xxx" its own other branch already sends; the title is literal.
+PROFILES["audio-toggle"] = deepcopy(PROFILES["audio-gated"])
+PROFILES["audio-toggle"]["private_fields"].update({
+    0x204E6C6: (36, "B2_6", "xxx"),
+    0x204EC7A: (36, "SUB_MV_AudioRecord", "SUB_MV_fpLossless"),
+    0x204ED97: (36, "SUB_MV_AudioRecord", "SUB_MV_fpLossless"),
+    0x204E97F: (36, "EXCL_AudioRecord", "EXCL_fpLossless"),
+    0x204E9AC: (54, "EXCL_AudioRecord", "EXCL_fpLossless"),
+    0x204E9E7: (36, "EXCL_AudioRecord", "EXCL_fpLossless"),
+    0x204EA18: (54, "EXCL_AudioRecord", "EXCL_fpLossless"),
+    0x204EA7B: (54, "EXCL_AudioRecord", "EXCL_fpLossless"),
+    0x2054060: (32, "0326_C", "Lossless RAW"),
+})
+PROFILES["audio-toggle"]["text_animation_values"] = {
+    0x2054099: {"0326_C": "Lossless RAW", "0326_CI": "Lossless RAW"},
+}
+# The Audio popup marks ON as having a submenu (camera, SS__1091): with the
+# cursor on ON the List shows the arrow image and the "more options" footer.
+# Lossless RAW has none: ON uses OFF's footer, and the arrow never shows.
+PROFILES["audio-toggle"]["private_fields"][0x204ED01] = (45, "Footer02", "Footer05")
+PROFILES["audio-toggle"]["word_writes"] = {
+    0x204F4CC: [(64, 1, 0, "submenu_arrow_never_visible")],   # clip 3 key @66
+}
 SHARED_CALLS = {0x216CA1B: (37, "Footer"), 0x216D533: (37, "Footer"),
                 0x216CB0F: (55, "UpDown"), 0x216CB95: (55, "UpDown")}
 SHARED_RECORDS = [
@@ -402,6 +432,10 @@ class Remapper:
 
     def transform(self, record):
         data, source, tag = bytearray(record.data), record.offset, record.tag
+        for offset, expected, value, role in self.profile.get("word_writes", {}).get(source, ()):
+            check(u32(data, offset) == expected,
+                  "word write source mismatch at %X+%d" % (source, offset))
+            self.write(data, source, offset, value, role)
         if tag == 0x10003:
             check(len(data) == 36, "unexpected object declaration length")
             self.object_field(data, source, 20, "object_id")
@@ -494,6 +528,108 @@ def extend_mode_change(record, new_root):
     return bytes(data)
 
 
+def add_permission_bindings(source, audit, donor, clone, mapping, pool, schemas):
+    """Three exact native appVariableEvent records; no invented widget ABI.
+
+    The pinned donor's C216CEB3 provides the 10006 event declaration. Its
+    native six-field schema permits explicit property-name (mask bit 3),
+    including the one-byte type-11 resolver flags. Component IDs are local
+    to an object, not globally allocated object IDs. No new object is needed.
+    """
+    template = next(r for r in donor if r.offset == 0x216CEB3)
+    check(template.tag == 0x10006 and len(template.data) == 53 and
+          [template.word(i) for i in (12, 16, 20, 24, 28, 32, 36, 45, 49)] ==
+          [6, 0, 0xFFFFFFFF, 19459, 14, 0x27, 1, 13, 6] and
+          template.data[44] == 0 and pool.resolve(template.word(40)) == "ST_CableRelease",
+          "permission event template signature mismatch")
+    check([(p["name"], p["kind"]) for p in schemas["appVariableEvent"]] ==
+          [("type", 9), ("variable-name", 11), ("component-id", 0),
+           ("property-name", 11), ("property-subindex", 0), ("decimal-places", 9)],
+          "permission native schema mismatch")
+    namespaces = {19463: set(), 19464: set()}
+    for record in donor:
+        if record.tag in OWNER_OFFSETS:
+            owner = record.word(OWNER_OFFSETS[record.tag])
+            if owner in namespaces:
+                namespaces[owner].add(record.word(28 if record.tag == 0x10006 else 24))
+    next_id = {owner: max(ids) + 1 for owner, ids in namespaces.items()}
+    specs = [(19463, "MV_fpLosslessCursor", 1, 3, "value"),
+             (19464, "MV_fpLosslessConfirm", 0, 10, "type"),
+             (19464, "MV_fpLosslessConfirm", 0, 12, "type")]
+    additions, generated, bindings = {}, {}, []
+    for owner, name, direction, target, prop in specs:
+        event_id = next_id[owner]
+        check(0 < event_id < 0x10000 and event_id not in namespaces[owner],
+              "permission component ID collision or overflow")
+        namespaces[owner].add(event_id)
+        next_id[owner] += 1
+        expected_component = "controlValue" if prop == "value" else "keyEvent"
+        targets = [r for r in donor if r.tag in OWNER_OFFSETS and
+                   r.word(OWNER_OFFSETS[r.tag]) == owner and
+                   r.word(28 if r.tag == 0x10006 else 24) == target and
+                   pool.resolve(r.word(8)) == expected_component]
+        check(len(targets) == 1, "permission target component is not unique")
+        data = bytearray(template.data[:36])
+        struct.pack_into(">I", data, 24, mapping[owner])
+        struct.pack_into(">I", data, 28, event_id)
+        struct.pack_into(">I", data, 32, 0x2F)
+        data.extend(words(direction, pool.intern(name)) + b"\0" + words(target, pool.intern(prop)) +
+                    b"\0" + words(6))
+        struct.pack_into(">I", data, 4, len(data))
+        original = audit.Record(template.offset, template.data)
+        row = {"variable": name, "initial_integer": 0, "direction": direction,
+               "owner_id": mapping[owner], "source_owner_id": owner,
+               "event_component_id": event_id, "target_component_id": target,
+               "target_kind": expected_component, "property": prop,
+               "property_subindex": 0, "resolver_flags": [0, 0], "decimal_places": 6,
+               "source_template": audit.address(template.offset),
+               "source_template_sha256": digest(template.data), "length": len(data)}
+        additions.setdefault(owner, []).append((original, bytes(data)))
+        generated[id(original)] = row
+        bindings.append(row)
+    changed, result, previous_owner = [], [], None
+    declaration_counts = {19463: (7, 1), 19464: (10, 2)}
+    confirm_addresses = {0x216D8CA: (10, 0x27), 0x216D95E: (12, 0x0D)}
+    for original, data in clone:
+        if original.tag == 0x10003:
+            result.extend(additions.pop(previous_owner, []))
+            previous_owner = original.word(20)
+            if previous_owner in declaration_counts:
+                count, extra = declaration_counts[previous_owner]
+                check(u32(data, 8) == count, "permission owner component budget mismatch")
+                data = bytearray(data)
+                struct.pack_into(">I", data, 8, count + extra)
+                changed.append({"source_record": audit.address(original.offset),
+                                "field_offset": 8, "old": count, "new": count + extra,
+                                "role": "private_permission_component_capacity"})
+        if original.offset in confirm_addresses:
+            component, key = confirm_addresses[original.offset]
+            check(original.tag == 0x10006 and len(data) == 40 and
+                  pool.resolve(u32(data, 8)) == "keyEvent" and
+                  [u32(data, i) for i in (12, 24, 28, 32, 36)] ==
+                  [5, mapping[19464], component, 8, key],
+                  "confirmation key source signature mismatch")
+            data = bytearray(data)
+            data[36:36] = words(0)  # explicit fail-closed type; preserve key/args
+            struct.pack_into(">I", data, 32, 9)
+            struct.pack_into(">I", data, 4, len(data))
+            changed.append({"source_record": audit.address(original.offset),
+                            "field_offset": 36, "length": 4, "hex": "00000000",
+                            "role": "confirmation_key_initial_type_zero"})
+        result.append((original, bytes(data)))
+    result.extend(additions.pop(previous_owner, []))
+    check(not additions and len(result) == len(clone) + 3,
+          "permission event insertion missed its owner")
+    return result, generated, {"bindings": bindings, "typed_changes": changed,
+                              "added_components": {"appVariableEvent": 3},
+                              "new_objects": 0, "new_records": 3,
+                              "variables": [{"name": name, "type": 0, "initial_value": 0}
+                                            for name in ("MV_fpLosslessCursor", "MV_fpLosslessConfirm")],
+                              "saved_variable": "MV_fpLossless", "registration_performed": False,
+                              "grey_render_verified": False, "runtime_permission_verified": False,
+                              "repeat_cancellation_proven": False}
+
+
 def build_candidate(source, audit, profile_name="pure-fixed-gated"):
     evidence = audit.audit_bytes(source)  # Whole-image hash gate before any transform.
     check(profile_name in PROFILES, "unknown donor profile")
@@ -534,6 +670,10 @@ def build_candidate(source, audit, profile_name="pure-fixed-gated"):
     shared_evidence = validate_shared_dependencies(source, audit, donor_page, stock, pool.resolve) if profile["pure_select"] else []
     remapper = Remapper(pool, mapping, namespace, property_schemas, profile, SHARED_CALLS if shared_evidence else None)
     clone = [(record, remapper.transform(record)) for record in donor]
+    permission, generated = None, {}
+    if profile.get("private_permission_bindings"):
+        clone, generated, permission = add_permission_bindings(
+            source, audit, donor, clone, mapping, pool, property_schemas)
     source_header = audit.parse_header(donor_page[0], pool.resolve)
     source_groups = [r for r in donor_page if r.tag == 0x1000B]
     group_indexes = [i for i, r in enumerate(source_groups) if profile["start"] <= r.offset < profile["end"]]
@@ -543,6 +683,9 @@ def build_candidate(source, audit, profile_name="pure-fixed-gated"):
              "group_budgets": [source_header["groups"][i] for i in group_indexes],
              "clip_property_counts": [len(c["properties"]) for c in source_clips],
              "property_key_counts": [len(p["keys"]) for c in source_clips for p in c["properties"]]}
+    if permission:
+        for kind, count in permission["added_components"].items():
+            delta["component_counts"][kind] = delta["component_counts"].get(kind, 0) + count
     new_header = extend_header(stock[0], evidence["allocation_header"], delta)
     new_root = mapping[profile["root_id"]]
     parts, locations = [], []
@@ -553,13 +696,16 @@ def build_candidate(source, audit, profile_name="pure-fixed-gated"):
         locations.append({"source_record": audit.address(original.offset),
                           "candidate_offset": cursor, "length": len(data),
                           "provenance": provenance, "sha256": digest(data)})
+        if id(original) in generated:
+            generated[id(original)]["candidate_offset"] = cursor
         parts.append(data)
         cursor += len(data)
 
     for record in stock:
         if record.offset == audit.DONOR_END:
             for original, data in clone:
-                append(original, data, "cloned_fourth_row_gated")
+                append(original, data, "generated_permission_binding" if id(original) in generated
+                       else "cloned_fourth_row_gated")
         if record.offset == audit.PAGE_START:
             data = new_header
         elif record.offset == audit.B2_OBJECT:
@@ -576,7 +722,8 @@ def build_candidate(source, audit, profile_name="pure-fixed-gated"):
     parsed = audit.records(candidate, 0, len(candidate))
     objects = audit.parse_objects(parsed, pool.resolve)
     counts = Counter(obj["parent_id"] for obj in objects.values())
-    check(len(objects) == len(all_objects) + len(donor_objects) and len(parsed) == len(stock) + len(donor),
+    check(len(objects) == len(all_objects) + len(donor_objects) and
+          len(parsed) == len(stock) + len(donor) + len(generated),
           "candidate structure count mismatch")
     check(all(counts[obj["id"]] == obj["child_count"] for obj in objects.values()), "candidate child counts inconsistent")
     check(objects[new_root]["parent_id"] == 116 and objects[116]["child_count"] == 7, "fourth root not connected in resource graph")
@@ -647,6 +794,10 @@ def build_candidate(source, audit, profile_name="pure-fixed-gated"):
         "unresolved": unresolved,
         "non_outputs": ["firmware image", "VSHL", "AutoRun", "installer", "transport", "runtime hooks"],
     }
+    if permission:
+        manifest["private_permissions"] = permission
+        manifest["unresolved"].append({"code": "PERMISSION_RUNTIME_NOT_PROVEN",
+            "detail": "Private cursor/confirm bindings and zero initial confirm masks are serialized only; registration, synchronous publication, original property callbacks, pending repeat events and grey rendering require native integration."})
     return candidate, bytes(pool.data), manifest
 
 
@@ -667,7 +818,7 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="new output directory; existing directories are refused")
     parser.add_argument("--audit-module", type=Path, default=DEFAULT_AUDIT)
     parser.add_argument("--profile", choices=sorted(PROFILES), default="pure-fixed-gated",
-                        help="pure-fixed-gated is the intended fixed-width OFF/ON candidate; older profiles are comparisons")
+                        help="pure-fixed-gated remains default; native-permission-gated adds opt-in cursor/confirm bindings")
     args = parser.parse_args(argv)
     try:
         audit = load_audit(args.audit_module)

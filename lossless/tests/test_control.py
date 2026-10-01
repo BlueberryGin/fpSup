@@ -52,11 +52,12 @@ class ControlTests(unittest.TestCase):
         cls.lib.fpl_menu_value.argtypes = [ct.POINTER(State)]
         cls.lib.fpl_set.argtypes = [ct.POINTER(State), ct.c_uint32, ct.POINTER(Context)]
         cls.lib.fpl_begin.argtypes = [ct.POINTER(State), ct.POINTER(Context)]
+        cls.lib.fpl_begin_direct.argtypes = [ct.POINTER(State), ct.POINTER(Context)]
         cls.lib.fpl_frame_done.argtypes = [ct.POINTER(State)]
         cls.lib.fpl_fail.argtypes = [ct.POINTER(State), ct.c_uint32]
         cls.lib.fpl_end.argtypes = [ct.POINTER(State), ct.c_uint32]
         for name in ('fpl_can_enable', 'fpl_menu_value', 'fpl_set', 'fpl_begin',
-                     'fpl_frame_done', 'fpl_fail', 'fpl_end'):
+                     'fpl_begin_direct', 'fpl_frame_done', 'fpl_fail', 'fpl_end'):
             getattr(cls.lib, name).restype = ct.c_uint32
 
     def setUp(self):
@@ -100,13 +101,146 @@ class ControlTests(unittest.TestCase):
 
     def test_every_target_predicate_is_required(self):
         wrong = {'firmware': 501, 'cine': 0, 'compression': 7, 'bits': 14,
-                 'width': 3024, 'height': 2010, 'fps_num': 30000,
-                 'fps_den': 1000, 'media': 2}
+                 'width': 1937, 'height': 1089, 'fps_num': 0,
+                 'fps_den': 0, 'media': 2}
         for field, value in wrong.items():
             with self.subTest(field=field):
                 c = eligible()
                 setattr(c, field, value)
                 self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), UNSUPPORTED)
+
+    def test_direct_entry_omits_only_ui_for_all_128_combinations(self):
+        for flags in range(128):
+            with self.subTest(flags=flags):
+                self.lib.fpl_boot(ct.byref(self.s))
+                self.c.ready = flags
+                before, context = bytes(self.s), bytes(self.c)
+                result = self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c))
+                self.assertEqual(result, OK if flags in (126, 127) else NOT_READY)
+                self.assertEqual(bytes(self.c), context)  # no synthetic UI bit
+                if result == OK:
+                    self.assertEqual((self.s.requested, self.s.clip, self.s.frames), (1, LOSSLESS, 0))
+                else:
+                    self.assertEqual(bytes(self.s), before)
+
+    def test_direct_entry_does_not_relax_format_or_explicit_interlock(self):
+        wrong = {'firmware': 501, 'cine': 0, 'compression': 7, 'bits': 14,
+                 'width': 1937, 'height': 1089, 'fps_num': 0, 'fps_den': 0, 'media': 2}
+        for field, value in wrong.items():
+            c = eligible()
+            c.ready = 126
+            setattr(c, field, value)
+            before = bytes(self.s)
+            self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(c)), UNSUPPORTED)
+            self.assertEqual(bytes(self.s), before)
+        self.c.ready = 126 | (1 << 31)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), FAULT)
+        self.assertEqual(self.s.clip, IDLE)
+
+    def test_direct_entry_rechecks_each_take_and_keeps_fault_sticky(self):
+        self.c.ready = 126
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), OK)
+        before = bytes(self.s)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), BUSY)
+        self.assertEqual(bytes(self.s), before)
+        self.assertEqual(self.lib.fpl_end(ct.byref(self.s), 0), BUSY)
+        self.assertEqual(self.lib.fpl_end(ct.byref(self.s), 1), OK)
+        self.c.ready &= ~2
+        before = bytes(self.s)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), NOT_READY)
+        self.assertEqual(bytes(self.s), before)
+        self.c.ready = 126
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), OK)
+        self.assertEqual(self.lib.fpl_fail(ct.byref(self.s), 9), FAULT)
+        self.assertEqual(self.lib.fpl_end(ct.byref(self.s), 1), OK)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), FAULT)
+        self.assertEqual(self.s.clip, IDLE)
+
+    def test_direct_entry_does_not_make_menu_on_ready(self):
+        self.c.ready = 126
+        self.assertEqual(self.set_value(1), NOT_READY)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), OK)
+        self.assertEqual(self.lib.fpl_can_enable(ct.byref(self.c)), NOT_READY)
+
+    def test_direct_entry_requires_real_state_and_context(self):
+        self.assertEqual(self.lib.fpl_begin_direct(None, ct.byref(self.c)), INVALID)
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), None), INVALID)
+        self.s.reserved0 = 1
+        self.assertEqual(self.lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), INVALID)
+
+    def test_direct_readiness_guard_mutation_is_detected(self):
+        source = (HERE / 'control.c').read_text()
+        old = 'if ((c->ready & FPL_READY_CAPTURE) != FPL_READY_CAPTURE) return FPL_NOT_READY;'
+        self.assertEqual(source.count(old), 1)
+        mutant = Path(self.temp.name) / 'direct-mutant.c'
+        mutant.write_text(source.replace(old, '/* broken: omitted capture readiness */'))
+        target = mutant.with_suffix('.dylib')
+        subprocess.run([self.compiler, '-std=c11', '-shared', '-fPIC', '-I', str(HERE),
+                        str(mutant), '-o', str(target)], check=True, capture_output=True, text=True)
+        lib = ct.CDLL(str(target))
+        lib.fpl_begin_direct.argtypes = [ct.POINTER(State), ct.POINTER(Context)]
+        lib.fpl_begin_direct.restype = ct.c_uint32
+        self.c.ready = 0
+        self.assertNotEqual(lib.fpl_begin_direct(ct.byref(self.s), ct.byref(self.c)), NOT_READY)
+
+    def test_requested_format_matrix_requires_its_own_readiness(self):
+        # Synthetic candidate facts, NOT camera proof for these formats.
+        shapes = ((1024, 576), (1920, 1080), (1936, 1090), (2048, 1152),
+                  (3856, 2170), (4096, 2160), (6064, 4042), (6144, 3456))
+        for bits in (10, 12):
+            for width, height in shapes:
+                for num, den in ((24000, 1001), (30000, 1001), (60000, 1001)):
+                    with self.subTest(bits=bits, width=width, height=height,
+                                      fps=(num, den)):
+                        c = Context(502, 1, 1, bits, width, height, num, den, 1, 0)
+                        self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), NOT_READY)
+                        c.ready = 127  # explicit synthetic adapter evidence
+                        self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), OK)
+
+    def test_geometry_bounds_and_tile_capacity_are_not_overflowable(self):
+        for width, height in ((0, 1090), (7, 1090), (1936, 0), (1936, 1),
+                              (0x4008, 2), (8, 0x4002), (0xffffffff, 1090),
+                              (1936, 0xffffffff), (0x4000, 0x4000)):
+            with self.subTest(width=width, height=height):
+                c = eligible()
+                c.width, c.height = width, height
+                self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), UNSUPPORTED)
+        c = eligible()
+        c.width, c.height = 512 * 16, 368 * 10  # exactly 160 tiles
+        self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), OK)
+        c.height += 2  # 176 tiles, despite the raster still looking plausible
+        self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), UNSUPPORTED)
+
+    def test_unsupported_depths_do_not_inherit_codec_readiness(self):
+        for bits in (0, 8, 11, 14, 16, 32, 0xffffffff):
+            c = eligible()
+            c.bits = bits
+            self.assertEqual(self.lib.fpl_can_enable(ct.byref(c)), UNSUPPORTED)
+
+    def test_format_safety_assertions_detect_isolated_mutations(self):
+        # Only temporary source copies are broken; shared runtime is untouched.
+        source = (HERE / 'control.c').read_text()
+        for index, (before, after, context, expected) in enumerate((
+            ('if ((c->ready & FPL_READY_ALL) != FPL_READY_ALL)', 'if (0)',
+             Context(502, 1, 1, 10, 6064, 4042, 24000, 1001, 1, 0), NOT_READY),
+            ('(c->bits != 10 && c->bits != 12)', '0',
+             Context(502, 1, 1, 14, 1936, 1090, 24000, 1001, 1, 127), UNSUPPORTED),
+            ('if (columns * rows > FPL_TILE_MAX)', 'if (columns * rows > 0xffffffffu)',
+             Context(502, 1, 1, 12, 0x4000, 0x4000, 24000, 1001, 1, 127), UNSUPPORTED),
+        )):
+            with self.subTest(mutation=index):
+                self.assertEqual(source.count(before), 1)
+                mutated = Path(self.temp.name) / ('mutation%d.c' % index)
+                mutated.write_text(source.replace(before, after))
+                output = mutated.with_suffix('.dylib')
+                subprocess.run([self.compiler, '-std=c11', '-shared', '-fPIC',
+                                '-I', str(HERE), str(mutated), '-o', str(output)],
+                               check=True, capture_output=True, text=True)
+                lib = ct.CDLL(str(output))
+                lib.fpl_can_enable.argtypes = [ct.POINTER(Context)]
+                lib.fpl_can_enable.restype = ct.c_uint32
+                with self.assertRaises(AssertionError):
+                    self.assertEqual(lib.fpl_can_enable(ct.byref(context)), expected)
 
     def test_menu_changes_only_private_requested_word(self):
         before, context = bytes(self.s), bytes(self.c)
@@ -159,9 +293,9 @@ class ControlTests(unittest.TestCase):
                 self.assertEqual(bytes(self.s), before)
             self.assertEqual(self.begin(), BUSY)
 
-    def test_recheck_at_rec_after_switching_to_og(self):
+    def test_recheck_at_rec_after_switching_to_unsupported_depth(self):
         self.assertEqual(self.set_value(1), OK)
-        self.c.width, self.c.height = 3024, 2010
+        self.c.bits = 14
         before = bytes(self.s)
         self.assertEqual(self.begin(), UNSUPPORTED)
         self.assertEqual(bytes(self.s), before)
@@ -211,12 +345,23 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.begin(), OK)
         self.assertEqual(self.s.clip, RAW)
 
-    def test_counter_overflow_stops(self):
+    def test_counter_saturates_without_stopping_a_continuous_take(self):
         self.set_value(1)
         self.begin()
         self.s.frames = 0xffffffff
-        self.assertEqual(self.lib.fpl_frame_done(ct.byref(self.s)), FAULT)
-        self.assertEqual(self.s.clip, STOP)
+        for _ in range(3):
+            self.assertEqual(self.lib.fpl_frame_done(ct.byref(self.s)), OK)
+        self.assertEqual((self.s.clip, self.s.frames, self.s.fault),
+                         (LOSSLESS, 0xffffffff, 0))
+
+    def test_continuous_take_has_no_40_frame_limit(self):
+        self.assertEqual(self.set_value(1), OK)
+        self.assertEqual(self.begin(), OK)
+        for n in range(10000):
+            self.assertEqual(self.lib.fpl_frame_done(ct.byref(self.s)), OK)
+            self.assertEqual((self.s.frames, self.s.clip), (n + 1, LOSSLESS))
+        self.assertEqual(self.lib.fpl_end(ct.byref(self.s), 0), BUSY)
+        self.assertEqual(self.lib.fpl_end(ct.byref(self.s), 1), OK)
 
     def test_invalid_state_is_never_written(self):
         for field, value in (('magic', 0), ('abi', 2), ('requested', 2),
@@ -247,6 +392,19 @@ class ControlTests(unittest.TestCase):
         self.assertFalse((HERE / 'AutoRun.txt').exists())
         self.assertFalse((HERE / 'VSHL.BIN').exists())
         self.assertFalse((HERE / 'fpSup.BIN').exists())
+
+    def test_requested_direct_fast2_build_keeps_usb_shell_without_menu(self):
+        # This is a scope regression, not a generated-card or boot test.
+        manifest = json.loads((HERE / 'manifest.json').read_text())
+        build = manifest['requested_test_build']
+        self.assertEqual(build['control_entry'], 'fpl_begin_direct')
+        self.assertTrue(build['usb_shell'])
+        self.assertEqual(build['usb_shell_source'], 'fp_usb_shell')
+        self.assertEqual(build['fast_start'], 2)
+        for key in ('menu_included', 'opengate_included', 'gyro_included',
+                    'runtime_adapter_installed', 'artifact_produced'):
+            self.assertFalse(build[key])
+        self.assertTrue(manifest['ui']['deferred_for_current_test_build'])
 
 
 if __name__ == '__main__':

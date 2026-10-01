@@ -124,3 +124,33 @@ The manifest distinguishes `fourth_row_in_serialized_graph: true` and
 `pure_select_widget_structure: true` from `deployable: false` and
 `pure_toggle_runtime_verified: false`. It must not be included in an installable
 release or fp-Merge card until those integration gates are independently closed.
+
+## Native permission candidate
+
+Use `--profile native-permission-gated` explicitly for the current integration
+candidate. The default `pure-fixed-gated` bytes and pins stay unchanged.
+This profile adds three typed native `appVariableEvent` records, no new object:
+
+| Private variable | Native destination | Direction |
+| --- | --- | --- |
+| `MV_fpLossless` | Existing saved-value actions | Unchanged |
+| `MV_fpLosslessCursor` | List 34497, controlValue 3.value | A2P and P2A |
+| `MV_fpLosslessConfirm` | ListItem 34498, Right 10.type and Enter 12.type | A2P only |
+
+Cursor and Confirm initially equal zero. Right/Enter records explicitly start
+with type=0. Popup min/max remains 0..1, root max=7 remains an animation index,
+and ESC/Left/Up/Down, saved-value actions and every original Audio byte stay
+unchanged. Disabling a visual child or clamping popup max to zero is not used.
+
+Page: 179907 bytes, 1541 records, 3288-byte header, 214 objects; SHA-256
+`e602a154162790287fed8a182e07fda0af5d02509b59300a25725fe923c71dea`.
+Pool: 176300 bytes, original 176152-byte prefix unchanged; SHA-256
+`3ff3ea5264f8a16aec7fac30160cc8065dfe1d2b896fb7b40c3212de5cf7d3ba`.
+List component count grows 7→8, ListItem 10→12, header appVariableEvent budget +3.
+
+Run `test_permission_candidate.py` with the same `--seg0`/`--audit-module`
+arguments as above: 17 tests including eight isolated binary mutations. The
+existing 35 candidate and eight recipe tests still pass. This proves exact
+serialization/preservation, not successful native page construction or display.
+The manifest keeps variable registration, runtime permission and rendering
+unverified; separate component probes cannot close full-resource runtime gates.

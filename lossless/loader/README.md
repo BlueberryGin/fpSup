@@ -142,3 +142,39 @@ integration requires an explicit shared dispatcher and resource ownership design
 The UI candidate's private variable, navigation,
 font/layout, native allocation and event/callback lifetime gates remain open.
 No native binding may claim readiness solely because this lease model passes.
+
+## ARM32 native reader bridge
+
+`native_reader.c` is a separate implementation over actual v5.02 reader offsets,
+not a cast of the normalized `fp_reader_view`. It calls a retained original
+`C05E6401` parser synchronously, after checking the exact MainB2 first boundary,
+source/pool identity, immutable candidate fingerprints and record framing.
+The caller supplies build-pinned constants and real serialized ownership, not
+an arbitrary runtime hash or a boolean claiming that ownership was proven.
+
+Success requires every cursor/result pair, terminal return 1, all 214 objects
+and a root. It restores the original source/pool with cursor `0x795950`, retaining
+private resources. Post-start failure preserves partial-object diagnostics,
+clears reader +50/+B4 to prevent immediate native publication, and permanently
+poisons the bridge. No reset/free/retry API is supplied. The string helper only
+handles appended offsets for its exact retained reader after restoration.
+
+```sh
+python3 -B /absolute/path/fpSup/lossless/loader/test_native_reader.py \
+  --seg0 /absolute/path/out/seg0_c0000000.bin \
+  --profile native-permission-gated --candidate /absolute/path/permission
+```
+
+Both fixed and permission profiles pass 16 ARM tests each. Original header,
+terminal and outer selector instructions execute; intermediate component records,
+allocation and owner services are explicit substitutes. Removing quarantine in
+an isolated mutant makes the actual selector publish a partial root. The compiled
+1956-byte text is relocation-free; SHA-256
+`fe0ab3994455362ad4e950d70e8ea8479525152ec0e13629d6c68350fbe7c76e`.
+
+**Still not installable:** native initialization/cleanup happens before the
+record seam. An outer-entry gate must prevent it from touching ACTIVE/DEAD state,
+with real exclusion/drain and retained parser trampoline. Full component
+construction, GUI lifetime, shared OG hook ownership and loader journal/cache
+publication remain open. Do not return adapter error codes blindly through a
+record hook, force-clear a cached MainB2, or copy OG's smaller record scratch.

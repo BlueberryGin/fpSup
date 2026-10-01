@@ -22,6 +22,11 @@ static uint32_t private_name(const char *p) {
         if (p[n] != expected[n]) return 0;
     return 1;
 }
+static uint32_t same_name(const char *p, const char *expected) {
+    if (!p) return 0;
+    while (*expected) if (*p++ != *expected++) return 0;
+    return *p == 0;
+}
 uint32_t fpl_port_translate(uint32_t native_result) {
     switch (native_result) {
     case FP_NV_OK: return FPL_OK;
@@ -48,6 +53,17 @@ static uint32_t ours(const struct fpl_port *p, const struct fpl_ticket *t) {
     return t && p->ticket == t && t->magic == FPL_TICKET_MAGIC &&
            p->descriptor && t->descriptor == p->descriptor;
 }
+/* Revoke even when fresh facts or exclusion acquisition fail. Quiet writes
+ * still dispatch A2P components, so retain the existing publication guard. */
+static uint32_t close_confirm(struct fpl_port *p) {
+    uint32_t result, publishing;
+    if (!p->permissions_prepared) return FPL_OK;
+    publishing = p->publishing;
+    p->publishing = 1;
+    result = record(p, fp_nv_set_canonical(&p->confirm, 0));
+    p->publishing = publishing;
+    return result;
+}
 
 /* Runs in the native notification context. It may not allocate, block, free
  * the callback pair or assume the coordinator still accepts events. */
@@ -69,6 +85,7 @@ static int32_t port_callback(struct fp_nv_descriptor *descriptor, void *context)
          * second policy transition over a half-applied one. */
         ++p->callbacks_refused;
         p->fault = 1;
+        close_confirm(p);
         return -1;
     }
     p->callback_depth = 1;
@@ -78,6 +95,28 @@ static int32_t port_callback(struct fp_nv_descriptor *descriptor, void *context)
     /* A rejected stale/retired event is correct policy, not a port fault. The
      * coordinator poisons itself when a port operation inside it failed. */
     if (result != FPL_OK) ++p->callbacks_rejected;
+    return result == FPL_OK ? 0 : -1;
+}
+
+/* Highlight is not confirmation. Recompute the confirmation mask from the
+ * coordinator's fresh view; never send Cursor through fpl_ui_select. The
+ * native variable setter may echo during publication, just like saved value. */
+static int32_t cursor_callback(struct fp_nv_descriptor *descriptor, void *context) {
+    struct fpl_port *p = context;
+    uint32_t result;
+    if (!p || p->magic != FPL_PORT_MAGIC || !p->permissions_prepared ||
+        !p->binding || !p->ticket || descriptor != p->cursor.owned) return -1;
+    if (!ours(p, p->ticket) || p->binding->ticket != p->ticket ||
+        p->binding->phase != FPL_BIND_ACTIVE || !p->binding->ui.attached ||
+        p->ticket->session != p->binding->session ||
+        p->ticket->generation != p->binding->generation ||
+        p->ticket->owner != p->binding->ui.owner) return -1;
+    if (p->publishing) { ++p->echoes_suppressed; return 0; }
+    if (p->callback_depth) { p->fault = 1; close_confirm(p); return -1; }
+    p->callback_depth = 1;
+    result = fpl_binding_refresh(p->binding);
+    p->callback_depth = 0;
+    p->last_notify = result;
     return result == FPL_OK ? 0 : -1;
 }
 
@@ -130,6 +169,14 @@ static uint32_t port_subscribe(void *port, const struct fpl_ticket *ticket) {
     /* Retained before the call: a non-atomic native failure can still have
      * published the pair, so the callback context must stay addressable. */
     p->ticket = ticket;
+    if (p->permissions_prepared) {
+        result = record(p, fp_nv_subscribe(&p->cursor, cursor_callback, p));
+        if (result != FPL_OK) {
+            p->subscribe_uncertain = 1;
+            p->fault = 1;
+            return result;
+        }
+    }
     result = record(p, fp_nv_subscribe(&p->nv, port_callback, p));
     if (result != FPL_OK) {
         p->subscribe_uncertain = 1; /* keep ticket; cancellation is explicit */
@@ -145,6 +192,17 @@ static uint32_t port_unsubscribe(void *port, const struct fpl_ticket *ticket) {
     /* The coordinator must already hold exclusion; this port cannot establish
      * it and must not pretend the native mutation lock is equivalent. */
     if (!p->exclusion_held) return FPL_INVALID;
+    /* Revoke new confirms before retiring either event source. This does not
+     * cancel an already-held key/repeat, so the coordinator remains the gate. */
+    if (p->permissions_prepared) {
+        result = record(p, fp_nv_set_canonical(&p->confirm, 0));
+        if (result != FPL_OK) return result;
+        if (p->cursor.callback) {
+            result = record(p, fp_nv_unsubscribe_locked(&p->cursor));
+            if (result != FPL_OK) return result;
+        }
+    }
+    if (!p->nv.callback) return FPL_OK; /* failed cursor subscribe before saved */
     return record(p, fp_nv_unsubscribe_locked(&p->nv));
 }
 static uint32_t port_quiesce(void *port, const struct fpl_ticket *ticket) {
@@ -165,6 +223,16 @@ static uint32_t port_quiesce(void *port, const struct fpl_ticket *ticket) {
         p->fault = 1;
         return FPL_FAULT;
     }
+    if (p->permissions_prepared) {
+        if (p->cursor.callback || p->cursor.native_pair) return FPL_BUSY;
+        result = record(p, fp_nv_inspect(&p->cursor, &snapshot));
+        if (result != FPL_OK) return result;
+        if (snapshot.subscription ||
+            snapshot.descriptor != (uint32_t)(uintptr_t)p->cursor.owned) {
+            p->fault = 1;
+            return FPL_FAULT;
+        }
+    }
     /* Quiescence is proven, but the coordinator may still fail its own final
      * checks, so the ticket reference stays until fpl_port_release. */
     p->retired = 1;
@@ -176,16 +244,19 @@ static uint32_t port_context(void *port, struct fpl_context *out) {
     if (!out) return FPL_INVALID;
     zero_words((volatile uint32_t *)out, sizeof(*out) / sizeof(uint32_t));
     if (result != FPL_OK) { out->ready = FPL_BLOCK_REC; return result; }
+    result = close_confirm(p);
+    if (result != FPL_OK) { out->ready = FPL_BLOCK_REC; return result; }
     if (!p->facts.read) { out->ready = FPL_BLOCK_REC; return FPL_NOT_READY; }
     result = p->facts.read(p->facts.context, out);
+    if (p->fault) result = FPL_FAULT; /* provider reentry may have faulted us */
     if (result != FPL_OK) {
         zero_words((volatile uint32_t *)out, sizeof(*out) / sizeof(uint32_t));
         out->ready = FPL_BLOCK_REC;
         return result;
     }
-    /* This port writes and reads an integer. It does not render the row, port
-     * choice permissions or prove a visible view, so it can never carry a UI
-     * readiness proof, whatever the facts provider claims. */
+    /* Optional permission variables gate new confirms, but do not prove row
+     * rendering/visibility or cancel already-held key repeats. This port can
+     * never supply UI readiness, whatever the facts provider claims. */
     if (out->ready & FPL_READY_UI) {
         out->ready &= ~FPL_READY_UI;
         ++p->ui_claims_stripped;
@@ -202,24 +273,48 @@ static uint32_t port_read(void *port, uintptr_t descriptor, uint32_t *out) {
 }
 static uint32_t port_publish(void *port, uintptr_t descriptor, const struct fpl_view *view) {
     struct fpl_port *p = port;
-    uint32_t result = usable(p, 0);
+    uint32_t result = usable(p, 0), cursor = 0, after = 0, allow = 0;
     if (result != FPL_OK) return result;
     if (!view || !p->descriptor || descriptor != p->descriptor) return FPL_INVALID;
     if (view->value > 1) return FPL_INVALID;
-    /* Only the canonical value is expressible. Hiding the row and disabling a
-     * choice need the page/permission ports, so they are counted as unapplied
-     * rather than silently treated as displayed. Stripping FPL_READY_UI keeps
-     * a wrongly selectable ON from ever being accepted by policy. */
+    /* Canonical value and optional confirmation permission are expressible.
+     * Visibility, per-choice grey rendering and reasons remain unapplied;
+     * neither an integer write nor this counter proves a rendered view.
+     * Stripping FPL_READY_UI keeps stale ON events from passing policy. */
     if (view->visible != 1 || view->on_enabled != view->off_enabled)
         ++p->presentation_unapplied;
     p->publishing = 1;
+    if (p->permissions_prepared) {
+        /* Close first. A failed/non-atomic refresh must not knowingly leave
+         * the previous permission enabled over a new saved/cursor state. */
+        result = record(p, fp_nv_set_canonical(&p->confirm, 0));
+        if (result != FPL_OK) goto done;
+    }
     result = record(p, fp_nv_set_canonical(&p->nv, view->value));
+    if (result != FPL_OK || !p->permissions_prepared) goto done;
+    result = record(p, fp_nv_read(&p->cursor, &cursor));
+    if (result != FPL_OK) goto done;
+    if (cursor > 1) { p->fault = 1; result = FPL_FAULT; goto done; }
+    if (view->visible == 1)
+        allow = cursor == 0 ? view->off_enabled == 1 : view->on_enabled == 1;
+    result = record(p, fp_nv_set_canonical(&p->confirm, allow));
+    if (result == FPL_OK) result = record(p, fp_nv_read(&p->cursor, &after));
+    /* Component dispatch is synchronous: a changed cursor during the final
+     * publication invalidates this mask, even if its callback was suppressed. */
+    if (result != FPL_OK || p->fault || after != cursor) {
+        p->fault = 1;
+        close_confirm(p);
+        result = FPL_FAULT;
+    }
+done:
     p->publishing = 0;
     return result;
 }
 static uint32_t port_enter(void *port) {
     struct fpl_port *p = port;
     uint32_t result = usable(p, 1);
+    if (result != FPL_OK) return result;
+    result = close_confirm(p);
     if (result != FPL_OK) return result;
     if (p->exclusion_held) return FPL_BUSY; /* never nested by the coordinator */
     if (!p->exclusion.enter) return FPL_BUSY; /* acquires nothing; not a stub OK */
@@ -263,7 +358,8 @@ uint32_t fpl_port_init(struct fpl_port *p, void *app, const char *name,
 uint32_t fpl_port_release(struct fpl_port *p) {
     if (!p || p->magic != FPL_PORT_MAGIC) return FPL_INVALID;
     if (!p->ticket) return FPL_OK;
-    if (!p->retired || p->nv.callback || p->nv.native_pair) return FPL_BUSY;
+    if (!p->retired || p->nv.callback || p->nv.native_pair ||
+        p->cursor.callback || p->cursor.native_pair) return FPL_BUSY;
     /* The coordinator must have finished its own retirement first; otherwise
      * it can still address this ticket. */
     if (!p->binding || p->binding->ticket || p->binding->phase != FPL_BIND_CLEAN)
@@ -271,6 +367,25 @@ uint32_t fpl_port_release(struct fpl_port *p) {
     p->ticket = 0;
     p->retired = 0;
     p->subscribe_uncertain = 0;
+    return FPL_OK;
+}
+
+uint32_t fpl_port_prepare_permissions(struct fpl_port *p, const char *cursor_name,
+                                      const char *confirm_name) {
+    uint32_t result = usable(p, 0);
+    if (result != FPL_OK) return result;
+    if (p->ticket || p->descriptor || p->permissions_prepared || p->cursor.magic ||
+        p->confirm.magic || !same_name(cursor_name, FP_NV_CURSOR_NAME) ||
+        !same_name(confirm_name, FP_NV_CONFIRM_NAME)) return FPL_INVALID;
+    result = record(p, fp_nv_init(&p->cursor, p->nv.app, cursor_name));
+    if (result != FPL_OK) return result;
+    result = record(p, fp_nv_init(&p->confirm, p->nv.app, confirm_name));
+    if (result != FPL_OK) { p->fault = 1; return result; }
+    result = record(p, fp_nv_register_off(&p->cursor));
+    if (result != FPL_OK) { p->fault = 1; return result; }
+    result = record(p, fp_nv_register_off(&p->confirm));
+    if (result != FPL_OK) { p->fault = 1; return result; }
+    p->permissions_prepared = 1;
     return FPL_OK;
 }
 uint32_t fpl_port_bind(struct fpl_port *p, struct fpl_binding *binding) {

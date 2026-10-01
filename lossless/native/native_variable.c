@@ -22,9 +22,15 @@ _Static_assert(offsetof(struct fp_nv_descriptor, subscription) == 24, "subscript
 _Static_assert(sizeof(struct fp_nv_state) == 36, "ARM state layout");
 
 INLINE uint32_t name_ok(const char *p) {
-    return p && p[0]=='M' && p[1]=='V' && p[2]=='_' && p[3]=='f' &&
+    if (!(p && p[0]=='M' && p[1]=='V' && p[2]=='_' && p[3]=='f' &&
         p[4]=='p' && p[5]=='L' && p[6]=='o' && p[7]=='s' && p[8]=='s' &&
-        p[9]=='l' && p[10]=='e' && p[11]=='s' && p[12]=='s' && !p[13];
+        p[9]=='l' && p[10]=='e' && p[11]=='s' && p[12]=='s')) return 0;
+    if (!p[13]) return 1;
+    if (p[13]!='C') return 0;
+    return (p[14]=='u' && p[15]=='r' && p[16]=='s' && p[17]=='o' &&
+            p[18]=='r' && !p[19]) ||
+           (p[14]=='o' && p[15]=='n' && p[16]=='f' && p[17]=='i' &&
+            p[18]=='r' && p[19]=='m' && !p[20]);
 }
 INLINE uint32_t firmware_ok(void) {
     return *(volatile const uint32_t *)0xc05db308u == 0x4ff0e92du &&

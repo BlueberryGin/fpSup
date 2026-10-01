@@ -2,6 +2,9 @@
 #define FPLOSSLESS_NATIVE_VARIABLE_H
 #include <stdint.h>
 
+#define FP_NV_CURSOR_NAME "MV_fpLosslessCursor"
+#define FP_NV_CONFIRM_NAME "MV_fpLosslessConfirm"
+
 /* ARM32 v5.02 native call layer. No hook, lock, renderer or readiness proof. */
 struct fp_nv_descriptor;
 typedef int32_t (*fp_nv_callback)(struct fp_nv_descriptor *, void *);
@@ -22,7 +25,8 @@ struct fp_nv_state {
 struct fp_nv_snapshot { uint32_t descriptor, type, value, subscription; };
 
 /* Fresh zeroed storage; app must be a live initialized v5.02 app. name must be
- * stable "MV_fpLossless" storage retained for the whole registry lifetime.
+ * stable "MV_fpLossless", FP_NV_CURSOR_NAME or FP_NV_CONFIRM_NAME storage
+ * retained for the whole registry lifetime. No other/stock name is admitted.
  * Exact function prologue checks catch conflicts, not a whole-image identity.
  * Every operation requires serialized registry/GUI ownership. They do not lock.
  * Outputs and state must be separate, valid caller-owned allocations. */

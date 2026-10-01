@@ -122,6 +122,20 @@ class UITests(unittest.TestCase):
         self.assertEqual((view.visible, view.value, view.on_enabled, view.reason), (1, 0, 0, NOT_READY))
         self.assertEqual(self.select(1), NOT_READY)
 
+    def test_format_candidates_never_enable_menu_without_readiness(self):
+        self.assertEqual(self.attach(), OK)
+        for bits in (10, 12):
+            for width, height in ((1024, 576), (2048, 1152),
+                                  (4096, 2160), (6064, 4042)):
+                with self.subTest(bits=bits, width=width, height=height):
+                    self.c.bits, self.c.width, self.c.height = bits, width, height
+                    self.c.ready = 0
+                    self.assertEqual(self.view().on_enabled, 0)
+                    self.assertEqual(self.select(1), NOT_READY)
+                    self.c.ready = 127  # synthetic adapter only; no native UI
+                    self.assertEqual(self.select(1), OK)
+                    self.assertEqual(self.select(0), OK)
+
     def test_still_transition_hides_row(self):
         self.attach()
         self.c.cine = 0
@@ -132,7 +146,7 @@ class UITests(unittest.TestCase):
     def test_unsupported_geometry_disables_on_but_allows_off(self):
         self.attach()
         self.select(1)
-        self.c.width, self.c.height = 2016, 1344
+        self.c.width, self.c.height = 2017, 1344  # invalid codec width alignment
         view = self.view()
         self.assertEqual((view.value, view.off_enabled, view.on_enabled, view.reason), (1, 1, 0, UNSUPPORTED))
         self.assertEqual(self.select(0), OK)

@@ -2,15 +2,56 @@
 
 Development source, **not an installable recording product**. No AutoRun,
 VSHL, firmware patch or camera deployment is emitted by this directory yet.
+The current development entry (2026-09-30, §14), evidence limits and next gates are in
+[`PROGRESS_20260930.md`](../../projects/lossless-sup/notes/PROGRESS_20260930.md).
+The adjacent `IMPLEMENTATION.md` is a chronological history, not the current
+verdict.
+Buffer/lifetime notes and historical design alternatives are in
+[`BUFFER_DESIGN.md`](../../projects/lossless-sup/notes/BUFFER_DESIGN.md).
+The 2026-09-29 synchronous probe wrote decodable compressed DNGs. The historical
+async probe copied earlier-frame output into a later frame; its driver now
+unconditionally refuses `arm`, including direct API calls. The new
+`frame_pipeline.c` implements a single-pending-frame adaptive policy with saved
+source/file identity, but has no native hold/defer/handoff adapter. Source
+lifetime, source-tail coverage, safe release and all-format capacity remain
+integration gates. Busy frames pass as RAW; no source frame is deliberately
+dropped. Submit return is not a buffer-release fence.
+Follow [`SUP_BUILD_RULES.md`](../SUP_BUILD_RULES.md) for builds; notify the user
+before camera testing and obtain authorization for that run. This increment
+includes host and ARM-emulated tests, not a card build or camera validation.
 
-Requested UI: **SHOOT page 2 (CINE)**, alongside DC crop, recording settings
+Current requested test card: **direct compression + current USB shell + Fast
+Start 2**, without menu, OG or gyro. `fpl_begin_direct` is implemented for the
+real REC boundary: it omits only UI readiness and preserves every capture
+proof. It does not install a recorder hook or make unverified geometry ready.
+There is not yet a deployable card; `requested_test_build` in the manifest is
+the requested scope, not an artifact receipt. USB shell must remain enabled in
+the shared build; a shell-only card is not a Lossless build.
+
+The REC-before-frame workspace is now implemented in `native/rec_workspace.c`,
+with geometry-derived layout and native RAW/class 10 allocation wrappers. It
+calls original REC preparation before reserving, rechecks producer facts and
+source headroom after reserving, and separates stop from quiescent release.
+This adapter has compiled-C integration tests and ARM object builds; the RAW
+wrapper additionally executes original descriptor instructions in Unicorn.
+It is **not installed at the REC call site**, has no native facts provider or
+compression worker, and does not prove DMA output limits. Layout arithmetic
+includes 14-bit, but the recording control still rejects 14-bit. Reproduce with
+`native/build_workspace_offline.py`; see [native details](native/README.md).
+
+Deferred UI: **SHOOT page 2 (CINE)**, alongside DC crop, recording settings
 and audio recording, with a dedicated **Lossless RAW / 無損壓縮: OFF / ON**
 row. Existing entries retain their original meanings. The private binding name
 is `MV_fpLossless`. An offline fourth-row resource builder now exists in
 `menu/`; `native/` contains executable ARM variable-call wrappers and, in
 `native_port.c`, the `fpl_binding_ops` adapter that routes a native variable
-event into policy. Native row installation, rendered-view publication, choice
-permissions and the exclusion/quiescence providers remain pending.
+event into policy. The opt-in `native-permission-gated` resource adds separate
+private Cursor and Confirm bindings; the port refreshes confirmation permission
+without treating a cursor move as a saved preference. `loader/native_reader.c`
+now bridges real ARM32 reader fields to the original parser. Native row
+installation, rendered-view publication, outer reader lifetime protection and
+the exclusion/quiescence providers remain pending. No menu is installed on a
+camera by these changes, and this port still refuses to supply `FPL_READY_UI`.
 
 This is an independent product. It does not select a sensor mode, alter crop,
 exposure or bit depth, or include OpenGate patches. Future OG2K/OG3K combinations
@@ -23,10 +64,14 @@ compatibility alone will not certify recording or playback compatibility.
 
 - private OFF/ON state, default OFF after a quiescent boot reset;
 - no setting changes while a take is active;
-- exact first-target eligibility: FHD RAW12 / SD / 24000/1001;
+- actual 10/12-bit CinemaDNG geometry candidates, including representative
+  1K/2K/4K/6K sizes, positive frame rate and SD; bounded to 160 tiles;
 - separate UI, codec, writer, header, playback, storage and REC-gate proofs;
 - a second eligibility check at REC, catching mode changes after ON was chosen;
-- no silent compressed-to-RAW fallback within a take;
+- a separate no-menu `fpl_begin_direct` REC entry; no fabricated UI bit and no
+  UI binding instance in that build, with the same capture/format/fault checks;
+- no implicit OFF when ON fails readiness; during a ready adaptive ON take,
+  busy frames intentionally pass as RAW and keep their original identity;
 - sticky error and explicit completion/cleanup before returning to idle.
 
 The core does not itself provide atomic locking, DMA ownership, codec unwind,
@@ -39,6 +84,22 @@ The capability check deliberately uses the producer's actual dimensions and
 packing rather than `M139`, `M98`, or an OpenGate display label. Additional
 validated geometries can be added without building a separate compression
 product per resolution. FHD is the first test case, not the product identity.
+Candidate eligibility is not per-format support: the adapter must recompute
+all readiness proofs for the exact geometry/packing/rate/media tuple. This
+increment does not add 14-bit support or change sensor modes.
+
+`frame_pipeline.c` is the small task-context policy behind adaptive compression:
+one saved lease, no pending-frame queue or full-frame pool, no 40-frame stop.
+OFF is all RAW. ON selects an idle arrival only after same-frame hold/defer
+proof; busy arrivals pass untouched. Completion cannot release the lease until
+codec quiescence and same-frame native handoff are proven. A valid result that
+does not reduce the **complete DNG** size instead hands off the unchanged source
+as RAW and continues. Real errors retain ownership and require cleanup.
+Stop drains the last selected frame without requiring another incoming frame;
+old take/session callbacks and inline handoff reentry are rejected. Counters
+saturate without ending recording. The adapter must serialize calls, preserve
+source metadata/filename, and never retain the stack-local stock writer at
+`C03A5490`. None of those native adapter proofs are fabricated by the policy.
 
 `ui_control.c` provides the corresponding lifecycle policy: CINE/MainB2-only
 visibility, explicit confirmed OFF/ON events, stale-owner/generation/session
@@ -53,13 +114,19 @@ this core cannot prove that on its own. It does not create the row.
 host, executes state transitions, and cross-compiles for ARMv7 with clang
 (`-mfloat-abi=soft -mfpu=none`; no FP/NEON dependency). The view API uses an
 explicit output pointer rather than an aggregate-return ABI. The initial
-control/lifecycle suite contains 32 unique passing tests, including all 128
-readiness combinations. Host execution plus ARM compilation is not execution
-on the camera CPU.
+control/lifecycle suite covers all 128 readiness combinations and a 10,000-frame
+control run. Compiled-C pipeline tests include a 1,200-frame run, OFF/ON
+integration, error cleanup, stale tokens and mutation controls.
+`tests/test_frame_pipeline_arm.py` additionally runs the actual compiled ARM
+instructions with strict external-call checks, saved-register/SP checks and
+an explicitly synthetic handoff. It uses the existing checked ELF extractor,
+not a new linker or loader. A failed JIT is a test failure, not a silent pass.
+These are not execution on the camera CPU or native buffer ownership proof.
 It performs no camera or USB operations and fails if the compiler is missing.
 
 Common codec research remains in `research/slimRAW` and `research/imaging-hw`.
-Integration evidence and product decisions belong in `projects/lossless-sup`.
+Integration evidence and product decisions belong in `projects/lossless-sup`;
+`notes/ROADMAP.md` is canonical for current gates.
 
 The shared `research/ui/tools/native_ui_audit.py` verifies the pinned stock
 MainB2 page and reports its row/allocation structure. It passes 15 additional
@@ -86,8 +153,10 @@ pass 35 + 8 tests. Width 320 is a design choice, not measured camera rendering.
 publication, rejected-choice restoration and subscription retirement. Native
 callback return does not veto assignment; failed publication can leave ON
 visible. The `FPL_BLOCK_REC` context bit therefore blocks RAW as well as lossless
-REC while state is uncertain. Use the mandatory `fpl_binding_begin` entry; do
-not bypass it with a separately constructed context. Its 30 tests use mock
+REC while state is uncertain. In a UI-enabled build use the mandatory
+`fpl_binding_begin` entry; do not bypass that binding with a separately
+constructed context. The separate no-menu test build must not attach this UI
+binding and uses `fpl_begin_direct` with fresh producer facts. Its 30 tests use mock
 port operations plus ARM compilation, not the native GUI.
 
 `loader/` adds a normalized reader-view lease with 53 sanitizer-tested groups,
@@ -109,5 +178,6 @@ Further shared probes cover lazy page selection (16 cases) and input/property
 boundaries (14 cases). These expose two integration hazards: parser nonzero
 returns can publish an incomplete root, and disabling a key does not cancel an
 already-active repeat. The current page candidate is intentionally unchanged.
-See `native/README.md`, `menu/README.md` and
+See `native/README.md`, `menu/README.md`, the canonical
+`projects/lossless-sup/notes/ROADMAP.md`, and the historical
 `projects/lossless-sup/notes/IMPLEMENTATION.md`.

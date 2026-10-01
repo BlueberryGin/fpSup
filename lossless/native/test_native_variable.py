@@ -251,6 +251,27 @@ class NativePortTests(unittest.TestCase):
         self.assertEqual(self.p.call("set_canonical", self.p.STATE, 1), COLLISION)
         self.assertEqual(self.p.words(d + 8)[0], 0)
 
+    def test_24_only_exact_cursor_and_confirm_private_names_are_admitted(self):
+        for index, name in enumerate((b'MV_fpLosslessCursor', b'MV_fpLosslessConfirm')):
+            state, at = self.p.STATE + 0x100 + index * 64, self.p.NAME + 0x100 + index * 64
+            self.p.write(at, name + b'\0')
+            self.assertEqual(self.p.call('init', state, self.p.APP, at), 0)
+            self.assertEqual(self.p.call('register_off', state), 0)
+            descriptor = self.p.words(state + 12)[0]
+            self.assertEqual(self.p.words(descriptor, 3), (0, at, 0))
+            self.assertEqual(self.p.call('set_canonical', state, 1), 0)
+            self.assertEqual(self.p.words(descriptor + 8)[0], 1)
+        self.assertEqual(self.p.words(self.p.STATE + 12)[0], 0,
+                         'UI variables must not claim or alter saved preference')
+
+    def test_25_private_prefix_or_stock_names_do_not_expand_the_allowlist(self):
+        state, at = self.p.STATE + 0x100, self.p.NAME + 0x100
+        for name in (b'MV_fpLosslessCursorX', b'MV_fpLosslessConfirmX',
+                     b'MV_fpLosslessC', b'MV_fpLosslessOther', b'MV_AudioRecord'):
+            self.p.write(at, name + b'\0')
+            self.assertEqual(self.p.call('init', state, self.p.APP, at), INVALID)
+        self.assertEqual(self.p.native_calls, [])
+
 
 def main():
     global IMAGE, TEXT, BINDING
