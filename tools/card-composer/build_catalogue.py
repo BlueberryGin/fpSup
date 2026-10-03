@@ -85,7 +85,7 @@ def build_fast(extra=()):
     And it is why the page needs no assembler to offer a fast card: nothing here
     is computed at merge time.  The page swaps three blobs.
     """
-    # Fast Start 2 (2026-09-25): the settings-block fast path AND the loader
+    # Fast Start 3 (Fast Start 2 of 2026-09-25 + the 2026-10-04 echo NOP): the settings-block fast path AND the loader
     # hook, so a warm boot loads without the AutoRun at all and a cold one
     # starts fast; the four-box splash is what the instant path shows.  See
     # projects/usb-shell-sup/notes/LOADER_V2.md.
@@ -487,6 +487,7 @@ PRODUCTS = {
                           'all of it is remembered across a power-off. The recorded '
                           'RAW is not changed. Test build.'),
     'lossless': dict(id='lossless', name='fpSup-Lossless', category='shooting',
+                     guide='guide/lossless.html',
                      tail_at=0xF000,
                      desc='Lossless-compressed CinemaDNG by the camera\'s own hardware '
                           'codec: a Lossless RAW row (SHOOT page 2, CINE), OFF at every '
@@ -1053,6 +1054,14 @@ def main():
                 print(f'          {error}')
         else:
             ok = got == want
+        if not ok:
+            # Say which sections differ; "FAIL" alone sent a session hunting.
+            try:
+                g, w = dict(parse(got)[1]), dict(parse(want)[1])
+                diff = sorted(a for a in set(g) | set(w) if g.get(a) != w.get(a))
+                print('          differ at: ' + ', '.join(f'0x{a:08X}' for a in diff))
+            except Exception as error:
+                print(f'          (no section diff: {error})')
         bad |= not ok
         proof = 'same sections + ordered entries' if semantic else 'byte-identical'
         print(f'  {"OK  " if ok else "FAIL"}  {what} [{proof}]')

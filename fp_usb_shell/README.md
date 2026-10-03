@@ -116,7 +116,7 @@ Nothing is flashed. Everything the camera runs is written into RAM at boot by an
 `AutoRun.txt` on the card. The power switch is a warm restart that keeps the
 firmware in memory, so the loader writes every patched word — all seven firmware
 patches included — back when the camera powers off (see *Power-off write-back
-and the loader hook*, below). The one exception is Fast Start 2 on the merge
+and the loader hook*, below). The one exception is Fast Start 3 on the merge
 page, which also stores the loader in the settings block.
 
 ## Use
@@ -359,7 +359,7 @@ docs/                逆向筆記(繁體中文)
 **不需要重刷韌體。** 相機執行的一切都是開機時由卡上的 `AutoRun.txt` 寫進 RAM 的。
 撥電源開關是暖開機、韌體會留在記憶體裡,所以 loader 在關機時把改過的每個字寫回 ——
 包括那七個韌體 patch(見下方「關機寫回與 loader hook」)。唯一例外是合併頁面的
-Fast Start 2,它另外把 loader 存進設定區。
+Fast Start 3,它另外把 loader 存進設定區。
 
 ### 使用
 
@@ -451,7 +451,7 @@ journal;關機時回呼寫回。執行期才裝 hook 的 payload 把每個 hook 
 | (預設) | 關機寫回 |
 | `--loader-hook` | 另外把 `0xC03DA420`(啟動 AutoRun 的呼叫)指向 loader 的 `+4` 入口:暖開機約 1.4 秒載入、不跑 AutoRun。配 `--four-box-bar` 時 hook 路徑自己畫四格畫面,否則在 `--loader-hook-banner-at`(預設 3 秒)畫文字 banner |
 | `--loader-hook-mark ADDR` | 除錯:journal 區塊位址寫在 ADDR+8、關機回呼次數在 ADDR、時間戳在 ADDR+4(`loader_hook_check.py` 讀) |
-| `--store-boot --loader-hook --four-box-bar` | 合併頁面的 Fast Start 2:同一次建置出瞬開、快開、慢開 |
+| `--store-boot --loader-hook --four-box-bar` | 合併頁面的 Fast Start 3:同一次建置出瞬開、快開、慢開 |
 
 `--store-boot` 的中止程式只在確實有 AutoRun 註冊時才安排,hook 路徑不會把 `echo` 留在它上面。
 插著 USB 線關機一律冷開機。設計、上機結果與唯一未解的情況(關機回呼沒跑到時會把殘留當原字記下):
@@ -516,7 +516,7 @@ each site as a four-byte section holding the firmware's own word (gyro's
 | *(default)* | power-off write-back |
 | `--loader-hook` | also points `0xC03DA420` (the call that starts the AutoRun) at the loader's `+4` entry: a warm boot loads ~1.4 s after power-on without the AutoRun. With `--four-box-bar` the hook path draws the splash itself; without it, the text banner at `--loader-hook-banner-at` (default 3 s) |
 | `--loader-hook-mark ADDR` | debug: journal block at ADDR+8, power-off runs at ADDR, their stamp at ADDR+4 (`loader_hook_check.py` reads them) |
-| `--store-boot --loader-hook --four-box-bar` | Fast Start 2, the merge page's option: instant, fast and slow boot from one build |
+| `--store-boot --loader-hook --four-box-bar` | Fast Start 3, the merge page's option: instant, fast and slow boot from one build |
 
 The abort that stops the AutoRun (`--store-boot`) is armed only when an AutoRun
 is registered, so the hook path never leaves `echo` pointing at it. Powering off
@@ -552,7 +552,7 @@ area without repeatedly reading a full-width image.
 This option works with ordinary/debug and `--store-boot` builds; it does not
 support legacy `--boot-call`. `--banner` and the old bar measurement environment
 variables affect only the legacy display. Single-product releases keep the text
-display; the merge page's Fast Start 2 carries the splash and its artwork
+display; the merge page's Fast Start 3 carries the splash and its artwork
 (2026-09-25).
 The first adoption needs the new AutoRun, BIN, and artwork; subsequent compatible
 payload-only updates retain identical AutoRun/artwork. No new runtime version or

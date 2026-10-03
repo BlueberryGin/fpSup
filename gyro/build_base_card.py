@@ -345,7 +345,7 @@ def main():
     banner = a.banner or f'fpSup-{BANNER[a.edition]}-{a.version}!'
     # The power-off restore is every loader card's now (build_autorun always
     # adds it; hook_sites above is what puts these hooks in it).  --loader-hook
-    # only adds the instant path, which the merge page's Fast Start 2 owns.
+    # only adds the instant path, which the merge page's Fast Start 3 owns.
     cmd = [sys.executable, str(SHELL / 'build_autorun.py'),
            '--loader', '--banner', banner] + (
                ['--loader-hook'] if a.loader_hook else []) + (

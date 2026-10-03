@@ -69,6 +69,21 @@ ap.add_argument('--no-pad', action='store_true',
                      'the card removes the old file first -- putfile cannot, the '
                      'Mac can. Saves the camera parsing five hundred lines of '
                      'filler on every boot.')
+ap.add_argument('--strip-comments', action=argparse.BooleanOptionalAction, default=True,
+                help='(default on; --no-strip-comments keeps them) '
+                     'drop every comment line from the script.  The firmware shell '
+                     'reads the file a character at a time and sleeps 1 ms after '
+                     'each printable one (0xC04215F4 bl 0xC0421770, delay(1)), '
+                     'comments included -- three thousand of them before the '
+                     'loader starts.  The padding after the commands stays.')
+ap.add_argument('--fast-echo', action=argparse.BooleanOptionalAction, default=True,
+                help='(default on since 2026-10-04, every card; --no-fast-echo for '
+                     'the old timing) '
+                     'first line NOPs that per-character sleep (mem set 0xC04215F4 '
+                     '0xE320F000); the stock word (0xEB00005D, bl 0xC0421770) goes '
+                     'back before the first hand-off to the cave.  Andy_hal9000\'s '
+                     'forum report, 2026-10-04; measured 11.5 s -> 3.0 s.  Memory '
+                     'only, nothing in the settings block.')
 ap.add_argument('--no-shell', action='store_true',
                 help='leave the USB shell out: no worker, no endpoint patches, no '
                      'state block. The loader sleeps instead of becoming it. Boots '
@@ -117,8 +132,10 @@ ap.add_argument('--profile', action='store_true',
                      '`mem set` on one that spells it out, which is why it is a '
                      'flag and not the default.  Read both with '
                      '`mem get 0xC072F6F4,,8`')
-ap.add_argument('--four-box-bar', action='store_true',
-                help='experimental offline-reviewed four-box splash: white fp, '
+ap.add_argument('--four-box-bar', action=argparse.BooleanOptionalAction, default=None,
+                help='(default on for every --loader card since 2026-10-04, single '
+                     'ones too; --no-four-box-bar for the old text display) '
+                     'four-box splash: white fp, '
                      'reference pink Sup, transparent background, restore native UI 2 seconds after '
                      'loading. Requires --loader and the generated FPSUPUI folder. '
                      '--banner applies only to the legacy text display.')
@@ -138,6 +155,8 @@ ap.add_argument('--loader-hook-banner-at', type=int, default=3_000_000,
                      'many microseconds after power-on (default 3 s; drawn at '
                      '1.35 s it is wiped by the UI coming up)')
 args = ap.parse_args()
+if args.four_box_bar is None:
+    args.four_box_bar = bool(args.loader and not args.boot_call)
 if args.loader_hook and not args.loader:
     ap.error('--loader-hook requires --loader')
 if args.four_box_bar and not args.loader:
@@ -1097,7 +1116,24 @@ if args.loader:
     print(f"binary : {binpath.name}  {len(binblob)} bytes, {len(secs)} section(s), "
           f"entry 0x{entry:08X}")
 
-text = '\n'.join(out) + '\n'
+ECHO_SLEEP_AT, ECHO_SLEEP_STOCK, ARM_NOP = 0xC04215F4, 0xEB00005D, 0xE320F000
+lines = '\n'.join(out).split('\n')
+if args.strip_comments:
+    lines = [l for l in lines if not l.startswith('#')]
+if args.fast_echo:
+    # The restore goes in front of the first line that hands the echo handler
+    # to our own code (the cave, 0xC07xxxxx): the store bootstrap on the fast
+    # path, the loader on the slow one -- either becomes the worker and never
+    # returns, so nothing after that `echo` runs (2026-10-04: a restore at the
+    # end, then one before the loader's hand-off, left the NOP in place on nine
+    # boots; every other word landed).  Three times, like every must-land
+    # `mem set` here.
+    restore = [f'mem set 0x{ECHO_SLEEP_AT:08X} 0x{ECHO_SLEEP_STOCK:08X}'] * 3
+    handoff = f'mem set 0x{ECHO_SLOT:08X} 0x'
+    at = next((i for i, l in enumerate(lines) if l.startswith(handoff)
+               and 0xC0700000 <= int(l[len(handoff) - 2:], 16) < 0xC0800000), len(lines))
+    lines = ([f'mem set 0x{ECHO_SLEEP_AT:08X} 0x{ARM_NOP:08X}'] + lines[:at] + restore + lines[at:])
+text = '\n'.join(lines) + '\n'
 
 # Pad to a fixed length.
 #

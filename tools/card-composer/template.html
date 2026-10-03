@@ -235,6 +235,7 @@ td.r,th.r{text-align:right}
 .caveats p{margin:0 0 6px}
 .caveats p:last-child{margin-bottom:0}
 .caveats b{color:var(--ink);font-weight:600}
+.caveats .thanks{color:var(--ink)}
 .mod.fix:hover{border-color:var(--line)}
 button.x{border:0;background:transparent;color:var(--dim);font-family:var(--mono);
   font-size:1rem;line-height:1;cursor:pointer;padding:0 3px;float:right}
@@ -306,7 +307,7 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);
       <div id="startopt"></div>
       <button class="btn" id="dl-z">Download sup (.zip)</button>
       <!-- The zip is the only download (2026-09-25): a card can be more than
-           two files -- Fast Start 2 adds the FPSUPUI folder -- and the two files
+           two files -- Fast Start 3 adds the FPSUPUI folder -- and the two files
            alone would be an incomplete card. -->
       <p class="note" id="dlnote" hidden></p>
       <div class="status" id="status"></div>
@@ -941,7 +942,7 @@ function cardName(){
   return 'fpSup-' + (cards.length ? cards.map(short).join('-') : 'card');
 }
 /* ...and the name with the start-up option, for the zip and its README. */
-const cardLabel = () => cardName() + (fastOn ? '-FS2' : '');
+const cardLabel = () => cardName() + (fastOn ? '-FS3' : '');
 function cardReadme(banner, cards, fast, shaAutorun, shaBin){
   const name = c => c.upload ? c.name + ' (uploaded)' : (c.banner || c.name).replace(/!$/, '');
   return [
@@ -949,7 +950,7 @@ function cardReadme(banner, cards, fast, shaAutorun, shaBin){
     'Firmware Ver.5.02 on the original fp only.',
     '',
     'Contains: ' + cards.map(name).join(', '),
-    'Fast Start 2: ' + (fast
+    'Fast Start 3: ' + (fast
       ? 'on -- the first boot stores the loader in the camera\'s settings block,'
         + '\n            which survives a battery pull. After that a power-switch'
         + '\n            restart loads in about 1.4 s without the AutoRun and shows the'
@@ -1070,7 +1071,7 @@ function renderCatalogue(){
           ${legacy}
         </span>
       </label>${push}
-      ${c.guide ? `<a class="sup-guide" href="${escapeHTML(guideHref(c.guide))}">How to use &rarr;</a>` : ''}
+      ${c.guide ? `<a class="sup-guide" href="${escapeHTML(guideHref(c.guide))}">How to use &amp; details &rarr;</a>` : ''}
       ${c.upload ? `<button type="button" class="remove-upload" data-rm="${escapeHTML(c.id)}">Remove uploaded file</button>` : ''}
     </article>`;
   }).join('') || '<p class="catalogue-empty">No SUPs in this category.</p>';
@@ -1121,7 +1122,7 @@ function render(){
      keeps making it while the option is ticked is the page lying. */
   const fn = document.getElementById('flashnote');
   if (fn) fn.innerHTML = fastOn
-    ? ' — except the loader, which Fast Start 2 puts in the settings block'
+    ? ' — except the loader, which Fast Start 3 puts in the settings block'
     : ' — nothing is ever written to flash';
   const checks = runChecks(recs, vshl, banner, entry, entries);
   const ok = checks.every(x => x.ok);
@@ -1131,35 +1132,17 @@ function render(){
   const fastRow = `<div class="start-setting">
     <h2>Start-up</h2>
     <label class="fast-switch" for="fast">
-      <span><b>Fast Start 2</b><small id="fast-hint">Optional, off by default · instant start after a power-switch restart, fast after a cold one · stores the loader in camera flash</small></span>
+      <span><b>Fast Start 3</b><small id="fast-hint">Optional, off by default · instant start after a power-switch restart, fast after a cold one · stores the loader in camera flash</small></span>
       <input type="checkbox" role="switch" id="fast" aria-describedby="fast-hint" ${fastOn ? 'checked' : ''}>
     </label></div>` + (fastOn ? `<div class="caveats">
-      <p><b>It writes to the camera, not just to the card.</b> The loader is put
-      into XC_CommonSaveData, which is flash-backed and survives a battery pull.
-      Everything else on this page lives on the card and goes away with it.</p>
-      <p><b>Three ways to start.</b> A restart with the power switch keeps the
-      firmware in memory, and the card loads about 1.4 s after power-on without
-      running the AutoRun at all — you see the four-box screen, then the
-      camera's own UI. When the firmware was reloaded (a cold start, a battery
-      pull, or powering off with the USB cable attached) the AutoRun runs, short
-      because the loader comes out of flash. Some restarts come up cold anyway;
-      that costs a few seconds, nothing else.</p>
-      <p><b>The first boot is still slow</b> — that is the boot that fills the
-      block — and so is the first boot with a changed loader. Updating a
-      compatible <code>fpSup.BIN</code> alone does not invalidate the stored
-      loader or require a new <code>AutoRun.txt</code>.</p>
-      <p><b>A fast card is a finished card.</b> Do not bring it back here to
-      combine with something else. Combine ordinary cards and tick this again
-      so the bootstrap, loader, stage2 and abort come from one packaging build.</p>
-      <p><b>The script is stopped early, on purpose.</b> Once the loader has run,
-      the rest of the AutoRun is a slower way to do what is already done, so it is
-      cut off. Anything you expected to happen after the load will not.</p>
-      <p><b>A loader-marker mismatch takes the slow path.</b> This marker is
-      tied to the loader, not to the BIN’s size, contents, or entry. It is not
-      an integrity check of every byte saved in flash.</p>
-      <p><b>Build checks are not a new on-camera test.</b> Fast Start 2 was
-      booted on 2026-09-25 with OG3K + USB shell and with gyro + OG3K + USB
-      shell; it does not validate every combined output.</p>
+      <p class="thanks">⚡ Thanks to our Flash, <b>Andy_hal9000</b>, whose tip
+      cut start-up from 11.5 s to 3 s.</p>
+      <p><b>Writes to the camera.</b> The loader is stored in its settings
+      flash, which survives a battery pull; everything else stays on the card.</p>
+      <p><b>The first boot is the slow one</b> — it fills that store. Then a
+      power-switch restart loads in about 1.4 s; a cold start runs a short AutoRun.</p>
+      <p><b>A finished card.</b> Do not merge it again: combine ordinary cards
+      here, then tick this. Not camera-tested in every combination.</p>
       </div>` : '');
   document.getElementById('startopt').innerHTML = sel().length ? fastRow : '';
   const fb = document.getElementById('fast');

@@ -190,7 +190,7 @@ class SplashTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, '-B', str(HERE / 'build_autorun.py'), '--loader',
              '--out', str(out / 'AutoRun.txt'), '--also-bin', f'0xC0731000:{payload}',
-             *flags, *(['--four-box-bar'] if splash else [])],
+             *flags, '--four-box-bar' if splash else '--no-four-box-bar'],
             env=env, capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(result.stdout + result.stderr)

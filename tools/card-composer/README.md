@@ -17,7 +17,7 @@ Development is hidden and unselected by default. Open Development or All to
 see Shell, then explicitly select it to include it. Changing categories only
 filters the display: it does not select, deselect or remove a previously
 selected sup from the merged output. OG3K and OG2K remain mutually exclusive.
-Fast Start 2 stays a separate, off-by-default settings switch, not a sup tile.
+Fast Start 3 stays a separate, off-by-default settings switch, not a sup tile.
 
 When adding a sup, set its `category` string in `PRODUCTS` in
 `build_catalogue.py` (`shooting` or `development` for the current products).
@@ -47,7 +47,7 @@ The loader, stage2 (with the four-box splash) and optional Fast pieces come from
 4. It calls the payload entries: **worker → gyro → OG restore**, omitting
    absent products. Every entry must return.
 5. Pass 2 places pool-offset sections, then publishes D/I. Loader returns
-   and frees staging. Only Fast Start 2 packaging adds provisioning, the script
+   and frees staging. Only Fast Start 3 packaging adds provisioning, the script
    abort (armed only while an AutoRun runs) and the loader hook at
    `0xC03DA420`.
 
@@ -70,7 +70,7 @@ are run-in-place launchers and must survive; they do not imply USB Shell.
   payload sections stay byte for byte; its own stage2 is replaced.
 - A merge uses the current common stage2, deduplicates identical records and
   relocates entries. Payload code is retained, not rebuilt by the browser.
-- Fast Start 2 always replaces stage2 and adds the matching abort section, and
+- Fast Start 3 always replaces stage2 and adds the matching abort section, and
   the zip carries the four-box frames as `FPSUPUI/0.BIN`..`4.BIN`.
 - The built-in Shell's **EP 0x83** option controls the six exact descriptor
   records derived from `fp_usb_shell/patches.py` (`PUSH`). Off omits them; on
@@ -83,8 +83,8 @@ are run-in-place launchers and must survive; they do not imply USB Shell.
 The named `plain`, `shell` and `shellpush` AutoRun template slots are retained
 for compatibility, but their executable commands are now the same: worker
 creation, state and descriptor patches reside in the BIN. Changing the EP
-option does **not** add AutoRun commands. The current normal script has 112
-commands; the Fast Start 2 script has 148 in total, and a hit runs about 26.
+option does **not** add AutoRun commands. The current normal script has 116
+commands; the Fast Start 3 script has 152 in total, and a hit runs about 26.
 
 BIN output retains 32 KiB padding when it fits. Larger output is padded to the
 loader's `MAXLEN`, currently `0xF000` (61,440 bytes), and output exceeding that
@@ -92,9 +92,14 @@ read capacity is rejected. The browser, catalogue composer and common builder
 use the same policy. The loader owns a separate staging allocation: its read
 buffer is no longer a reserved region of the payload's shared pool.
 
-## Fast Start 2 and replacing only the BIN
+## Fast Start 3 and replacing only the BIN
 
-Fast Start 2 is optional and off by default, and built in one
+Every AutoRun (not only Fast) now drops its comment lines and NOPs the shell's
+per-character sleep until just before the loader hand-off -- Andy_hal9000's
+tip, measured 11.5 s -> 3.0 s on 2026-10-04 (`build_autorun.py`
+`--strip-comments --fast-echo`, on by default).
+
+Fast Start 3 is optional and off by default, and built in one
 `--store-boot --loader-hook --four-box-bar` run. A power-switch restart keeps
 the firmware in memory and with it the hook at `0xC03DA420`: the card loads
 about 1.4 s after power-on without the AutoRun and shows the four-box screen.

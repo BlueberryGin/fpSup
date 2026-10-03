@@ -95,7 +95,7 @@ or released.
    **each must return**.
 6. stage2 runs pass 2: it places the pool-offset sections, then publishes D/I
    again.
-7. Only a Fast Start 2 package has the store provisioning, the abort and the
+7. Only a Fast Start 3 package has the store provisioning, the abort and the
    loader hook. stage2 arms the abort only when an AutoRun is actually running,
    and points `0xC03DA420` (the call that starts the AutoRun) at the loader's
    `+4` entry, so a warm restart loads without the AutoRun. stage2 returns and
@@ -173,7 +173,7 @@ does not look at r0 and does not stop later entries.
 
 ## 5. Fast start and "only the BIN changes"
 
-The merge page's option is **Fast Start 2**: this settings-block fast path plus
+The merge page's option is **Fast Start 3**: this settings-block fast path plus
 the loader hook, built in one `--store-boot --loader-hook --four-box-bar` run.
 A warm restart then loads about 1.4 s after power-on without the AutoRun and
 shows the four-box screen; a cold start runs the short Fast AutoRun. Single

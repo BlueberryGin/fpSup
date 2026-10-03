@@ -57,6 +57,8 @@
         <td><span class="en">Open gate 3K: the full 3:2 sensor at 3024×2010 CinemaDNG. Needs an external SSD.</span><span class="zh">Open gate 3K:完整 3:2 感光元件,3024×2010 CinemaDNG。需要外接 SSD。</span></td></tr>
     <tr><td><a href="guide/og2k.html">fpSup-OG2K</a></td>
         <td><span class="en">Open gate 2K: the same 3:2 view at 2016×1344, at about the camera's own FHD data rate.</span><span class="zh">Open gate 2K:同樣的 3:2 視野,2016×1344,資料量約等於相機自己的 FHD。</span></td></tr>
+    <tr><td><a href="guide/lossless.html">fpSup-Lossless</a></td>
+        <td><span class="en">Lossless-compressed CinemaDNG by the camera's own hardware codec: a 3K 12-bit frame drops from 9.1 MB to about 3.2 MB. Test build.</span><span class="zh">用相機自己的硬體編碼器錄無損壓縮 CinemaDNG:3K 12-bit 一格從 9.1 MB 降到約 3.2 MB。測試版。</span></td></tr>
     <tr><td><a href="guide/gyro.html">fpSup-Gyro</a></td>
         <td><span class="en">Gyroflow motion files (<code>.gcsv</code> + <code>.json</code>) written next to each CinemaDNG clip.</span><span class="zh">在每段 CinemaDNG 片子旁邊寫出 Gyroflow 運動檔(<code>.gcsv</code> + <code>.json</code>)。</span></td></tr>
     <tr><td><a href="guide/gyro-base.html">fpSup-Gyro-Base</a></td>
@@ -145,7 +147,7 @@
   它讓電腦透過 USB 跟相機對話,在相機本身上<strong>用不到任何東西</strong>。
   設定方式在 <a href="https://github.com/ijigen/fpSup/tree/main/fp_usb_shell">fp_usb_shell 的 README</a>。</p>
 
-  <h4 id="fast"><span class="en">Fast Start 2 (optional)</span><span class="zh">Fast Start 2(可選)</span></h4>
+  <h4 id="fast"><span class="en">Fast Start 3 (optional)</span><span class="zh">Fast Start 3(可選)</span></h4>
   <p class="en">Under <b>Start-up</b> there is one switch, off by default. With it on, the
   first start stores the loader in the camera's settings block. After that a
   power-switch restart loads in about 1.4 seconds without the start-up script, and a
@@ -236,11 +238,11 @@
   <strong>不要再試一次</strong>,去看<a href="#trouble">問題清單</a>。</p>
   <p class="note en">This happens every time you turn the camera on, as long as the files
   are on the card. The camera reads the card and builds it all again in memory each
-  time. With <a href="#fast">Fast Start 2</a> on, a power-switch restart shows the four
+  time. With <a href="#fast">Fast Start 3</a> on, a power-switch restart shows the four
   boxes already full at about three seconds, with no filling.</p>
   <p class="note zh">只要檔案還在卡上,<strong>每次開機都會這樣</strong>。
   相機每次都重新讀卡、在記憶體裡把整套東西再建一次。
-  開了 <a href="#fast">Fast Start 2</a> 的話,撥電源開關重開時,大約三秒會直接出現
+  開了 <a href="#fast">Fast Start 3</a> 的話,撥電源開關重開時,大約三秒會直接出現
   四個已經填滿的方格,不會一格一格填。</p>
 </li>
 
@@ -282,10 +284,10 @@ something that is no longer there. <b>Each product's page says what to set back.
 <p class="en"><b>Then:</b> delete the files from the card, or take the card out, and
 switch the camera off. As it powers off, the card writes back every part of the camera's
 memory it changed, so the camera is back to normal. Nothing was written to the camera's
-flash, unless you turned on <a href="#fast">Fast Start 2</a>.</p>
+flash, unless you turned on <a href="#fast">Fast Start 3</a>.</p>
 <p class="zh"><b>然後:</b>把卡上的檔案刪掉,或是把卡拿出來,然後關機。
 相機關機時,卡片會把它改過的每一處記憶體寫回原狀,所以相機就恢復正常了。
-除非你開了 <a href="#fast">Fast Start 2</a>,否則相機的 flash 裡沒有被寫入任何東西。</p>
+除非你開了 <a href="#fast">Fast Start 3</a>,否則相機的 flash 裡沒有被寫入任何東西。</p>
 <div class="note en"><b>Did you already do it in the wrong order?</b> Nothing is
 broken. Put the card back with its files, turn the camera on so the setting exists
 again, set it back to a normal one, and then remove the files. The setting is only a
@@ -341,11 +343,11 @@ no motion files, a strange picture — are in the table on that product's page.<
 <p class="note en" style="margin-top:20px"><b>Still stuck?</b> Ask on the
 <a href="https://discord.gg/WVTCcpGUYC">Discord</a> &middot;
   <a href="https://www.youtube.com/@fp-sup">YouTube</a>. Tell us which products you ticked,
-whether Fast Start 2 was on, your firmware version, and how far the boxes filled.</p>
+whether Fast Start 3 was on, your firmware version, and how far the boxes filled.</p>
 <p class="note zh" style="margin-top:20px"><b>還是卡住?</b>到
 <a href="https://discord.gg/WVTCcpGUYC">Discord</a> &middot;
 <a href="https://www.youtube.com/@fp-sup">YouTube</a> 上問。<br>
-告訴我們你勾了哪些產品、有沒有開 Fast Start 2、你的韌體版本,以及方格填到第幾格。</p>
+告訴我們你勾了哪些產品、有沒有開 Fast Start 3、你的韌體版本,以及方格填到第幾格。</p>
 
 <footer>
   <p class="removal en"><b>Removing it, in short:</b> set back any menu setting the card

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fpSup-Lossless — how to use it | fpSup</title>
+<meta name="description" content="Lossless-compressed CinemaDNG for the SIGMA fp, by the camera's own hardware codec.">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ijigen.github.io/fpSup/guide/lossless.html">
+<meta property="og:title" content="fpSup-Lossless — how to use it">
+<meta property="og:description" content="Lossless-compressed CinemaDNG for the SIGMA fp, by the camera's own hardware codec.">
+<meta property="og:image" content="https://ijigen.github.io/fpSup/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<style>
+/* The credit for CorNy, styled as RAW-View's credit to Ole Berek. */
+.credit{background:var(--sig-soft); border:1px solid var(--line); border-left:4px solid var(--sig);
+  border-radius:4px; padding:18px 20px; margin:22px 0 30px}
+.credit-kicker{font-family:var(--mono); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--sig); margin:0 0 4px}
+.credit-h{font-size:1.35rem; line-height:1.3; margin:0 0 6px; color:var(--ink);
+  font-family:var(--sans); text-transform:none; letter-spacing:0}
+.credit p:last-child{margin-bottom:0}
+</style>
+</head>
+<body>
+
+<div class="langbar">
+  <div class="lang" role="group" aria-label="Language / 語言 / 语言">
+    <button type="button" data-set="en" aria-pressed="true">EN</button>
+    <button type="button" data-set="cn" aria-pressed="false">中</button>
+    <button type="button" data-set="zh" aria-pressed="false">繁</button>
+  </div>
+</div>
+<a class="back" href="../guide.html">&larr; <span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a>
+
+<header class="hero">
+  <h1>fpSup-Lossless</h1>
+  <p class="lede en">Records CinemaDNG <b>losslessly compressed</b> by the camera's own hardware
+  codec, which the stock firmware never uses for video. A 3K 12-bit frame of 9.1&nbsp;MB
+  typically becomes about 3.2&nbsp;MB. Not a single pixel value changes. Version
+  <b>v0.1.2test</b> &mdash; a <b>test build</b>.</p>
+  <p class="lede zh">用相機自己的硬體編碼器錄<b>無損壓縮</b>的 CinemaDNG(原廠韌體從不拿它錄影)。
+  一張 9.1&nbsp;MB 的 3K 12-bit 畫格通常變成約 3.2&nbsp;MB,像素值一個都不變。
+  版本 <b>v0.1.2test</b> —— 這是<b>測試版</b>。</p>
+</header>
+
+<section class="credit" id="credits" aria-labelledby="credits-h">
+  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
+  <h2 id="credits-h" class="credit-h"><span class="en">Thank you, CorNy</span><span class="zh">感謝 CorNy</span></h2>
+  <p class="en">CorNy found that DaVinci Resolve plays a clip mixing compressed and uncompressed
+  frames without flickering only when its <b>first frame is uncompressed</b>. So every take now
+  keeps its first frame uncompressed &mdash; and mixed clips play cleanly in Resolve.</p>
+  <p class="zh">CorNy 發現:壓縮與未壓縮畫格混合的片段,只有在<b>第一格是未壓縮</b>時,
+  DaVinci Resolve 才能正常播放、不會閃爍。所以現在每段拍攝的第一格都保留未壓縮 ——
+  混合片段在 Resolve 裡就能乾淨地播放。</p>
+</section>
+
+<!-- 1. INSTALL -->
+<h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
+<ol class="steps">
+  <li>
+    <h3><span class="en">Check the camera</span><span class="zh">確認相機</span></h3>
+    <p class="en">SIGMA fp (not fp L) on firmware <b>Ver.5.02</b> exactly. <a href="../guide.html#firmware">How to check</a>.</p>
+    <p class="zh">SIGMA fp(不是 fp L),韌體必須剛好是 <b>Ver.5.02</b>。<a href="../guide.html#firmware">怎麼確認</a>。</p>
+  </li>
+  <li>
+    <h3><span class="en">Build the card in fpSup-Merge</span><span class="zh">在 fpSup-Merge 做卡</span></h3>
+    <p class="en"><a href="../tools/card-composer/?pick=lossless"><b>Open fpSup-Merge with fpSup-Lossless ticked</b></a>.
+    It can go on the same card as every other fpSup card, RAW-View included. With open gate,
+    use OG3K v0.2.8a / OG2K v0.1.5a or later. Tick what else you want, then download the zip.</p>
+    <p class="zh"><a href="../tools/card-composer/?pick=lossless"><b>打開已勾好 fpSup-Lossless 的 fpSup-Merge</b></a>。
+    它可以和其他所有 fpSup 卡放在同一張卡上,包括 RAW-View。搭配 open gate 時,
+    請用 OG3K v0.2.8a / OG2K v0.1.5a 或更新版。勾好其他想要的,然後下載 zip。</p>
+    <p class="note en">Fast Start 3 is an optional setting on that page. See
+    <a href="../guide.html">How to use fpSup</a>.</p>
+    <p class="note zh">Fast Start 3 是那個頁面上的選項。見
+    <a href="../guide.html">fpSup 怎麼用</a>。</p>
+  </li>
+  <li>
+    <h3><span class="en">Copy to the card and start the camera</span><span class="zh">複製到卡上並開機</span></h3>
+    <p class="en">Unzip. Copy <code>AutoRun.txt</code>, <code>fpSup.BIN</code> and the
+    <code>FPSUPUI</code> folder to the <b>top level</b> of the SD card the camera boots from, and
+    start the camera with the <b>USB cable unplugged</b>. All four boxes white means it loaded.
+    <a href="../guide.html#copy">Details</a>.</p>
+    <p class="zh">解壓縮。把 <code>AutoRun.txt</code>、<code>fpSup.BIN</code> 和
+    <code>FPSUPUI</code> 資料夾複製到相機開機用的 SD 卡<b>最上層</b>,<b>不插 USB 線</b>開機。
+    四格全白就是載入完成。<a href="../guide.html#copy">詳細說明</a>。</p>
+  </li>
+</ol>
+
+<!-- 2. Use -->
+<h2 id="use"><span class="en">Use</span><span class="zh">使用</span></h2>
+<p class="en">Open <b>MENU &rarr; SHOOT</b>, page 2 (CINE). Below Audio Record there is a new row,
+<b>Lossless RAW</b>: set it to <b>On</b>, then record CinemaDNG as usual.</p>
+<p class="zh">打開 <b>MENU &rarr; SHOOT</b> 第 2 頁(CINE)。在「錄音」下面多了一列
+<b>Lossless RAW</b>:設成 <b>On</b>,然後照平常錄 CinemaDNG。</p>
+<figure class="shot">
+  <img src="../assets/guide/09-lossless-menu.webp" width="1146" height="749"
+       alt="SHOOT menu with the Lossless RAW row below Audio Record, its Off / On choice open">
+  <figcaption class="en">The <b>Lossless RAW</b> row in the SHOOT menu, choosing <b>On</b>.</figcaption>
+  <figcaption class="zh">SHOOT 選單裡的 <b>Lossless RAW</b> 列,選 <b>On</b>。</figcaption>
+</figure>
+<ul>
+  <li><span class="en">It starts <b>Off</b> at every power-on. Nothing is saved in the camera's
+  settings.</span><span class="zh">每次開機都從 <b>Off</b> 開始,相機設定裡不存任何東西。</span></li>
+  <li><span class="en">When the codec cannot finish a frame in time, that frame is written
+  uncompressed, exactly as the camera writes it today. A clip can therefore mix compressed and
+  uncompressed frames; no frame is dropped to make room.</span><span class="zh">編碼器來不及壓完的畫格,
+  照相機原本的方式寫成未壓縮。所以一段片子可能混著壓縮與未壓縮的畫格;不會為了趕上而丟格。</span></li>
+  <li><span class="en">The first frame of every take is always uncompressed, so DaVinci Resolve plays
+  mixed clips (<a href="#credits">thanks to CorNy</a>).</span><span class="zh">每段拍攝的第一格一定是未壓縮,
+  DaVinci Resolve 才能播放混合片段(<a href="#credits">感謝 CorNy</a>)。</span></li>
+  <li><span class="en">Compressed clips play back in the camera: the player decodes them with the
+  same hardware.</span><span class="zh">壓縮過的片段可以在機內回放:播放器用同一顆硬體解碼。</span></li>
+</ul>
+
+<!-- 3. Tested / not tested -->
+<h2 id="tested"><span class="en">What is tested and what is not</span><span class="zh">測過什麼、沒測過什麼</span></h2>
+<div class="warn en"><b>This is a test build.</b> Record something you do not need and check it
+before you shoot something that matters.</div>
+<div class="warn zh"><b>這是測試版。</b>拍重要的東西之前,先錄一段不需要的東西並檢查它。</div>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">tested on the camera</span><span class="zh">已在相機上測過</span></th><th><span class="en">not tested</span><span class="zh">沒測過</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">3K (OG3K) 12-bit 29.97p to SD: 84&ndash;87% of frames compressed, every
+        written frame decodes.</span><span class="zh">3K(OG3K)12-bit 29.97p 寫 SD:84~87% 的畫格被壓縮,
+        寫下的每一格都能解碼。</span></td>
+        <td><span class="en">This release card itself has not been booted.</span><span class="zh">這張發布卡本身還沒開機測過。</span></td></tr>
+    <tr><td><span class="en">3K 12-bit 48p to an SSD for 15 minutes: about half of the frames compressed
+        to the end, no stall.</span><span class="zh">3K 12-bit 48p 寫 SSD 15 分鐘:到最後約一半畫格被壓縮,沒有卡住。</span></td>
+        <td><span class="en">UHD, 10-bit, and frame rates not listed here.</span><span class="zh">UHD、10-bit,以及這裡沒列的格率。</span></td></tr>
+    <tr><td><span class="en">FHD and 3K compressed clips play back in the camera.</span><span class="zh">FHD 與 3K 壓縮片段可在機內回放。</span></td>
+        <td><span class="en">Long SD takes past the camera's own auto-stop.</span><span class="zh">超過相機自動停止時間的長時間 SD 錄影。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 4. Remove -->
+<h2 id="remove"><span class="en">Remove</span><span class="zh">移除</span></h2>
+<p class="en">Nothing to undo first: Lossless saves no setting. Delete the files (or take the card
+out) and switch the camera off. <a href="../guide.html#remove">More on removing</a>.</p>
+<p class="zh">不用先改回什麼:Lossless 不存任何設定。刪掉檔案(或拔卡),然後關機。
+<a href="../guide.html#remove">移除的詳細說明</a>。</p>
+
+<!-- 5. Trouble -->
+<h2 id="trouble"><span class="en">If something does not work</span><span class="zh">如果有東西不能用</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">what happens</span><span class="zh">發生什麼</span></th><th><span class="en">what to do</span><span class="zh">怎麼辦</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">No Lossless RAW row in the SHOOT menu</span><span class="zh">SHOOT 選單沒有 Lossless RAW</span></td>
+        <td><span class="en">The card did not load. Check that all four boxes turned white at start-up;
+        see <a href="../guide.html#trouble">general problems</a>.</span><span class="zh">卡沒有載入。
+        確認開機時四格都變白;見<a href="../guide.html#trouble">一般問題</a>。</span></td></tr>
+    <tr><td><span class="en">Files are as big as before</span><span class="zh">檔案跟以前一樣大</span></td>
+        <td><span class="en">Lossless RAW is Off again after every power-on. Set it to On.</span><span class="zh">每次開機 Lossless RAW 都回到 Off。把它設成 On。</span></td></tr>
+    <tr><td><span class="en">Some frames are big, some small</span><span class="zh">有些畫格大、有些小</span></td>
+        <td><span class="en">Expected: frames the codec could not finish in time are written
+        uncompressed.</span><span class="zh">正常:編碼器來不及壓的畫格會寫成未壓縮。</span></td></tr>
+    <tr><td><span class="en">The camera does not respond</span><span class="zh">相機沒反應</span></td>
+        <td><span class="en">Take the battery out (USB unplugged). Bring what you saw to the
+        <a href="https://discord.gg/WVTCcpGUYC">Discord</a>.</span><span class="zh">把電池拿出來(不插 USB 線)。
+        把你看到的情況帶到 <a href="https://discord.gg/WVTCcpGUYC">Discord</a>。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="../releases/fpsup-lossless-v0.1.2test/README.txt">README.txt</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
+</footer>
+
+<script src="../assets/lang.js?v=7c49866d" defer></script>
+</body>
+</html>

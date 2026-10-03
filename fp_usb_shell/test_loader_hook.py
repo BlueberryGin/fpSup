@@ -65,7 +65,8 @@ def build(extra=(), hook=True):
     subprocess.run([sys.executable, '-B', str(HERE / 'build_autorun.py'),
                     '--loader', *(['--loader-hook'] if hook else []),
                     '--loader-hook-mark', hex(MARK),
-                    '--out', str(out / 'AutoRun.txt'), *extra],
+                    '--out', str(out / 'AutoRun.txt'),
+                    *([] if '--four-box-bar' in extra else ['--no-four-box-bar']), *extra],
                    check=True, capture_output=True)
     text = (out / 'AutoRun.txt').read_text()
     sets = [(int(a, 16), int(v, 16)) for a, v in

@@ -17,7 +17,7 @@
 
 #ifdef LH_RESTORE
 /* The power-off restore (LH_RESTORE, every --loader card) and the loader hook
- * (LOADER_HOOK, only the merge page's Fast Start 2).  See LOADER_V2.md.
+ * (LOADER_HOOK, only the merge page's Fast Start 3).  See LOADER_V2.md.
  *
  * Every firmware word this file overwrites is copied first into a journal in
  * memory from the allocator, and a power-off callback writes the journal back.

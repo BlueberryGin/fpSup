@@ -1,11 +1,11 @@
 ---
 name: fp-merged-card
-description: Building a SIGMA fp card to test with — one product or several (open gate, the gyro logger, the USB shell), with or without Fast Start 2, where a power-switch restart loads through the loader hook without the AutoRun and a cold start runs the short AutoRun from the settings block — and getting it onto the camera and reading back which boot path it took. Use when a change needs verifying on the camera, when a card should boot fast or instantly, when a page-composed card has to be reproduced offline, or when a test result has to be attached to specific bytes. Covers what a script-built card shares with the ones fpSup-Merge hands out, and where they differ.
+description: Building a SIGMA fp card to test with — one product or several (open gate, the gyro logger, the USB shell), with or without Fast Start 3, where a power-switch restart loads through the loader hook without the AutoRun and a cold start runs the short AutoRun from the settings block — and getting it onto the camera and reading back which boot path it took. Use when a change needs verifying on the camera, when a card should boot fast or instantly, when a page-composed card has to be reproduced offline, or when a test result has to be attached to specific bytes. Covers what a script-built card shares with the ones fpSup-Merge hands out, and where they differ.
 ---
 
 # A card to test with
 
-Build any combination here, Fast Start 2 included. The cards people download
+Build any combination here, Fast Start 3 included. The cards people download
 come from `fpSup/tools/card-composer/index.html`; that is about distribution and
 the checks the page runs, not about what a script is allowed to make (2026-09-20,
 the user's call).
@@ -26,7 +26,7 @@ does not reproduce. **Run it after changing a card**, whatever built the card.
 - **The loader hook, opt-in (`--loader-hook`).** `0xC03DA420` points at the
   loader's `+4` entry: a power-switch restart loads ~1.4 s after power-on with no
   AutoRun. Single-product releases do not carry it; the merge page's
-  **Fast Start 2** does, together with the settings-block fast path and the
+  **Fast Start 3** does, together with the settings-block fast path and the
   four-box splash.
 
 Design, camera results, the open case: `projects/usb-shell-sup/notes/LOADER_V2.md`.
@@ -60,7 +60,7 @@ does and prints how it differs from the page's card.
 with: every section except destination 0, from the release, on the current
 loader and stage2, then a check that all of them arrived unchanged.
 
-## Fast Start 2
+## Fast Start 3
 
 ```sh
 python3 projects/open-gate/build/build_og3k_gyro.py --dev-card --fast \
@@ -87,7 +87,7 @@ word stage2 checks all come out of one `--store-boot --loader-hook` run. Mixed
 from two builds they disagree at boot, with no shell to recover with. stage2
 also refuses to arm the hook if the loader's `+4` is not the entry it expects.
 
-Fast Start 2 is dev-card or page packaging only. A single-product release must
+Fast Start 3 is dev-card or page packaging only. A single-product release must
 not carry it: it writes the settings block, which survives a battery pull and
 outlives deleting `AutoRun.txt`. `release_card.py` refuses a card with the abort.
 
@@ -111,7 +111,7 @@ const ctx=vm.createContext({CAT, atob:s=>Buffer.from(s,'base64').toString('binar
                             btoa:s=>Buffer.from(s,'binary').toString('base64')});
 vm.runInContext(block('compose')+`globalThis.api={composed,composeVshl,composeAutorun,runChecks,
   select(ids,fast,push){on.clear();ids.forEach(i=>on.add(i));fastOn=fast;pushOn=push;}};`, ctx);
-const api=ctx.api; api.select(['shell','gyro','og3k'], true /* Fast Start 2 */, false);
+const api=ctx.api; api.select(['shell','gyro','og3k'], true /* Fast Start 3 */, false);
 const c=api.composed(), v=api.composeVshl(c.recs,c.entry), ar=api.composeAutorun('fpSup-X!');
 // checks: api.runChecks(c.recs, v, 'fpSup-X!', c.entry, c.entries).every(x=>x.ok)
 // write ar, v.bytes, and CAT.fast.ui[] as FPSUPUI/<n>
@@ -204,7 +204,7 @@ bytes from `releases/fpsup-<product>-v<version>/`; do not rebuild and assume.
 
 ## Before saying a card works
 
-- The banner names the build; a dev card should say so. (Fast Start 2's instant
+- The banner names the build; a dev card should say so. (Fast Start 3's instant
   path shows the four-box screen, not the banner.)
 - Boot with USB **unplugged**, then attach: the gadget is built on attach and the
   descriptor patches have to land first. Power off unplugged too, or every start

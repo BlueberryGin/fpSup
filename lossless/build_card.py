@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the fpLossless TEST card: direct compression + USB shell + Fast Start 2.
+"""Build the fpLossless TEST card: direct compression + USB shell + Fast Start 3.
 
     python3 -B lossless/build_card.py --out /absolute/new/directory
 
@@ -11,7 +11,7 @@ Writes AutoRun.txt and fpSup.BIN into a NEW directory (refuses a non-empty
 one), plus BUILD_NOTES.md and SHA256SUMS. It never writes a card.
 
 WHAT IS IN IT (manifest.json requested_test_build): the current USB shell from
-fp_usb_shell, Fast Start 2 (--store-boot --loader-hook --four-box-bar, one
+fp_usb_shell, Fast Start 3 (--store-boot --loader-hook --four-box-bar, one
 packaging, SUP_BUILD_RULES §5), and the lossless launcher as a run-in-place
 section after the shell's worker. No menu, no OpenGate, no gyro.
 
@@ -335,7 +335,7 @@ def main():
                          'projects/open-gate/build, current og3k_ui.S): every fixed '
                          'section and its entry, after the lossless launcher')
     ap.add_argument('--plain', action='store_true',
-                    help='no Fast Start 2 (a single-product card: plain --loader)')
+                    help='no Fast Start 3 (a single-product card: plain --loader)')
     ap.add_argument('--no-shell', action='store_true', help='leave the USB shell out')
     ap.add_argument('--banner', default=None)
     ap.add_argument('--add-sup', action='append', default=[], choices=('lcdflip',),
@@ -380,7 +380,7 @@ def main():
             cmd += ['--boot-bin', f'{tmp / (sup.NAME + ".bin")}:0']
             added[sup.NAME] = (sblob, sfacts)
         if not a.plain:
-            cmd += ['--store-boot', '--loader-hook', '--four-box-bar']     # Fast Start 2
+            cmd += ['--store-boot', '--loader-hook', '--four-box-bar']     # Fast Start 3
         if a.no_shell:
             cmd += ['--no-shell']
         for site, (stock, _) in (sorted(SITES.items()) if not a.no_lossless else []):

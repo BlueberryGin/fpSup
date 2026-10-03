@@ -54,7 +54,7 @@ OpenGate 是完整專案的 [build_og3k_gyro.py](../projects/open-gate/build/bui
    關機時回呼把 journal 寫回，相機以原廠狀態關機。
 5. 呼叫 header entry；有多個入口就依序呼叫，**每個都必須返回**。
 6. stage2 做 pass 2：放置 pool-offset 區段，然後再次 D/I publication。
-7. 僅 Fast Start 2 封裝具有 store provision、abort 與 loader hook：
+7. 僅 Fast Start 3 封裝具有 store provision、abort 與 loader hook：
    只有確實有 AutoRun 在跑時才安排 abort；並把 `0xC03DA420`（啟動 AutoRun 的那條呼叫）指向 loader 的 `+4` 入口，
    讓暖開機不跑 AutoRun 就載入。stage2 返回，loader 釋放 staging。
    **Fast 命中且載入完成**時，下一個 echo 執行 abort，跳過慢路徑；
@@ -102,7 +102,7 @@ OpenGate 是完整專案的 [build_og3k_gyro.py](../projects/open-gate/build/bui
 
 ## 5. Fast start 與「只換 BIN」
 
-合併頁面的選項是 **Fast Start 2**：這條設定區快路徑加上 loader hook，由同一次
+合併頁面的選項是 **Fast Start 3**：這條設定區快路徑加上 loader hook，由同一次
 `--store-boot --loader-hook --four-box-bar` 建置產生。暖開機時開機後約 1.4 秒就載入、不跑 AutoRun，
 顯示四格畫面；冷開機時跑短版 Fast AutoRun。單一產品發布卡兩者都不帶。
 
