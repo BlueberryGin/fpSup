@@ -22,6 +22,7 @@ const ctx = vm.createContext({CAT,
   btoa: s => Buffer.from(s, 'binary').toString('base64')});
 vm.runInContext(block('compose') + `
   globalThis.api = {composed, composeVshl, composeAutorun, runChecks, templateName,
+    capAutorun, capStage2,
     select(ids, fast, push) {
       on.clear(); ids.forEach(id => on.add(id)); fastOn = fast; pushOn = push;
     }};`, ctx, {filename: page + '#compose'});
@@ -76,7 +77,7 @@ function checkEntries(cards, out) {
   // Required product order is worker -> gyro (or gyro-base, exclusive with it)
   // -> OG restore, regardless of the order checkboxes were clicked. Do not
   // derive this expectation from sel().
-  const ordered = ['shell', 'gyro', 'gyro-base', 'og3k', 'og2k'].filter(id => cards.some(c => c.id === id));
+  const ordered = ['shell', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view'].filter(id => cards.some(c => c.id === id));
   const expected = ordered.map(id => sourceEntry(byId.get(id), out)).filter(Boolean);
   if (expected.length < 2) {
     assert.equal(out.entry, expected[0] || 0);
@@ -125,8 +126,8 @@ for (let mask = 1; mask < 2 ** CAT.cards.length; mask++) {
         assert.equal(bad.length, 0, bad.join('\n'));
         assert.equal(auto.length, CAT.pad_to);
         assert(auto.endsWith('\n'));
-        const mode = `${fast}/${api.templateName()}`;
-        if (autoByMode.has(mode)) assert.equal(auto, autoByMode.get(mode), 'payload selection changed AutoRun');
+        const mode = `${fast}/${api.templateName()}/${built.cap}`;
+        if (autoByMode.has(mode)) assert.equal(auto, autoByMode.get(mode), 'payload selection changed AutoRun at the same read cap');
         else autoByMode.set(mode, auto);
         const out = parse(built.bytes);
         assert.equal(out.used, built.used);
@@ -174,20 +175,59 @@ for (const fast of [false, true]) {
   assert(!plain.includes('@@BANNER@@'), 'a template still carries the banner placeholder');
 }
 
-// Crossing the usual USB-write padding is legal; crossing the loader's read
-// capacity must be a visible failed check, not an exception that blanks the UI.
+// Crossing the usual USB-write padding is legal, and so is crossing the default
+// read: the page raises the loader's read to the next 4 KiB.  Crossing the
+// ceiling must be a visible failed check, not an exception that blanks the UI.
+const CP = CAT.cap_patch;
+const capOf = need => need <= CAT.read_cap ? CAT.read_cap
+  : Math.min(CP.max, Math.ceil(need / CP.step) * CP.step);
 api.select(['gyro'], false, false);
-for (const need of [CAT.pad_to, CAT.pad_to + 4, CAT.read_cap, CAT.read_cap + 4]) {
+for (const need of [CAT.pad_to, CAT.pad_to + 4, CAT.read_cap, CAT.read_cap + 4,
+                    CAT.read_cap + CP.step, CP.max, CP.max + 4]) {
   const helperSize = (decode(CAT.stage2).length + 3) & ~3;
   const records = [CAT.stage2, {a: 0xC1000000, k: 'sec', l: 'padding boundary test',
     b: Buffer.alloc(need - 32 - helperSize).toString('base64')}];
   const built = api.composeVshl(records, 0);
   assert.equal(built.used, need);
-  assert.equal(built.bytes.length, Math.max(need, need <= CAT.pad_to ? CAT.pad_to : CAT.read_cap));
+  assert.equal(built.cap, capOf(need));
+  assert.equal(built.bytes.length, Math.max(need, need <= CAT.pad_to ? CAT.pad_to : capOf(need)));
   const failures = api.runChecks(records, built, 'fpSup-Test!', 0, []).filter(c => !c.ok);
-  assert.equal(failures.length, need > CAT.read_cap ? 1 : 0);
-  if (need > CAT.read_cap)
+  assert.equal(failures.length, need > CP.max ? 1 : 0);
+  if (need > CP.max)
     assert.equal(failures[0].t, 'The loader can read the whole card');
+}
+
+// The page's rewrite of the loader's read is a rebuild, byte for byte: the
+// AutoRun build_autorun writes for --read-cap, and on a fast card the stage2
+// whose magic is the hash of that loader.  Without this the page could hand
+// out a fast card whose store_boot and stage2 disagree -- silent, at boot.
+{
+  const {execFileSync} = require('node:child_process');
+  const os = require('node:os');
+  const shell = path.join(root, 'fp_usb_shell');
+  const flags = {plain: ['--no-shell'], shell: ['--no-ep-patches']};
+  let rebuilt = 0;
+  for (const cap of [CAT.read_cap + CP.step, 0x14000, CP.max])
+    for (const fast of [false, true])
+      for (const name of Object.keys(flags)) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-'));
+        execFileSync('python3', ['-B', path.join(shell, 'build_autorun.py'), '--loader',
+          ...(fast ? ['--store-boot', '--loader-hook'] : []), '--four-box-bar', ...flags[name],
+          '--banner', '@@BANNER@@', '--vshl-entry', '0xC072E064',
+          '--read-cap', '0x' + cap.toString(16), '--out', path.join(dir, 'A.txt')],
+          {cwd: shell, stdio: 'ignore'});
+        const want = fs.readFileSync(path.join(dir, 'A.txt'), 'utf8').split('# pad -- see PAD_TO')[0];
+        const tpl = (fast ? CAT.fast.templates : CAT.templates)[name];
+        assert.equal(api.capAutorun(tpl, cap), want, `AutoRun ${name} ${fast ? 'fast' : ''} at 0x${cap.toString(16)}`);
+        if (fast) {
+          const bin = parse(fs.readFileSync(path.join(dir, 'fpSup.BIN')));
+          assert(Buffer.from(api.capStage2(decode(CAT.fast.stage2), cap)).equals(bin.records[0].bytes),
+                 `fast stage2 at 0x${cap.toString(16)}`);
+        }
+        fs.rmSync(dir, {recursive: true});
+        rebuilt++;
+      }
+  console.log(`  read-cap rewrite == build_autorun --read-cap: ${rebuilt} builds`);
 }
 
 // Verify the embedded AutoRun machine code, not merely the current .S file:
@@ -224,4 +264,4 @@ for (const [mode, auto] of autoByMode) {
 }
 console.log(`PASS ${selections} legal selections / ${cases} normal-Fast-push cases; ` +
   `${frozenChecks} single cards keep every released section; entry relocation/order, payload-independent AutoRun, ` +
-  `4 padding/read-cap boundaries, embedded D/I and Fast stack.`);
+  `7 padding/read-cap boundaries, read-cap rewrite, embedded D/I and Fast stack.`);

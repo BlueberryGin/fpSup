@@ -492,6 +492,92 @@ function templateName(){
   return !hasShell() ? 'plain' : pushOn ? 'shellpush' : 'shell';
 }
 
+/* How much of the file the loader is told to read (2026-10-02).
+   loader.S reads MAXLEN into a buffer of MAXLEN + 4 KiB, each one MOV, so the
+   page can rewrite them without moving a byte of the loader: CAT.read_cap when
+   the card fits it, which leaves every such card exactly as it was, else the
+   smallest 4 KiB multiple that holds it, up to CAT.cap_patch.max.  A fast card
+   also carries the loader's magic -- sha256 of its bytes, in store_boot and in
+   stage2 -- so that is recomputed from the rewritten loader.  build_catalogue
+   finds these words by diffing real builds and checks its Python twin
+   (patch_cap) against them; test_compose.js checks this against both. */
+const CP = CAT.cap_patch;
+function capFor(need){
+  if (need <= CAT.read_cap) return CAT.read_cap;
+  return Math.min(CP.max, Math.ceil(need / CP.step) * CP.step);
+}
+function movImm(word, v){
+  for (let rot = 0; rot < 16; rot++){
+    const imm = rot ? ((v << (2 * rot)) | (v >>> (32 - 2 * rot))) >>> 0 : v;
+    if (imm < 256) return ((word & 0xFFFFF000) | (rot << 8) | imm) >>> 0;
+  }
+  throw new Error(hex(v) + ' is not a MOV immediate');
+}
+function sha256(bytes){
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const n = bytes.length, len = ((n + 9 + 63) >> 6) << 6, m = new Uint8Array(len);
+  m.set(bytes); m[n] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(len - 8, Math.floor(n / 0x20000000)); dv.setUint32(len - 4, (n << 3) >>> 0);
+  const W = new Uint32Array(64), r = (x, k) => (x >>> k) | (x << (32 - k));
+  for (let o = 0; o < len; o += 64){
+    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(o + 4 * i);
+    for (let i = 16; i < 64; i++){
+      const a = W[i-15], b = W[i-2];
+      W[i] = (W[i-16] + (r(a,7) ^ r(a,18) ^ (a >>> 3)) + W[i-7] + (r(b,17) ^ r(b,19) ^ (b >>> 10))) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++){
+      const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + W[i]) >>> 0;
+      const t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+  }
+  return H;
+}
+const MEMSET = /^mem set (0x[0-9A-F]{8}) (0x[0-9A-F]{8})/gm;
+/* The words a template's `mem set` lines would write, with the cap applied. */
+function capWords(text, cap){
+  const w = new Map([...text.matchAll(MEMSET)].map(m => [Number(m[1]), Number(m[2])]));
+  const set = new Map([[CP.pool_at, movImm(w.get(CP.pool_at), cap + 0x1000)],
+                       [CP.maxlen_at, movImm(w.get(CP.maxlen_at), cap)]]);
+  set.forEach((v, a) => w.set(a, v));
+  if (w.has(CP.magic_at)){
+    const words = [];
+    for (let a = CAVE_LOW; w.has(a); a += 4) words.push(w.get(a));
+    const buf = new Uint8Array(words.length * 4), dv = new DataView(buf.buffer);
+    words.forEach((x, i) => dv.setUint32(4 * i, x, true));
+    set.set(CP.magic_at, sha256(buf)[0]);
+  }
+  return set;
+}
+const CAVE_LOW = 0xC072DE64;
+function capAutorun(text, cap){
+  if (cap === CAT.read_cap) return text;
+  const set = capWords(text, cap);
+  return text.replace(MEMSET, (line, a) => set.has(Number(a))
+    ? 'mem set ' + a + ' ' + hex(set.get(Number(a))) : line);
+}
+function capStage2(bytes, cap){
+  if (cap === CAT.read_cap) return bytes;
+  const magic = capWords(CAT.fast.templates.plain, cap).get(CP.magic_at);
+  const out = new Uint8Array(bytes), dv = new DataView(out.buffer), o = CP.stage2_magic;
+  const enc = (w, v) => ((w & 0xFFF0F000) | (((v >>> 12) & 0xF) << 16) | (v & 0xFFF)) >>> 0;
+  dv.setUint32(o, enc(dv.getUint32(o, true), magic & 0xFFFF), true);
+  dv.setUint32(o + 4, enc(dv.getUint32(o + 4, true), magic >>> 16), true);
+  return out;
+}
+
 function composeVshl(recs, entry){
   const blobs = recs.map(r => b64(r.b));
   const bodyLen = blobs.reduce((s,b) => s + b.length + ((-b.length)&3), 0);
@@ -499,7 +585,8 @@ function composeVshl(recs, entry){
      The padding is not a limit on what a card may carry -- it is there because
      `putfile` writes over USB and cannot shorten a file, so a smaller binary
      would leave the tail of the last one behind.  The limit is the loader's
-     read: MAXLEN out of loader.S, which is CAT.read_cap.
+     read: CAT.read_cap (MAXLEN out of loader.S), raised by capFor when the
+     selection needs it.
      A selection that does not fit the usual 32 KiB is therefore padded to the
      read cap instead of refused -- four products plus an uploaded payload
      reach 33 KiB, and nothing about that is a problem the camera has.  Every
@@ -508,7 +595,9 @@ function composeVshl(recs, entry){
      wrote off the end of this array and threw -- and a throw in here takes the
      whole page's render with it, including the check whose job was to say so. */
   const need = 16 + recs.length*8 + bodyLen;
-  const pad = need <= CAT.pad_to ? CAT.pad_to : CAT.read_cap;
+  const cap = capFor(need);
+  if (recs.length && recs[0] === CAT.fast.stage2) blobs[0] = capStage2(blobs[0], cap);
+  const pad = need <= CAT.pad_to ? CAT.pad_to : cap;
   const out = new Uint8Array(Math.max(pad, need));
   const dv = new DataView(out.buffer);
   out.set([0x56,0x42,0x49,0x4E]);
@@ -520,16 +609,20 @@ function composeVshl(recs, entry){
     dv.setUint32(t, r.a >>> 0, true); dv.setUint32(t+4, blobs[i].length, true); t += 8;
     out.set(blobs[i], o); o += blobs[i].length + ((-blobs[i].length)&3);
   });
-  return {bytes: out, used: o, pad, payload: blobs.reduce((s,b)=>s+b.length,0)};
+  return {bytes: out, used: o, pad, cap, payload: blobs.reduce((s,b)=>s+b.length,0)};
 }
-function composeAutorun(banner){
+function composeAutorun(banner, cap){
+  /* The AutoRun spells the loader out, and the loader says how much to read:
+     it belongs to the BIN it is shipped with.  Without a cap, the current
+     selection's. */
+  if (cap === undefined){ const c = composed(); cap = composeVshl(c.recs, c.entry).cap; }
   /* Every template draws the four-box screen now and carries no text banner, so
      there is normally nothing to fill in.  Should a template ever carry the
      placeholder again, it gets the name reduced to what the OSD readout can
      show -- printable ASCII, CAT.banner_max long -- so no text from anywhere
      can add a line to the file. */
   const safe = String(banner).replace(/[^\x20-\x7E]/g, '').slice(0, CAT.banner_max) || 'fpSup!';
-  let t = (fastOn ? CAT.fast.templates : CAT.templates)[templateName()]
+  let t = capAutorun((fastOn ? CAT.fast.templates : CAT.templates)[templateName()], cap)
             .split('@@BANNER@@').join(safe);
   const f = CAT.filler, P = CAT.pad_to;
   /* P - 1, not P: the last byte is the newline below, and a run of filler that
@@ -574,8 +667,10 @@ function runChecks(recs, vshl, banner, entry, entriesNow){
      inside the shared pool.  Its offsets and a payload's pool offsets are now
      two address spaces, and every destination-zero section has offset zero, so
      it flagged all of them: the page told everyone not to use any card. */
-  c.push({ok: vshl.used <= CAT.read_cap, t:'The loader can read the whole card',
-          d: vshl.used.toLocaleString()+' of '+CAT.read_cap.toLocaleString()+' B'
+  c.push({ok: vshl.used <= vshl.cap, t:'The loader can read the whole card',
+          d: vshl.used.toLocaleString()+' of '+vshl.cap.toLocaleString()+' B'
+             + (vshl.cap === CAT.read_cap ? '' : ' (raised from '
+                + CAT.read_cap.toLocaleString() + ', at most ' + CP.max.toLocaleString() + ')')
              + ', padded to '+vshl.pad.toLocaleString()});
 
   /* The cave is not one flat region and an earlier version of this check
@@ -709,6 +804,9 @@ function runChecks(recs, vshl, banner, entry, entriesNow){
   const known = new Set([CAT.stage2.b, CAT.fast.stage2.b].concat(
     CAT.cards.map(k => k.records.length && (k.records[0].a >>> 0) === 0
                        ? k.records[0].b : null)));
+  // A fast card this page made with a raised read cap carries its magic.
+  for (let cap = CAT.read_cap + CP.step; replaced && cap <= CP.max; cap += CP.step)
+    known.add(b64enc(capStage2(b64(CAT.fast.stage2.b), cap)));
   const strangers = !replaced ? [] : sel().filter(k => k.upload
     && k.records.length && (k.records[0].a >>> 0) === 0
     && !known.has(k.records[0].b));
@@ -963,7 +1061,7 @@ function render(){
   const {recs, entry, entries} = composed();
   const banner = cardName();
   const vshl = composeVshl(recs, entry);
-  const autorun = composeAutorun(banner);
+  const autorun = composeAutorun(banner, vshl.cap);
   const cmds = autorun.split('\n').filter(l => l.trim() && !l.trimStart().startsWith('#')).length;
   /* The footer's promise is true of every card but a fast one, and a page that
      keeps making it while the option is ticked is the page lying. */

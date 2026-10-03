@@ -62,7 +62,7 @@ def push_sections():
             for address, word, *_ in PUSH]
 
 
-def build_fast():
+def build_fast(extra=()):
     """The fast path, as three carried blobs rather than a rule.
 
     A card boots fast when its loader is already in the settings block, and that
@@ -97,7 +97,7 @@ def build_fast():
         f = tmp / f'{name}.txt'
         r = subprocess.run([sys.executable, str(SHELL_DIR / 'build_autorun.py'),
                             '--loader', '--store-boot', '--loader-hook',
-                            '--four-box-bar', *flags,
+                            '--four-box-bar', *flags, *extra,
                             '--banner', '@@BANNER@@',
                             '--vshl-entry', '0xC072E064', '--out', str(f)],
                            capture_output=True, text=True)
@@ -144,6 +144,110 @@ def build_fast():
     return out, stage2, abort, ui
 
 
+READ_CAP_MAX = 0x1F000          # build_autorun --read-cap's ceiling
+MEMSET = re.compile(r'^mem set (0x[0-9A-F]{8}) (0x[0-9A-F]{8})', re.M)
+
+
+def arm_mov_imm(word, value):
+    """`word` (a MOV immediate) re-encoded for `value`, the way the assembler
+    does: the smallest rotation that holds it."""
+    for rot in range(16):
+        imm8 = ((value << (2 * rot)) | (value >> (32 - 2 * rot))) & 0xFFFFFFFF \
+            if rot else value
+        if imm8 < 256:
+            return (word & 0xFFFFF000) | (rot << 8) | imm8
+    raise SystemExit(f'0x{value:X} is not a MOV immediate')
+
+
+def movw_movt(blob, off, value):
+    """The movw/movt pair at `off` re-pointed at `value`."""
+    lo, hi = struct.unpack_from('<II', blob, off)
+    enc = lambda w, v: (w & 0xFFF0F000) | ((v >> 12) & 0xF) << 16 | (v & 0xFFF)
+    out = bytearray(blob)
+    struct.pack_into('<II', out, off, enc(lo, value & 0xFFFF), enc(hi, value >> 16))
+    return bytes(out)
+
+
+def loader_magic(words):
+    loader, a = b'', CAVE_LOW
+    while a in words:
+        loader += struct.pack('<I', words[a])
+        a += 4
+    return int(hashlib.sha256(loader).hexdigest()[:8], 16)
+
+
+def patch_cap(text, cap, spec, stage2=None):
+    """What fpSup-Merge does to a template (and a fast stage2) for a card that
+    needs more than the default read: the two loader immediates, then -- on a
+    fast card -- the magic, which is a hash of the loader those words are in.
+    Kept beside build_cap_patch so the page's JavaScript has a Python twin that
+    is checked against real builds."""
+    words = {int(a, 16): int(v, 16) for a, v in MEMSET.findall(text)}
+    new = {spec['pool_at']: arm_mov_imm(words[spec['pool_at']], cap + 0x1000),
+           spec['maxlen_at']: arm_mov_imm(words[spec['maxlen_at']], cap)}
+    words.update(new)
+    magic = loader_magic(words)
+    if spec['magic_at'] in words and stage2 is not None:
+        new[spec['magic_at']] = magic
+        stage2 = movw_movt(stage2, spec['stage2_magic'], magic)
+    text = MEMSET.sub(lambda m: f'mem set {m[1]} 0x{new[int(m[1], 16)]:08X}'
+                      if int(m[1], 16) in new else m[0], text)
+    return text, stage2
+
+
+def build_cap_patch(templates_out, fast_tpl, fast_stage2):
+    """Where the read capacity lives in the templates, found by building them
+    again at the ceiling and diffing, not by naming addresses here.
+
+    The loader reads MAXLEN bytes into a buffer of MAXLEN + 4 KiB; both are one
+    MOV each, so the loader's length never moves.  A fast card adds a third
+    word: store_boot's magic is sha256 of the loader, and stage2 carries the
+    same magic as a movw/movt pair.  Anything else that differs means the page
+    cannot do this by rewriting words, and the build stops."""
+    base = read_cap()
+    big, _ = build_templates(['--read-cap', f'0x{READ_CAP_MAX:X}'])
+    fbig, fstage2, _, _ = build_fast(['--read-cap', f'0x{READ_CAP_MAX:X}'])
+    spec = {}
+    for name in TEMPLATE_FLAGS:
+        a = dict(MEMSET.findall(templates_out[name]))
+        b = dict(MEMSET.findall(big[name]))
+        if MEMSET.sub('', templates_out[name]) != MEMSET.sub('', big[name]) \
+                or a.keys() != b.keys():
+            raise SystemExit(f'{name}: --read-cap changes more than mem set values')
+        diff = {int(k, 16): (int(a[k], 16), int(b[k], 16)) for k in a if a[k] != b[k]}
+        if len(diff) != 2:
+            raise SystemExit(f'{name}: --read-cap changed {len(diff)} words, not 2')
+        for at, (old, new) in diff.items():
+            key = ('pool_at' if arm_mov_imm(old, base + 0x1000) == old else
+                   'maxlen_at' if arm_mov_imm(old, base) == old else None)
+            if key is None or spec.setdefault(key, at) != at:
+                raise SystemExit(f'{name}: 0x{at:08X} is not a loader size word')
+    a = dict(MEMSET.findall(fast_tpl['plain']))
+    b = dict(MEMSET.findall(fbig['plain']))
+    extra = [int(k, 16) for k in a if a[k] != b[k]
+             and int(k, 16) not in (spec['pool_at'], spec['maxlen_at'])]
+    if len(extra) != 1:
+        raise SystemExit(f'fast: --read-cap changed {len(extra)} other words, not 1')
+    spec['magic_at'] = extra[0]
+    d = [i for i in range(len(fast_stage2)) if fast_stage2[i] != fstage2[i]]
+    if len(fast_stage2) != len(fstage2) or not d or d[-1] - d[0] >= 8:
+        raise SystemExit('fast stage2: --read-cap changed more than one movw/movt')
+    spec['stage2_magic'] = d[0] & ~3
+    spec.update(min=base, max=READ_CAP_MAX, step=0x1000)
+    # The Python twin against the real thing, at the ceiling and in between.
+    mid = 0x14000
+    mtpl, _ = build_templates(['--read-cap', f'0x{mid:X}'])
+    mfast, mstage2, _, _ = build_fast(['--read-cap', f'0x{mid:X}'])
+    for cap, tpl, ftpl, fs2 in ((READ_CAP_MAX, big, fbig, fstage2), (mid, mtpl, mfast, mstage2)):
+        for name in TEMPLATE_FLAGS:
+            if patch_cap(templates_out[name], cap, spec)[0] != tpl[name]:
+                raise SystemExit(f'{name}: patching to 0x{cap:X} is not a rebuild')
+            got = patch_cap(fast_tpl[name], cap, spec, fast_stage2)
+            if got != (ftpl[name], fs2):
+                raise SystemExit(f'fast {name}: patching to 0x{cap:X} is not a rebuild')
+    return spec
+
+
 ABORT_AT = 0xC072F080           # where the abort routine is placed in the cave
 CAVE_LOW = 0xC072DE64           # where the AutoRun spells the loader out
 STORE_BOOT_AT = 0xC072F700      # and where it puts the bootstrap that checks it
@@ -168,7 +272,7 @@ def trampoline():
     return assemble(src, []), symbols(src, [])['table']
 
 
-def build_templates():
+def build_templates(extra=()):
     """Build each AutoRun template and the current canonical stage2 helper."""
     tmp = pathlib.Path(tempfile.mkdtemp(prefix='tpl-'))
     out, stage2 = {}, None
@@ -176,7 +280,7 @@ def build_templates():
         f = tmp / f'{name}.txt'
         r = subprocess.run([sys.executable,
                             str(ROOT / 'fpSup' / 'fp_usb_shell' / 'build_autorun.py'),
-                            '--loader', '--four-box-bar', *flags,
+                            '--loader', '--four-box-bar', *flags, *extra,
                             '--banner', '@@BANNER@@',
                             '--vshl-entry', '0xC072E064', '--out', str(f)],
                            capture_output=True, text=True)
@@ -320,12 +424,12 @@ PRODUCTS = {
     'gyro-base': dict(id='gyro-base', name='fpSup-Gyro-Base', category='shooting',
                       guide='guide/gyro-base.html',
                       excl=['gyro'],
-                      desc='Writes the gyro and accelerometer as a raw .GYR in '
-                           '\\GYRO\\ beside every take -- every sample, the camera '
-                           'only streams -- converted afterwards in the browser. '
-                           'Needs an empty GYRO folder on every volume you record '
-                           'to. Same code as the Gyro edition; not with it: they '
-                           'hook the same places.'),
+                      desc='Writes the gyro and accelerometer as a raw .GYR in the '
+                           'ROOT of the disk you record to -- every sample, the '
+                           'camera only streams -- with the .json lens profile '
+                           'beside it; the .GYR is converted afterwards in the '
+                           'browser. No folder to make. Same code as the Gyro '
+                           'edition; not with it: they hook the same places.'),
     'og3k':     dict(id='og3k', name='fpSup-OG3K', category='shooting', excl=['og2k'],
                      guide='guide/og3k.html',
                      desc='3024×2010, DNG cropped to 3008×2000, eight frame rates, '
@@ -606,7 +710,7 @@ def read_cap():
     the loader staged the file inside the same 1 MiB pool the payload used: the
     gyro logger's blob at pool+0x44000 cleared pool+0x8000..0x28000 by design.
 
-    The loader asks the allocator for its own 64 KiB now and hands it back on the
+    The loader asks the allocator for its own staging buffer now and hands it back on the
     way out, so those offsets are in a buffer nobody else can name, and comparing
     them with a payload's pool offsets was comparing two address spaces.  Every
     destination-zero section has offset zero and was flagged by it -- which is to
@@ -683,6 +787,10 @@ def main():
     templates_out, stage2 = build_templates()
     tramp, tramp_tbl = trampoline()
     fast_tpl, fast_stage2, fast_abort, fast_ui = build_fast()
+    cap_spec = build_cap_patch(templates_out, fast_tpl, fast_stage2)
+    print(f'  read cap 0x{cap_spec["min"]:X}..0x{cap_spec["max"]:X}: loader words '
+          f'0x{cap_spec["pool_at"]:08X}/0x{cap_spec["maxlen_at"]:08X}, magic '
+          f'0x{cap_spec["magic_at"]:08X}, stage2 +{cap_spec["stage2_magic"]}')
     for name in TEMPLATE_FLAGS:
         n = len([l for l in autorun(templates_out[name], 'X').splitlines()
                  if l.strip() and not l.lstrip().startswith('#')])
@@ -699,7 +807,8 @@ def main():
                   f'composes the current shared loader')
 
     cap = read_cap()
-    cat = dict(cards=out_cards, pad_to=PAD_TO, read_cap=cap,
+    # read_cap is the default; the page raises it per card (cap_patch).
+    cat = dict(cards=out_cards, pad_to=PAD_TO, read_cap=cap, cap_patch=cap_spec,
                banner_max=banner_max(),
                dram_image=list(DRAM_IMAGE), pool_size=POOL_SIZE,
                entry_at=0xC072E064, park_at=PARK_AT,
