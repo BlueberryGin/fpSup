@@ -109,6 +109,8 @@ struct fpl_frame_hold {
     uint32_t lane_result, lane_failed, abandoned;
     uint32_t order;                     /* arrival order among the lanes */
     uint32_t dma_failed;                /* header DMA refused: CPU copy used */
+    uint32_t stalls;                    /* jobs the engine never finished: given
+                                           up on, the frame sent as it was */
     uint32_t lanes_full;                /* lane 0 only: a frame passed because
                                            every lane was busy */
     struct fpl_codec_input lane_in;

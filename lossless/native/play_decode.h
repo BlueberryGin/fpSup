@@ -19,8 +19,12 @@
  * So, three places:
  *   fpl_play_clip   (C05BDDAC, the store of that size) reads the first
  *                   frame's header; for a clip of ours it makes the size the
- *                   stock frame's and takes the decoder's scratch from the
- *                   pool BEFORE the player empties it;
+ *                   stock frame's and notes the scratch the decoder needs;
+ *   fpl_play_pool   (C05C2D10, the pool made) takes that scratch from the RAW
+ *                   pool BEFORE the player empties it. Not at clip open: the
+ *                   player frees its old pool between the two when the size
+ *                   changed (2026-10-02, a 48p clip: the scratch taken at
+ *                   clip open was freed with that pool, every frame refused);
  *   fpl_play_frame  (C05C0EA4, after the read) decodes a frame of ours back
  *                   into the stock layout and puts the root back on IFD0,
  *                   which still describes the uncompressed strip;
@@ -65,6 +69,8 @@ struct fpl_play {
     /* clip open */
     uint32_t clips, clips_ours, clip_size_was, clip_size_set, clip_failed;
     uint32_t scratch_bytes, scratch_failed, scratch_freed;
+    uint32_t scratch_want;                   /* the clip's need; 0: not one we decode */
+    uint32_t clips_first_stock;              /* decodable clips opening on a stock frame */
     uintptr_t scratch;
     uint32_t obj[4];                         /* the scratch allocation record */
     uint32_t file[0x400 / 4];                /* the native file object */
@@ -103,6 +109,9 @@ uint32_t fpl_play_clip(struct fpl_play *, uintptr_t desc, uint32_t size, uint32_
  * except after FPL_PLAY_R_ENGINE / a late FPL_PLAY_R_COPY, when some tile rows
  * are already written and the root still says compressed). */
 uint32_t fpl_play_frame(struct fpl_play *, uintptr_t slot, uint32_t busy);
+/* C05C2D10, the player making its buffer pool: the scratch the open clip
+ * needs, taken first. */
+void fpl_play_pool(struct fpl_play *);
 /* C05C2E90, and every REC start: the scratch back to the pool. */
 void fpl_play_end(struct fpl_play *);
 #endif

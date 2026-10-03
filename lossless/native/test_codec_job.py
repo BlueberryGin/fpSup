@@ -53,7 +53,8 @@ def build(directory, source=None, name='codec.dylib'):
                    check=True, capture_output=True, text=True, timeout=60)
     lib = ct.CDLL(str(out))
     for fn, count, ret in (('reset', 3, True), ('set', 2, False), ('submit', 0, True),
-                           ('poll', 0, True), ('get', 1, True), ('source_bytes', 3, True)):
+                           ('poll', 0, True), ('get', 1, True), ('source_bytes', 3, True),
+                           ('abort', 0, True)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = [ct.c_uint32] * count
         f.restype = ct.c_uint32 if ret else None
@@ -218,6 +219,28 @@ class CodecJobTests(unittest.TestCase):
         self.lib.fpl_fixture_poll()
         self.assertEqual(self.get(PADDED), 0x1000)
 
+    def test_a_job_given_up_on_is_closed_and_its_registers_kept(self):
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+        self.lib.fpl_fixture_set(16, 4)                 # 300D0008, as read on the camera
+        n = self.lib.fpl_fixture_get(LOG_N)
+        self.assertEqual(self.lib.fpl_fixture_abort(), OK)
+        self.assertEqual([self.lib.fpl_fixture_get(i) for i in range(n, self.lib.fpl_fixture_get(LOG_N))],
+                         [C_CLR, C_CLOSE])
+        self.assertEqual(self.lib.fpl_fixture_get(PHASE), IDLE)
+        self.assertEqual(self.lib.fpl_fixture_get(115), 4)
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK, 'not usable again')
+
+    def test_giving_up_on_an_idle_job_touches_nothing(self):
+        n = self.lib.fpl_fixture_get(LOG_N)
+        self.assertEqual(self.lib.fpl_fixture_abort(), OK)
+        self.assertEqual(self.lib.fpl_fixture_get(LOG_N), n)
+
+    def test_a_close_that_fails_when_giving_up_is_a_fault(self):
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+        self.lib.fpl_fixture_set(K_CLOSE, 1)
+        self.assertEqual(self.lib.fpl_fixture_abort(), FAULT)
+        self.assertEqual(self.lib.fpl_fixture_get(PHASE), FAILED)
+
     def test_the_engine_refusing_a_frame_closes_and_frees_the_job(self):
         """Output that would not fit one frame: the frame goes RAW, and the
         next frame may use the job again -- as the firmware reuses its own."""
@@ -347,6 +370,8 @@ class MutationTests(unittest.TestCase):
         'sends the zero band height': ('    j->request[1] = in->height;',
                                        '    j->request[1] = in->height % (FPL_TILE_HEIGHT * '
                                        'ceil_div(in->height, FPL_TILE_HEIGHT));'),
+        'gives up without closing': ('    if ((native = native_close()) != 0) return fail(j, native);\n    j->phase = FPL_CODEC_IDLE;\n    return FPL_OK;',
+                                     '    (void)native;\n    j->phase = FPL_CODEC_IDLE;\n    return FPL_OK;'),
         'clears the flag on a timeout': (
             '    if (native == E_TMOUT) return FPL_BUSY;          /* still encoding */',
             '    if (native == E_TMOUT) { native_clr_flg(j->flag, 0); return FPL_BUSY; }'),

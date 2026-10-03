@@ -66,7 +66,8 @@ def main():
         print(f'record at 0x{block:08X}: state 0x{state:08X}, resident base 0x{base:08X}')
     else:
         state = a.state
-    arrays = {'hold.refused_by': 8, 'play.refused_by': 12}
+    arrays = {'hold.refused_by': 8, 'play.refused_by': 12, 'hold.job.stall_regs': 8,
+              'hold_b.job.stall_regs': 8}
     v = {name: mem_get(state + off, 1)[0] for name, off in fields.items() if name not in arrays}
     arr = {name: mem_get(state + fields[name], n) for name, n in arrays.items() if name in fields}
     for name, value in v.items():
@@ -102,6 +103,11 @@ def main():
           f'{sum(v[f"{x}.no_benefit"] for x in lanes)}, faults '
           f'{sum(v[f"{x}.faults"] for x in lanes)}; header DMA refused '
           f'{sum(v[f"{x}.dma_failed"] for x in lanes)}')
+    stalls = sum(v[f'{x}.stalls'] for x in lanes)
+    print(f'  engine jobs given up on (never finished): {stalls}'
+          + ''.join(f'; {x} registers 0000/04/08/0C/64/74/F8/3FC '
+                    + ' '.join(f'{r:08X}' for r in arr.get(f'{x}.job.stall_regs', []))
+                    for x in lanes if v[f'{x}.stalls']))
     print(f'  zero copy: swapped {sum(v[f"{x}.swapped"] for x in lanes)}, declined '
           f'{v["hold.swap_declined"]}, undone {v["hold.swap_undone"]}; spare '
           f'{v["spare_bytes"]:,} B, failed {v["spare_failed"]}, freed {v["spares_freed"]}')
@@ -109,6 +115,8 @@ def main():
           f'lanes now {v["hold.lane"]}/{v["hold_b.lane"]}, result {v["lane_stop_result"]}')
     pwhy = ['slot', 'not tiff', 'root', 'format', 'tiles', 'ifd0', 'room', 'order', 'scratch',
             'engine', 'copy', 'take live']
+    print(f'  this take {v["take_frames"]} frames (the first left uncompressed); clips opening '
+          f'on a stock frame {v["play.clips_first_stock"]}')
     print(f'  clips opened {v["play.clips"]}, ours {v["play.clips_ours"]} (frame size '
           f'{v["play.clip_size_was"]:,} -> {v["play.clip_size_set"]:,}), header unread '
           f'{v["play.clip_failed"]}; scratch {v["play.scratch_bytes"]:,} B, failed '

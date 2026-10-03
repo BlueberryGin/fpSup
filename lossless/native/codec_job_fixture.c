@@ -17,6 +17,7 @@ enum { C_INIT = 1, C_FLAG, C_CLR, C_TWAI, C_OPEN, C_SUBMIT, C_RESET, C_START,
 #define ENDPOS 0x300d00f8u
 
 static uint32_t log_[64], log_n;
+static uint32_t devregs[0x40];         /* the engine's register window */
 static uint32_t engine[6], tilecount, endpos;
 static uint8_t dst[8192];
 static uint32_t tbl[1024];
@@ -78,6 +79,8 @@ static uint32_t *slot(uintptr_t a) {
     if (a >= ENGINE && a < ENGINE + 24) return &engine[(a - ENGINE) / 4];
     if (a == TILECOUNT) return &tilecount;
     if (a == ENDPOS) return &endpos;
+    if (a >= 0x300d0000u && a < 0x300d0100u) return &devregs[(a - 0x300d0000u) / 4];
+    if (a == 0x300d03fcu) return &devregs[0x3f];
     if (a >= DST && a < DST + sizeof dst) return (uint32_t *)(void *)&dst[a - DST];
     if (a >= TBL && a < TBL + sizeof tbl) return &tbl[(a - TBL) / 4];
     return 0;
@@ -102,6 +105,7 @@ uint32_t fpl_fixture_reset(uint32_t width, uint32_t height, uint32_t format) {
     memset(request_seen, 0, sizeof request_seen);
     init_ret = 1; flag_id = 42; open_ret = submit_ret = start_ret = close_ret = 0;
     twai_ret = 0; twai_pattern = 1; oob = 0;
+    memset(devregs, 0, sizeof devregs);
     engine_dst_len = 0x2000; engine_tbl_len = 160 * 4;
     total_ret = 0x1234;
     for (uint32_t i = 0; i < 160; ++i) tile_sizes[i] = 100 + i;
@@ -130,10 +134,12 @@ void fpl_fixture_set(uint32_t knob, uint32_t value) {
     case 13: input.table_capacity = value; break;
     case 14: endpos = value; break;
     case 15: input.source = value; break;
+    case 16: devregs[2] = value; break;          /* 300D0008 */
     }
 }
 uint32_t fpl_fixture_submit(void) { return fpl_codec_job_submit(&job, &input); }
 uint32_t fpl_fixture_poll(void) { return fpl_codec_job_poll(&job); }
+uint32_t fpl_fixture_abort(void) { return fpl_codec_job_abort(&job); }
 uint32_t fpl_fixture_source_bytes(uint32_t w, uint32_t h, uint32_t f) {
     return fpl_codec_source_bytes(w, h, f);
 }
@@ -160,6 +166,8 @@ uint32_t fpl_fixture_get(uint32_t field) {
     case 112: return oob;
     case 113: return job.band_table;
     case 114: return job.last_native;
+    case 115: return job.stall_regs[2];
+    case 116: return job.stall_regs[6];
     default: return 0xFFFFFFFFu;
     }
 }

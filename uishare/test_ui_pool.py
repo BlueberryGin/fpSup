@@ -17,7 +17,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 OK, NO_READER, UNKNOWN_POOL, NO_MEMORY, INVALID = range(5)
 STOCK_POOL, STOCK_LEN, HEADROOM = 0xC18C0474, 176152, 0x4000
 MAGIC = 0x4C505346
-OOB, ALLOCS, PUBLISHES, LOG_N, LEN, POOL, READER, ALLOC = range(8)
+OOB, ALLOCS, PUBLISHES, LOG_N, LEN, POOL, READER, ALLOC, BYTE_READS = range(9)
+NOT_STOCK = 0xFFFFFFFF
 
 
 def build(directory, replace=None, name='pool.dylib'):
@@ -39,6 +40,8 @@ def build(directory, replace=None, name='pool.dylib'):
                           ('word', [ct.c_uint32] * 2, None), ('peek', [ct.c_uint32], ct.c_uint32),
                           ('byte', [ct.c_uint32], ct.c_uint32),
                           ('intern', [ct.c_char_p, ct.c_uint32, ct.POINTER(ct.c_uint32)], ct.c_uint32),
+                          ('intern_hinted', [ct.c_char_p, ct.c_uint32, ct.c_uint32,
+                                             ct.POINTER(ct.c_uint32)], ct.c_uint32),
                           ('known', [], ct.c_uint32),
                           ('resolve', [ct.c_uint32, ct.c_char_p, ct.c_uint32], ct.c_uint32),
                           ('get', [ct.c_uint32], ct.c_uint32)):
@@ -68,6 +71,17 @@ class PoolTests(unittest.TestCase):
         b = s.encode()
         self.assertEqual(self.lib.fx_intern(b, len(b), ct.byref(off)), expect)
         return off.value
+
+    def hinted(self, s, at, expect=OK):
+        off = ct.c_uint32(0xDEADBEEF)
+        b = s.encode()
+        self.assertEqual(self.lib.fx_intern_hinted(b, len(b), at, ct.byref(off)), expect)
+        return off.value
+
+    def reads(self, fn):
+        before = self.get(BYTE_READS)
+        out = fn()
+        return out, self.get(BYTE_READS) - before
 
     def resolve(self, off):
         buf = ct.create_string_buffer(64)
@@ -105,6 +119,91 @@ class PoolTests(unittest.TestCase):
         self.intern('MV_fpLossless')
         log = [self.get(100 + i) for i in range(self.get(LOG_N))]
         self.assertEqual(log, [0x14, 0x10])
+
+    # ---- many at once (Sensor Lab's installer) -----------------------------
+    def many(self, strings, expect=OK, stock_at=0):
+        arr = (ct.c_char_p * len(strings))(*[t.encode() for t in strings])
+        offs = (ct.c_uint32 * len(strings))(*([0xDEADBEEF] * len(strings)))
+        self.assertEqual(self.lib.fx_intern_many(arr, len(strings), ct.c_uint32(stock_at), offs), expect)
+        return list(offs)
+
+    def test_many_not_stock_reads_only_what_was_appended(self):
+        self.intern('MV_fpLossless')                              # another sup's string
+        full, full_reads = self.reads(lambda: self.many(['SL_X', 'MV_fpLossless']))
+        self.lib.fx_reset(); self.intern('MV_fpLossless')
+        fast, fast_reads = self.reads(lambda: self.many(['SL_X', 'MV_fpLossless'], stock_at=NOT_STOCK))
+        self.assertEqual([self.resolve(o) for o in fast], ['SL_X', 'MV_fpLossless'])
+        self.assertEqual(fast, full)                               # the same offsets
+        self.assertLess(fast_reads * 100, full_reads)              # without the stock scan
+
+    def test_many_agree_with_one_by_one_and_publish_once(self):
+        words = ['Footer05', 'SL_A', 'Width / Height', 'SL_A', '3:2+', 'MV_fpLossless']
+        offs = self.many(words)
+        many_pub = self.get(PUBLISHES)
+        self.assertEqual([self.resolve(o) for o in offs], words)
+        self.assertEqual(offs[0], 1000)                            # stock: where it is
+        self.assertEqual(offs[1], offs[3])                         # repeated: one copy
+        self.assertTrue(all(o % 4 == 0 for o in offs[1:]))
+        self.assertEqual(self.get(OOB), 0)
+        # the same strings one by one, from a fresh camera: same layout, more publishes
+        self.lib.fx_reset()
+        one = [self.intern(w) for w in words]
+        self.assertEqual(one, offs)
+        self.assertLess(many_pub, self.get(PUBLISHES))
+        self.assertLessEqual(many_pub, 4)                          # grow (2) + append (2)
+        # and once the copy exists: exactly one pair for a whole batch
+        before = self.get(PUBLISHES)
+        more = self.many(['SL_B', 'SL_C', 'SL_D'])
+        self.assertEqual(self.get(PUBLISHES) - before, 2)
+        self.assertEqual([self.resolve(o) for o in more], ['SL_B', 'SL_C', 'SL_D'])
+
+    def test_many_failing_changes_nothing(self):
+        self.intern('MV_fpLossless')
+        length = self.get(LEN)
+        self.lib.fx_alloc_fail(1)
+        self.many(['x' * 40] * 1 + ['y' * 60000], expect=3)        # does not fit: no memory
+        self.assertEqual(self.get(LEN), length)
+        self.many(['ok', ''], expect=4)                            # empty string: invalid
+        self.assertEqual(self.get(LEN), length)
+
+    # ---- hinted: the builder knows the stock pool ---------------------------
+    def test_a_right_stock_hint_is_checked_and_nothing_is_scanned(self):
+        unhinted, full = self.reads(lambda: self.intern('Footer05'))
+        self.setUp()
+        off, cost = self.reads(lambda: self.hinted('Footer05', 1000))
+        self.assertEqual(off, unhinted)
+        self.assertLessEqual(cost, len('Footer05') + 1)
+        self.assertGreater(full, 1000, 'the unhinted call should have scanned')
+        self.assertEqual((self.get(POOL), self.get(ALLOCS)), (STOCK_POOL, 0))
+
+    def test_a_wrong_stock_hint_falls_back_to_the_scan(self):
+        for hint in (999, 1001, STOCK_LEN - 4, STOCK_LEN + 100):
+            with self.subTest(hint=hint):
+                self.setUp()
+                self.assertEqual(self.hinted('Footer05', hint), 1000)
+                self.assertEqual(self.get(ALLOCS), 0)
+
+    def test_a_prefix_is_not_a_hit(self):
+        # "Footer0" at 1000 is followed by '5', not NUL
+        off = self.hinted('Footer0', 1000)
+        self.assertNotEqual(off, 1000)
+        self.assertEqual(self.resolve(off), 'Footer0')
+
+    def test_not_stock_scans_only_what_was_appended(self):
+        a, first = self.reads(lambda: self.hinted('MV_fpLossless', NOT_STOCK))
+        self.assertEqual(self.resolve(a), 'MV_fpLossless')
+        self.assertLess(first, 1000, 'the stock bytes were scanned')
+        b, again = self.reads(lambda: self.hinted('MV_fpLossless', NOT_STOCK))
+        self.assertEqual(b, a)
+        self.assertLess(again, 1000)
+        self.assertEqual(self.get(ALLOCS), 1)
+
+    def test_hinted_and_unhinted_sups_agree(self):
+        a = self.intern('Lossless RAW')                 # an old sup, no hints
+        self.assertEqual(self.hinted('Lossless RAW', NOT_STOCK), a)
+        b = self.hinted('OG3K', NOT_STOCK)              # a new sup first
+        self.assertEqual(self.intern('OG3K'), b)
+        self.assertEqual(self.intern('Footer05'), self.hinted('Footer05', 1000))
 
     # ---- several sups, any order -----------------------------------------
     def test_later_strings_are_appended_in_the_same_copy(self):
@@ -204,6 +303,17 @@ class PoolMutationTests(unittest.TestCase):
             '    if (!uis_pool_known(reader)) return UIS_UNKNOWN_POOL;\n', ''),
         'never grows': ('    if (end > capacity) {', '    if (end > capacity && capacity == 0) {'),
         'forgets to terminate': ('    poke8(pool + at + n, 0);\n', ''),
+        'returns a hint unchecked': (
+            '        while (k < n && peek8(pool + stock_at + k) == (uint8_t)s[k]) ++k;\n'
+            '        if (k == n && peek8(pool + stock_at + n) == 0)',
+            '        (void)k;\n        if (1)'),
+        'takes a prefix for a hit': (
+            '        if (k == n && peek8(pool + stock_at + n) == 0) { *offset = stock_at; return UIS_OK; }',
+            '        if (k == n) { *offset = stock_at; return UIS_OK; }'),
+        'not-stock still scans the stock bytes': (
+            '        from = UIS_STOCK_LEN;               /* the stock bytes never change */', '        from = 0;'),
+        'the scan ignores where to start': ('    for (uint32_t i = from; i + n < len; ++i) {',
+                                            '    for (uint32_t i = 0 * from; i + n < len; ++i) {'),
         'does not publish the length': (
             '    poke(reader + READER_LEN, end);             /* the new string exists now */\n', ''),
     }

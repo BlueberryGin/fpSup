@@ -47,10 +47,12 @@ def build(directory, replace=None, name='play.dylib'):
     lib = ct.CDLL(str(out))
     lib.fpl_fixture_load.argtypes = [ct.c_char_p, ct.c_uint32, ct.c_uint32]
     lib.fpl_fixture_load.restype = None
-    lib.fpl_fixture_clip.argtypes = [ct.c_char_p, ct.c_uint32, ct.c_uint32, ct.c_uint32]
-    lib.fpl_fixture_clip.restype = ct.c_uint32
+    for fn in ('clip', 'open'):
+        getattr(lib, 'fpl_fixture_' + fn).argtypes = [ct.c_char_p, ct.c_uint32, ct.c_uint32,
+                                                     ct.c_uint32]
+        getattr(lib, 'fpl_fixture_' + fn).restype = ct.c_uint32
     for fn, n, ret in (('knob', 2, False), ('run', 1, True), ('byte', 1, True), ('get', 1, True),
-                       ('reset', 0, False), ('end', 0, False)):
+                       ('reset', 0, False), ('end', 0, False), ('pool', 0, False)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = [ct.c_uint32] * n
         f.restype = ct.c_uint32 if ret else None
@@ -139,7 +141,8 @@ class PlayDecodeTests(unittest.TestCase):
         self.lib.fpl_fixture_reset()
 
     def open_clip(self, data, size=None, busy=0):
-        return self.lib.fpl_fixture_clip(data, len(data), size or len(data), busy)
+        """Clip open, the old pool freed, the pool made: the camera's order."""
+        return self.lib.fpl_fixture_open(data, len(data), size or len(data), busy)
 
     def load(self, data, cap):
         self.data = data
@@ -162,24 +165,55 @@ class PlayDecodeTests(unittest.TestCase):
         return data, expected, cap, strip
 
     # ---- clip open --------------------------------------------------------
-    def test_a_clip_of_ours_asks_for_the_stock_frame_and_takes_the_scratch(self):
+    def test_a_clip_of_ours_asks_for_the_stock_frame_and_the_pool_takes_the_scratch(self):
         data, expected, pitch = frame()
         stock = 0x400 + ((len(expected) + 0x1FF) & ~0x1FF)
-        self.assertEqual(self.open_clip(data), stock)
-        self.assertEqual((self.get(CLIPS_OURS), self.get(ALLOCS)), (1, 1))
+        self.assertEqual(self.lib.fpl_fixture_clip(data, len(data), len(data), 0), stock)
+        self.assertEqual((self.get(CLIPS_OURS), self.get(ALLOCS)), (1, 0), 'taken at clip open')
+        self.lib.fpl_fixture_end()                       # the player's old pool freed
+        self.lib.fpl_fixture_pool()                      # and made
+        self.assertEqual(self.get(ALLOCS), 1)
         self.assertEqual(len(expected), raster_len())
         self.assertGreaterEqual(self.get(SCRATCH_BYTES), 2 * pitch * 32)
-        self.assertEqual(self.open_clip(data), stock)
-        self.assertEqual(self.get(ALLOCS), 0, 'the scratch was taken twice')
+        self.lib.fpl_fixture_pool()
+        self.assertEqual(self.get(ALLOCS), 1, 'the scratch was taken twice')
         self.lib.fpl_fixture_end()
         self.assertEqual((self.get(RELEASES), self.get(SCRATCH_BYTES)), (1, 0))
         self.lib.fpl_fixture_end()
         self.assertEqual(self.get(RELEASES), 1, 'freed twice')
 
-    def test_a_stock_clip_is_left_as_it_is(self):
+    def test_the_old_pool_freed_between_clip_open_and_the_new_pool_keeps_the_scratch(self):
+        # 2026-10-02, 48p: the scratch taken at clip open went with the old pool
+        data, expected, pitch = frame()
+        self.lib.fpl_fixture_clip(data, len(data), len(data), 0)
+        self.lib.fpl_fixture_end()
+        self.lib.fpl_fixture_pool()
+        self.load(data, 0x400 + raster_len())
+        self.assertEqual(self.lib.fpl_fixture_run(0), DECODED)
+
+    def test_a_clip_we_do_not_decode_after_ours_takes_no_scratch(self):
+        self.open_clip(frame()[0])
+        self.open_clip(frame(ours=False, bits=8)[0])
+        self.assertEqual(self.get(SCRATCH_BYTES), 0)
+
+    def test_a_clip_opening_on_a_stock_frame_keeps_its_size_and_gets_the_scratch(self):
+        # the take's first frame is left uncompressed (for DaVinci): the
+        # first frame cannot tell, so any clip we can decode gets the scratch
         data, expected, pitch = frame(ours=False)
         self.assertEqual(self.open_clip(data, 123456), 123456)
-        self.assertEqual((self.get(CLIPS_OURS), self.get(ALLOCS)), (0, 0))
+        self.assertEqual((self.get(CLIPS_OURS), self.get(ALLOCS)), (0, 1))
+
+    def test_a_compressed_frame_after_a_stock_first_frame_is_decoded(self):
+        self.open_clip(frame(ours=False)[0])
+        data, expected, pitch = frame()
+        self.load(data, 0x400 + raster_len())
+        self.assertEqual(self.lib.fpl_fixture_run(0), DECODED)
+        self.assertEqual(self.strip(0x400, len(expected)), expected)
+
+    def test_a_format_we_do_not_decode_takes_no_scratch(self):
+        data, expected, pitch = frame(ours=False, bits=8)
+        self.assertEqual(self.open_clip(data, 4321), 4321)
+        self.assertEqual(self.get(ALLOCS), 0)
 
     def test_no_clip_change_while_a_take_is_live(self):
         data, expected, pitch = frame()
@@ -351,11 +385,17 @@ class PlayDecodeMutationTests(unittest.TestCase):
                                             '        if (decode_row(&f, across, strip + r * raw_row, s_at) != 0)'),
         'copies whole tile rows in': ('(r == down - 1u ? rem : f.th) * pitch',
                                       '(r == down - 1u ? rem + 2u : f.th) * pitch'),
-        'asks the stock size for a stock clip': (
-            '    if (rd32(h, 1) != TIFF_LE || rd32(h + 4, 1) == ROOT_STOCK) return size;   /* stock */',
-            '    if (rd32(h, 1) != TIFF_LE) return size;'),
-        'takes a second scratch': ('    if (!p->scratch) {\n        p->scratch = scratch_get',
-                                   '    {\n        p->scratch = scratch_get'),
+        'changes the size of a clip opening on a stock frame': (
+            '        saturate(&p->clips_first_stock);\n        return size;',
+            '        saturate(&p->clips_first_stock);'),
+        'no scratch for a clip opening on a stock frame': (
+            '    p->scratch_want = need;\n    if (rd32(h + 4, 1) == ROOT_STOCK) {',
+            '    p->scratch_want = rd32(h + 4, 1) == ROOT_STOCK ? 0 : need;\n'
+            '    if (rd32(h + 4, 1) == ROOT_STOCK) {'),
+        'takes a second scratch': ('    if (p->scratch) return;\n    p->scratch = scratch_get',
+                                   '    p->scratch = scratch_get'),
+        'keeps a stale want across clips': ('    p->scratch_want = 0;\n    if (busy || !desc) return size;',
+                                            '    if (busy || !desc) return size;'),
         'no clip check while recording': ('    if (busy || !desc) return size;',
                                           '    (void)busy;\n    if (!desc) return size;'),
     }

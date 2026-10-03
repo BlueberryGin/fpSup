@@ -93,6 +93,13 @@ ap.add_argument('--boot-bin', action='append', default=[], metavar='FILE:OFFSET'
                      'order: ask the allocator, copy itself in, run. A '
                      'destination that is a pool offset cannot do that, '
                      'because somebody has to have published a pool first.')
+ap.add_argument('--late-boot-bin', action='append', default=[], metavar='FILE:OFFSET',
+                help='as --boot-bin, but its entry is called AFTER --vshl-entry: '
+                     'a payload that has to see what that one installed')
+ap.add_argument('--read-cap', type=lambda s: int(s, 0), default=None,
+                help='how much of the BIN the loader reads (default: loader.S '
+                     'MAXLEN, 0xF000). 0x1F000 at most: the loader asks for '
+                     'this plus 0x1000 for its file object')
 ap.add_argument('--bin-name', default='fpSup.BIN',
                 help='the payload container this card carries and the loader '
                      'opens. Every line writes fpSup.BIN; the option exists '
@@ -245,9 +252,13 @@ ECHO_SLOT = 0xC0BAC2F8  # command table entry 17, echo's handler pointer
 ECHO_ORIG = 0xC03D99A0
 HOOK   = 0xC00D0794   # gyro callback, borrowed once to create the task
 
+if args.read_cap is not None and (args.read_cap & 0xFFF or
+                                  not 0xF000 <= args.read_cap <= 0x1F000):
+    ap.error('--read-cap is whole 4 KiB pages, 0xF000..0x1F000')
 LOADER_DEFINES = [f'LOADER_BASE={CAVE_LOW}', f'POOL_DESC=0x{POOL_DESC:08X}',
                   BIN_PATH_DEF] + (
-                      [f'LOAD_START_US=0x{LOAD_START_US:08X}'] if args.profile else [])
+                      [f'LOAD_START_US=0x{LOAD_START_US:08X}'] if args.profile else []) + (
+                      [f'READ_CAP=0x{args.read_cap:X}'] if args.read_cap is not None else [])
 
 from patches import IFACE, PUSH, RETAIN, SCREEN, BAR_WIDTH
 
@@ -965,14 +976,15 @@ if args.loader:
         secs.append((int(addr_s, 0), pathlib.Path(src_s).read_bytes()))
     # Run-in-place payloads, each with an entry of its own.  After --also-bin so
     # that a card's ordinary sections are placed before anything is called.
-    boot_secs = []
-    for spec in args.boot_bin:
-        src_s, _, off_s = spec.rpartition(':')
-        blob = pathlib.Path(src_s).read_bytes()
-        if len(blob) % 4:
-            sys.exit(f'{src_s} is {len(blob)} bytes; sections are whole words')
-        boot_secs.append((len(secs), int(off_s, 0)))
-        secs.append((0, blob))
+    boot_secs, late_secs = [], []
+    for specs, into in ((args.boot_bin, boot_secs), (args.late_boot_bin, late_secs)):
+        for spec in specs:
+            src_s, _, off_s = spec.rpartition(':')
+            blob = pathlib.Path(src_s).read_bytes()
+            if len(blob) % 4:
+                sys.exit(f'{src_s} is {len(blob)} bytes; sections are whole words')
+            into.append((len(secs), int(off_s, 0)))
+            secs.append((0, blob))
     if not args.no_shell:
         # The worker's sixteen state words and the capture length, contiguous at
         # 0xC072F000, and the descriptor patches.  Zeroes, because the cave is
@@ -1004,7 +1016,7 @@ if args.loader:
     # and moves everything after it; its length is known without its contents
     # (the table is one word per entry plus a terminator), so nothing is
     # circular.  Its words are patched below, once the offsets exist.
-    entry_count = ((worker_sec is not None) + len(boot_secs)
+    entry_count = ((worker_sec is not None) + len(boot_secs) + len(late_secs)
                    + (args.vshl_entry is not None))
     tramp_sec = None
     if entry_count > 1:
@@ -1044,6 +1056,8 @@ if args.loader:
         entries.append(file_off(sec_i) + off)
     if args.vshl_entry is not None:
         entries.append(args.vshl_entry)
+    for sec_i, off in late_secs:
+        entries.append(file_off(sec_i) + off)
 
     if tramp_sec is not None:
         tbl_at = file_off(tramp_sec) + tramp_tbl
@@ -1064,7 +1078,7 @@ if args.loader:
     # The loader now owns a separate staging buffer, not a shared-pool window.
     # putfile cannot truncate; descriptor lengths exclude any old padded tail.
     BIN_PAD = 32768
-    read_cap = _equ(HERE / 'templates/loader.S', 'MAXLEN')
+    read_cap = args.read_cap or _equ(HERE / 'templates/loader.S', 'MAXLEN')
     if read_cap is None or read_cap < BIN_PAD:
         sys.exit('loader MAXLEN is missing or smaller than the default BIN padding')
     if len(binblob) > read_cap:

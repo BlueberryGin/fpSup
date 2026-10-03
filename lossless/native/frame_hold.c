@@ -39,6 +39,10 @@
 #define FILE_OFFSET       0x2000u
 #define PIXELS_IN_FILE    (HEADER_RESERVE - FILE_OFFSET)     /* 0x13400 */
 #define TRAILER_BOUND     4096u      /* root IFD copy, bounded; tables extra */
+#define STALL_POLLS        250u      /* a job not done after this many checks
+                                        (each >= 1 tick + the task's 1 ms) is
+                                        given up on; the slowest normal job,
+                                        UHD, is ~50 ms */
 #define STOP_POLLS        1000u      /* one tick each; the firmware's own
                                         wait for an FHD frame is 100 ticks */
 
@@ -519,7 +523,15 @@ uint32_t fpl_hold_check(struct fpl_frame_hold *h) {
     uint32_t result;
     if (!hold_valid(h) || h->lane != FPL_LANE_RUNNING) return 0;
     result = fpl_codec_job_poll(&h->job);
-    if (result == FPL_BUSY) return 0;
+    if (result == FPL_BUSY) {
+        /* 2026-10-02: one job in a long take never signalled; the lane waited
+         * for it forever and every later frame went out uncompressed. Given
+         * up on, the engine is closed (stopped) and the frame goes out as the
+         * engine refusing it would: unchanged, and the lane is free again. */
+        if (h->job.polls < STALL_POLLS) return 0;
+        result = fpl_codec_job_abort(&h->job) == FPL_OK ? FPL_UNSUPPORTED : FPL_FAULT;
+        saturate(&h->stalls);
+    }
     h->lane_result = result;
     barrier();
     h->lane = FPL_LANE_FINISHED;

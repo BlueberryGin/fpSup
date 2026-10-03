@@ -51,6 +51,26 @@ uint32_t uis_pool_known(uintptr_t reader);
  * resolves, adding it if no string in the pool already ends that way. */
 uint32_t uis_intern(const char *s, uint32_t n, uint32_t *offset);
 
+/* The same, without scanning the stock pool (2026-10-03). Each scan of the
+ * 176,152 stock bytes cost about 0.25 s on the camera, once per string, at
+ * boot; a builder knows the stock pool (it is in the pinned firmware image)
+ * and passes, for each string, where uis_intern would find it there:
+ *
+ *   stock_at = the first offset i with pool[i..i+n) == s and pool[i+n] == 0,
+ *              or UIS_NOT_STOCK if the stock pool has no such place.
+ *
+ * A stock_at is checked (n + 1 bytes) before it is returned; if it does not
+ * hold, this falls back to uis_intern. UIS_NOT_STOCK searches only what was
+ * appended after the stock bytes. The offset returned is one uis_intern could
+ * have returned, so hinted and unhinted callers stay consistent. */
+#define UIS_NOT_STOCK    0xFFFFFFFFu
+uint32_t uis_intern_hinted(const char *s, uint32_t n, uint32_t stock_at, uint32_t *offset);
+/* Many resident C strings at once, published with one pair of cache cleans
+ * (not one pair per string): offsets[i] as uis_intern would give s[i].
+ * stock_at: 0 (search everything) or UIS_NOT_STOCK (none is a stock string:
+ * search only what was appended after the stock bytes). */
+uint32_t uis_intern_many(const char *const *s, uint32_t count, uint32_t stock_at, uint32_t *offsets);
+
 #if defined(UIS_HOST_TEST)
 struct uis_natives {
     uint32_t (*read)(uintptr_t);

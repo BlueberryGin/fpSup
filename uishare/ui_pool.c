@@ -73,8 +73,8 @@ uint32_t uis_pool_known(uintptr_t reader) {
 }
 
 /* Where `s` already resolves in [pool, pool+len), or UINT32_MAX. */
-static uint32_t find(uintptr_t pool, uint32_t len, const char *s, uint32_t n) {
-    for (uint32_t i = 0; i + n < len; ++i) {
+static uint32_t find(uintptr_t pool, uint32_t from, uint32_t len, const char *s, uint32_t n) {
+    for (uint32_t i = from; i + n < len; ++i) {
         uint32_t k = 0;
         while (k < n && peek8(pool + i + k) == (uint8_t)s[k]) ++k;
         if (k == n && peek8(pool + i + n) == 0) return i;
@@ -108,16 +108,26 @@ static uintptr_t grow(uintptr_t reader, uintptr_t pool, uint32_t len, uint32_t c
     return fresh;
 }
 
-uint32_t uis_intern(const char *s, uint32_t n, uint32_t *offset) {
+/* stock_at as uis_intern_hinted takes it; FULL = no hint, scan everything. */
+#define FULL 0xFFFFFFFEu
+
+static uint32_t intern(const char *s, uint32_t n, uint32_t stock_at, uint32_t *offset) {
     uintptr_t reader = uis_reader(), pool;
-    uint32_t len, at, end, capacity;
+    uint32_t len, at, end, capacity, from = 0;
     if (!s || !offset || !n || s[n] != 0) return UIS_INVALID;
     for (uint32_t i = 0; i < n; ++i) if (!s[i]) return UIS_INVALID;
     if (!reader) return UIS_NO_READER;
     if (!uis_pool_known(reader)) return UIS_UNKNOWN_POOL;
     pool = peek(reader + READER_POOL);
     len = peek(reader + READER_LEN);
-    if ((at = find(pool, len, s, n)) != UINT32_MAX) { *offset = at; return UIS_OK; }
+    if (stock_at == UIS_NOT_STOCK) {
+        from = UIS_STOCK_LEN;               /* the stock bytes never change */
+    } else if (stock_at != FULL && stock_at < UIS_STOCK_LEN - n) {
+        uint32_t k = 0;                     /* a builder's hint: check it */
+        while (k < n && peek8(pool + stock_at + k) == (uint8_t)s[k]) ++k;
+        if (k == n && peek8(pool + stock_at + n) == 0) { *offset = stock_at; return UIS_OK; }
+    }
+    if ((at = find(pool, from, len, s, n)) != UINT32_MAX) { *offset = at; return UIS_OK; }
 
     at = (len + 3u) & ~3u;                      /* new strings start aligned */
     end = at + n + 1u;
@@ -135,4 +145,67 @@ uint32_t uis_intern(const char *s, uint32_t n, uint32_t *offset) {
     publish();
     *offset = at;
     return UIS_OK;
+}
+
+/* Many at once: each string found where uis_intern would find it, the missing
+ * ones appended together and published with ONE pair of D-cache cleans instead
+ * of a pair per string (Sensor Lab: ~40 strings; each clean pair is boot time).
+ * s[i] are resident C strings, offsets[i] receives each.  Strings repeated in s
+ * get one copy.  stock_at: 0, or UIS_NOT_STOCK when none of them is a stock
+ * string (uis_intern_hinted's meaning).  On any failure nothing new is visible
+ * (the length is not moved). */
+uint32_t uis_intern_many(const char *const *s, uint32_t count, uint32_t stock_at, uint32_t *offsets) {
+    uintptr_t reader = uis_reader(), pool;
+    uint32_t len, end, capacity, pending = 0;
+    /* UIS_NOT_STOCK: the builder knows none is a stock string -- search only
+     * what other sups appended (r13: the whole-pool scans were the boot time) */
+    uint32_t from = stock_at == UIS_NOT_STOCK ? UIS_STOCK_LEN : 0;
+    if (!s || !offsets) return UIS_INVALID;
+    if (!reader) return UIS_NO_READER;
+    if (uis_pool_known(reader) == 0) return UIS_UNKNOWN_POOL;
+    pool = peek(reader + READER_POOL);
+    len = peek(reader + READER_LEN);
+    end = len;
+    /* where each lands: found, or after what is pending (aligned, as uis_intern) */
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t n = 0, at;
+        if (!s[i]) return UIS_INVALID;
+        while (s[i][n]) ++n;
+        if (!n) return UIS_INVALID;
+        if ((at = find(pool, from, len, s[i], n)) != UINT32_MAX) { offsets[i] = at; continue; }
+        for (uint32_t j = 0; j < i; ++j) {            /* the same text earlier in this batch */
+            uint32_t k = 0;
+            while (s[j][k] && s[j][k] == s[i][k]) ++k;
+            if (!s[j][k] && !s[i][k]) { at = offsets[j]; break; }
+        }
+        if (at != UINT32_MAX) { offsets[i] = at; continue; }
+        at = (end + 3u) & ~3u;
+        offsets[i] = at;
+        end = at + n + 1u;
+        pending++;
+    }
+    if (!pending) return UIS_OK;
+    capacity = pool == UIS_STOCK_POOL ? 0 : peek(pool - 8);
+    if (capacity < end) {                      /* a bigger copy, as uis_intern grows */
+        uint32_t want = end + UIS_HEADROOM;
+        if (capacity && want < 2u * capacity) want = 2u * capacity;
+        if (!(pool = grow(reader, pool, len, want))) return UIS_NO_MEMORY;
+    }
+    for (uint32_t i = len; i < end; ++i) poke8(pool + i, 0);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (offsets[i] < len) continue;
+        for (uint32_t k = 0; s[i][k]; ++k) poke8(pool + offsets[i] + k, (uint8_t)s[i][k]);
+    }
+    publish();
+    poke(reader + READER_LEN, end);             /* every new string exists now */
+    publish();
+    return UIS_OK;
+}
+
+uint32_t uis_intern(const char *s, uint32_t n, uint32_t *offset) {
+    return intern(s, n, FULL, offset);
+}
+
+uint32_t uis_intern_hinted(const char *s, uint32_t n, uint32_t stock_at, uint32_t *offset) {
+    return intern(s, n, stock_at, offset);
 }

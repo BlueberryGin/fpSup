@@ -35,6 +35,9 @@ struct fpl_codec_job {
     uint32_t source_capacity;           /* what the caller vouched readable */
     uint32_t flag, pattern, end_position, total, padded;
     uint32_t request[12];
+    /* the engine's registers when a job was given up on (fpl_codec_job_abort):
+     * 300D0000, 04, 08, 0C, 64, 74, F8 (end position), 3FC */
+    uint32_t stall_regs[8];
 };
 
 /* Everything the caller vouches for. `source_capacity` is how many bytes are
@@ -82,4 +85,10 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *, const struct fpl_codec_inp
  * FPL_FAULT when the wait failed any other way or a close failed -- state
  * unknown, so the job and its buffers stay held. */
 uint32_t fpl_codec_job_poll(struct fpl_codec_job *);
+/* A job the engine never finished (2026-10-02: on the camera one job in a long
+ * take never signalled, and everything after it went out uncompressed). Its
+ * registers are kept in stall_regs, then CLOSE -- power off, the block reset,
+ * the interrupt off -- stops it, and the job is IDLE again: its source was only
+ * read, its output is not used. FPL_FAULT if CLOSE failed (state unknown). */
+uint32_t fpl_codec_job_abort(struct fpl_codec_job *);
 #endif

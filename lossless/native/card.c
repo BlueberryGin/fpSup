@@ -123,6 +123,7 @@ struct fpl_card {
     /* the take's spare for the buffer swap: asked, granted, given back */
     uint32_t spare_bytes, spare_failed, spares_freed;
     uint32_t stale_promises;            /* forgotten at a new take, see start_hold */
+    uint32_t take_frames;               /* frames this take, the first left stock */
     uintptr_t task_entry;               /* card.S task_shim */
     int32_t task_id;                    /* the codec task; < 1: none, and the
                                            card holds frames the old way */
@@ -198,9 +199,9 @@ USED uint32_t fpl_card_init(struct fpl_card *c, uintptr_t base, uint32_t block_b
 }
 
 /* The second lane: a spare like the first, and a table of its own (the
- * engine writes its size table there while the other lane's is read). Any
- * failure leaves it invalid; lane 0 then runs alone. */
-static void start_lane_b(struct fpl_card *c, const struct fpl_hold_workspace *a) {
+ * engine writes its size table there while the other lane's is read).
+ * 0: not made, nothing of it held. */
+static uint32_t start_lane_b(struct fpl_card *c, const struct fpl_hold_workspace *a) {
     struct fpl_hold_workspace ws;
     ws.output = 0;
     ws.output_capacity = 0;
@@ -219,7 +220,7 @@ static void start_lane_b(struct fpl_card *c, const struct fpl_hold_workspace *a)
         if (c->table_b.handle) card_free_spare(&c->table_b);
         c->table_b.handle = 0;
         card_saturate(&c->lane_b_failed);
-        return;
+        return 0;
     }
     if (fpl_hold_init(&c->hold_b, &c->pipe_b, &c->rec.facts, &ws) != FPL_OK) {
         /* the pipeline began: end it, it never held anything */
@@ -229,10 +230,17 @@ static void start_lane_b(struct fpl_card *c, const struct fpl_hold_workspace *a)
         card_free_spare(&c->table_b);
         c->table_b.handle = 0;
         card_saturate(&c->lane_b_failed);
+        return 0;
     }
+    return 1;
 }
 
-static void start_hold(struct fpl_card *c) {
+static void release_spare(struct fpl_card *c);
+
+/* Both lanes and the codec task, or no compression at all: the take was
+ * admitted (workspace reserved, pipeline begun), so on any failure that is
+ * undone here and the take records exactly as stock. 1 = live. */
+static uint32_t start_hold(struct fpl_card *c) {
     struct fpl_rec_workspace *w = &c->rec.workspace;
     struct fpl_hold_workspace ws;
     uintptr_t handle = w->memory.allocation.handle;
@@ -268,13 +276,21 @@ static void start_hold(struct fpl_card *c) {
         ws.spare.handle = ws.spare.capacity = ws.spare.allocator_class = 0;
         card_saturate(&c->spare_failed);
     }
-    if (fpl_hold_init(&c->hold, &w->pipeline, &c->rec.facts, &ws) != FPL_OK) {
+    if (c->task_id < 1 || !ws.spare.handle ||
+        fpl_hold_init(&c->hold, &w->pipeline, &c->rec.facts, &ws) != FPL_OK) {
         if (ws.spare.handle) card_free_spare(&ws.spare);
         card_saturate(&c->hold_init_failed);
-        return;
+        fpl_rec_workspace_finish(w, w->pipeline.take, 1);     /* the take is stock */
+        return 0;
     }
-    if (c->task_id > 0 && ws.spare.handle) start_lane_b(c, &ws);
+    if (!start_lane_b(c, &ws)) {
+        release_spare(c);                                  /* lane A's spare */
+        fpl_rec_workspace_finish(w, w->pipeline.take, 1);
+        return 0;
+    }
+    c->take_frames = 0;
     c->hold_live = 1;
+    return 1;
 }
 
 /* The engine is idle (the take finished): the spare -- by now some earlier
@@ -314,8 +330,8 @@ USED uint32_t fpl_card_rec(uintptr_t camera, const uint32_t *request, struct fpl
     }
     dispatch = fpl_rec_hook_call(camera, request, &c->rec);
     if (dispatch) {
-        card_saturate(&c->rec_admitted);
-        start_hold(c);
+        if (start_hold(c)) card_saturate(&c->rec_admitted);
+        else card_saturate(&c->rec_raw);
         return dispatch;
     }
     if (c->rec.workspace.native_result) {
@@ -331,8 +347,14 @@ USED uint32_t fpl_card_arrive(uintptr_t creator, uint32_t id, uint32_t argument,
                               struct fpl_card *c) {
     if (!card_valid(c) || !c->hold_live)
         return card_original_enqueue(creator, id, argument);
-    return c->task_id > 0 ? fpl_lanes_arrive(c->lane, creator, id, argument)
-                          : fpl_hold_arrive(&c->hold, creator, id, argument);
+    /* The take's first frame always goes out uncompressed: DaVinci Resolve
+     * decides a clip's decoding from its first frame and plays a clip that
+     * mixes compressed and uncompressed frames only when that one is
+     * uncompressed (reported by users, 2026-10-02). It is queued at once, so
+     * it is the clip's first file. */
+    if (c->take_frames != UINT32_MAX && c->take_frames++ == 0)
+        return card_original_enqueue(creator, id, argument);
+    return fpl_lanes_arrive(c->lane, creator, id, argument);
 }
 
 USED void fpl_card_stop(struct fpl_card *c, uint32_t kind) {
@@ -340,8 +362,7 @@ USED void fpl_card_stop(struct fpl_card *c, uint32_t kind) {
     if (!card_valid(c) || !c->hold_live || (kind != 1 && kind != 9)) return;
     card_saturate(&c->stops);
     w = &c->rec.workspace;
-    if (c->task_id > 0) c->lane_stop_result = fpl_lanes_stop(c->lane);
-    else fpl_hold_stop(&c->hold);
+    c->lane_stop_result = fpl_lanes_stop(c->lane);
     if (w->pipeline.phase != FPL_SLOT_FREE || c->hold.job.phase == FPL_CODEC_RUNNING ||
         c->hold.lane != FPL_LANE_IDLE ||
         (c->hold_b.magic && (c->pipe_b.phase != FPL_SLOT_FREE ||
@@ -397,6 +418,11 @@ USED uint32_t fpl_card_clip(struct fpl_card *c, uintptr_t player, uintptr_t desc
     (void)player;
     if (!card_valid(c)) return size;
     return fpl_play_clip(&c->play, desc, size, c->hold_live);
+}
+
+/* C05C2D10: the player makes its buffer pool. */
+USED void fpl_card_play_pool(struct fpl_card *c) {
+    if (card_valid(c) && !c->hold_live) fpl_play_pool(&c->play);
 }
 
 /* C05C2E90: the player frees its buffers. */

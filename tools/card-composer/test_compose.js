@@ -32,8 +32,16 @@ const byId = new Map(CAT.cards.map(c => [c.id, c]));
 
 // Parse output independently: assertions inspect actual table/data bytes, not
 // the composer-provided entry list or its offsetsOf implementation.
-function parse(bytes) {
-  const b = Buffer.from(bytes);
+// tail: {at, b} of a card that carries data past the loader read (lossless's
+// menu row): zeros up to tail.at, then exactly those bytes, then the end.
+function parse(bytes, tail) {
+  let b = Buffer.from(bytes);
+  if (tail) {
+    const t = Buffer.from(tail.b, 'base64');
+    assert.equal(b.length, tail.at + t.length, 'file does not end with the tail');
+    assert(b.subarray(tail.at).equals(t), 'tail bytes changed');
+    b = b.subarray(0, tail.at);
+  }
   assert.equal(b.toString('ascii', 0, 4), 'VBIN');
   const count = b.readUInt32LE(4), entry = b.readUInt32LE(8);
   const records = [];
@@ -49,8 +57,31 @@ function parse(bytes) {
   return {records, entry, used: off};
 }
 
-function sourceEntry(card, output) {
-  const entry = card.entry >>> 0;
+// A card's entries: its header's, or -- when that is its own entry trampoline
+// (several payloads on one released card) -- every entry its table calls.
+// Written from the bytes here, not from the page's ownTrampoline.
+function ownTable(card) {
+  const e = card.entry >>> 0, stub = Buffer.from(CAT.trampoline.b, 'base64'), tbl = CAT.trampoline.tbl;
+  if (!e || e >= 0x40000000) return null;
+  let off = 16 + 8 * card.records.length;
+  for (const r of card.records) {
+    const b = decode(r);
+    if (off === e && b.length >= tbl + 8 && b.subarray(0, tbl).equals(stub.subarray(0, tbl))) {
+      const list = [];
+      for (let o = tbl + 4; b.readUInt32LE(o); o += 4) list.push(b.readUInt32LE(o));
+      return {rec: r, list};
+    }
+    off += (b.length + 3) & ~3;
+  }
+  return null;
+}
+
+function sourceEntries(card, output) {
+  const own = ownTable(card);
+  return own ? own.list.map(e => sourceEntry(card, output, e)) : [sourceEntry(card, output)];
+}
+
+function sourceEntry(card, output, entry = card.entry >>> 0) {
   if (entry >= 0x40000000 || entry === 0) return entry;
   let off = 16 + 8 * card.records.length;
   for (const r of card.records) {
@@ -77,8 +108,8 @@ function checkEntries(cards, out) {
   // Required product order is worker -> gyro (or gyro-base, exclusive with it)
   // -> OG restore, regardless of the order checkboxes were clicked. Do not
   // derive this expectation from sel().
-  const ordered = ['shell', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view'].filter(id => cards.some(c => c.id === id));
-  const expected = ordered.map(id => sourceEntry(byId.get(id), out)).filter(Boolean);
+  const ordered = ['shell', 'lossless', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view'].filter(id => cards.some(c => c.id === id));
+  const expected = ordered.flatMap(id => sourceEntries(byId.get(id), out)).filter(Boolean);
   if (expected.length < 2) {
     assert.equal(out.entry, expected[0] || 0);
     return;
@@ -104,7 +135,8 @@ function frozen(card) {
   return fs.readFileSync(file);
 }
 
-let selections = 0, cases = 0, frozenChecks = 0;
+let selections = 0, cases = 0, frozenChecks = 0, tailClashes = 0;
+const tailOf = cards => (cards.find(c => c.tail) || {}).tail;
 const autoByMode = new Map();
 for (let mask = 1; mask < 2 ** CAT.cards.length; mask++) {
   const cards = CAT.cards.filter((_, i) => mask & (1 << i));
@@ -124,15 +156,26 @@ for (let mask = 1; mask < 2 ** CAT.cards.length; mask++) {
         const bad = api.runChecks(composed.recs, built, 'fpSup-Test!', composed.entry, composed.entries)
           .filter(c => !c.ok).map(c => c.t + ': ' + c.d);
         assert.equal(bad.length, 0, bad.join('\n'));
+        // lossless's tail goes at the read cap, which menu_page.c works out of
+        // the VBIN header the same way: max(0xF000, used rounded up to 4 KiB).
+        if (tailOf(cards)) {
+          const want = built.used <= 0xF000 ? 0xF000 : Math.ceil(built.used / 0x1000) * 0x1000;
+          assert.equal(built.cap, want, 'read cap is not the launcher\'s menu_at');
+          assert.equal(built.tailAt, want);
+          if (want > 0xF000) tailClashes++;
+        }
         assert.equal(auto.length, CAT.pad_to);
         assert(auto.endsWith('\n'));
         const mode = `${fast}/${api.templateName()}/${built.cap}`;
         if (autoByMode.has(mode)) assert.equal(auto, autoByMode.get(mode), 'payload selection changed AutoRun at the same read cap');
         else autoByMode.set(mode, auto);
-        const out = parse(built.bytes);
+        const out = parse(built.bytes, tailOf(cards) && {at: built.cap, b: tailOf(cards).b});
         assert.equal(out.used, built.used);
         assert.equal(out.records[0].a, 0, 'first section must be stage2');
-        assert(out.records[0].bytes.equals(decode(fast ? CAT.fast.stage2 : CAT.stage2)));
+        // A fast card past the default read carries the magic of its rewritten loader.
+        assert(out.records[0].bytes.equals(!fast ? decode(CAT.stage2)
+          : built.cap === CAT.read_cap ? decode(CAT.fast.stage2)
+          : Buffer.from(api.capStage2(decode(CAT.fast.stage2), built.cap))));
         const aborts = out.records.filter(r => r.a === (CAT.fast.abort.a >>> 0));
         assert.equal(aborts.length, fast ? 1 : 0);
         if (fast) assert(aborts[0].bytes.equals(decode(CAT.fast.abort)));
@@ -149,7 +192,9 @@ for (let mask = 1; mask < 2 ** CAT.cards.length; mask++) {
         // Push-off deliberately drops a shell release's push records.
         if (!fast && cards.length === 1 && (!cards[0].shell || push === (cards[0].template === 'shellpush'))) {
           assert(out.records[0].bytes.equals(decode(CAT.stage2)), 'single card: stage2 is not the current one');
-          const rel = parse(frozen(cards[0])).records.slice(1);
+          const own = ownTable(cards[0]);
+          const rel = parse(frozen(cards[0]), cards[0].tail).records.slice(1)
+            .filter(r => !own || !r.bytes.equals(decode(own.rec)));   // replaced by the page's own
           for (const r of rel)
             assert(out.records.some(s => s.a === r.a && s.bytes.equals(r.bytes)),
                    'single card lost released section ' + r.a.toString(16));
@@ -262,6 +307,6 @@ for (const [mode, auto] of autoByMode) {
     assert.equal(bootstrap[20], 0xE8BD81F0, 'Fast miss returns with the matching stack');
   }
 }
-console.log(`PASS ${selections} legal selections / ${cases} normal-Fast-push cases; ` +
+console.log(`PASS ${selections} legal selections / ${cases} normal-Fast-push cases (${tailClashes} with lossless's menu data moved past 0xF000); ` +
   `${frozenChecks} single cards keep every released section; entry relocation/order, payload-independent AutoRun, ` +
   `7 padding/read-cap boundaries, read-cap rewrite, embedded D/I and Fast stack.`);

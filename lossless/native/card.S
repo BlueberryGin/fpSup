@@ -46,6 +46,9 @@
 .equ SITE_END,     0xC05C2E90    /* the player's pool freed: entry            */
 .equ STOCK_END,    0xE92D4070    /* push {r4, r5, r6, lr}                     */
 .equ END_RESUME,   0xC05C2E94
+.equ SITE_POOL,    0xC05C2D10    /* the player's pool made: entry             */
+.equ STOCK_POOL,   0xE92D44F0    /* push {r4, r5, r6, r7, sl, lr}             */
+.equ POOL_RESUME,  0xC05C2D14
 .equ CREATOR_ENQ,  0xC037DD50
 .equ STOP_RESUME,  0xC0398D8C
 .equ REAL_FLUSH,   0xC069ADE0
@@ -145,6 +148,10 @@ entry:
     LDA     ip, OFF_END
     add     ip, r4, ip
     str     ip, [r0]
+    RESIDENT r0, w_pool
+    LDA     ip, OFF_POOL
+    add     ip, r4, ip
+    str     ip, [r0]
 
     LDA     ip, F_DCACHE
     blx     ip
@@ -198,14 +205,19 @@ entry:
     ldr     r2, [r0]
     cmp     r2, r1
     bne     out
+    LDA     r0, SITE_POOL
+    LDA     r1, STOCK_POOL
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
 
-    /* 72 bytes off the bump: four veneers, the state record (+32, where a
-     * host looks for it), and the player's three veneers after it (+48) */
+    /* 80 bytes off the bump: four veneers, the state record (+32, where a
+     * host looks for it), and the player's four veneers after it (+48) */
     LDA     r7, CAVE_BUMP
     ldr     r8, [r7]                    @ r8 = our cave block
     tst     r8, #3
     bne     out
-    add     r9, r8, #72
+    add     r9, r8, #80
     LDA     r10, CAVE_END
     cmp     r9, r10
     bhi     out                         @ the cave is full: arm nothing
@@ -242,6 +254,9 @@ entry:
     str     r0, [r8, #64]
     RESIDENT r1, end_shim
     str     r1, [r8, #68]
+    str     r0, [r8, #72]
+    RESIDENT r1, pool_shim
+    str     r1, [r8, #76]
 
     LDA     ip, F_DCACHE
     blx     ip
@@ -275,6 +290,10 @@ entry:
     bl      encode
     LDA     r0, SITE_END
     add     r1, r8, #64
+    mov     r2, #0xEA000000             @ b: the caller's lr must survive
+    bl      encode
+    LDA     r0, SITE_POOL
+    add     r1, r8, #72
     mov     r2, #0xEA000000             @ b: the caller's lr must survive
     bl      encode
 
@@ -379,6 +398,18 @@ end_shim:
     push    {r4, r5, r6, lr}            @ STOCK_END, executed here
     ldr     pc, end_resume
 
+/* C05C2D10 entry: the player is about to make its buffer pool (taking the
+ * RAW pool until it is empty). The decoder's scratch first, then the
+ * displaced push and the original. */
+pool_shim:
+    push    {r0, r1, r2, r3, ip, lr}
+    ldr     r0, g_card
+    ldr     ip, w_pool
+    blx     ip
+    pop     {r0, r1, r2, r3, ip, lr}
+    push    {r4, r5, r6, r7, sl, lr}    @ STOCK_POOL, executed here
+    ldr     pc, pool_resume
+
 /* The codec task's entry (tk_sta_tsk). The body takes the state and never
  * returns: a task cannot be ended in this firmware. */
 task_shim:
@@ -396,9 +427,11 @@ w_task:      .word 0
 w_play:      .word 0
 w_clip:      .word 0
 w_end:       .word 0
+w_pool:      .word 0
 stop_resume: .word STOP_RESUME
 flush_real:  .word REAL_FLUSH
 end_resume:  .word END_RESUME
+pool_resume: .word POOL_RESUME
     .align  3
 c_base:
     /* the compiled C is appended here by build_card.py */

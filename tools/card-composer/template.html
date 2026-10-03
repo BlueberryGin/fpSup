@@ -427,8 +427,9 @@ function composed(){
      helper is replaced and entries are relocated, as in any merge. */
   const out = [], runs = [], tail = [], seen = new Map(), kept = new Map(), entries = [];
   for (const c of chosen){
+    const own = ownTrampoline(c);          // a card that already calls several entries
     c.records.forEach((r, i) => {
-      if (i === 0 || omitPush(c, r)) return;
+      if (i === 0 || omitPush(c, r) || (own && r === own.rec)) return;
       const k = (r.a >>> 0) + ':' + r.b;
       if (seen.has(k)){ kept.set(r, seen.get(k)); return; }
       seen.set(k, r); kept.set(r, r);
@@ -439,14 +440,15 @@ function composed(){
     });
     // `continue`, not `return`: this is a for..of over the cards, and a card
     // with no entry must not end the loop. Current OG cards have a restore entry.
-    const e = c.entry >>> 0;
-    if (e === 0) continue;
-    if (e >= 0x40000000){ entries.push({abs: e}); continue; }
-    const offs = offsetsOf(c.records);
-    const hit = c.records.findIndex((r, i) =>
-      offs[i] <= e && e < offs[i] + b64(r.b).length);
-    if (hit < 0) throw new Error(c.id + ': entry ' + hex(e) + ' is in no section');
-    entries.push({rec: c.records[hit], delta: e - offs[hit]});
+    for (const e of own ? own.entries : [c.entry >>> 0]){
+      if (e === 0) continue;
+      if (e >= 0x40000000){ entries.push({abs: e}); continue; }
+      const offs = offsetsOf(c.records);
+      const hit = c.records.findIndex((r, i) =>
+        offs[i] <= e && e < offs[i] + b64(r.b).length);
+      if (hit < 0) throw new Error(c.id + ': entry ' + hex(e) + ' is in no section');
+      entries.push({rec: c.records[hit], delta: e - offs[hit]});
+    }
   }
   let recs = (fastOn ? [CAT.fast.stage2, CAT.fast.abort] : [CAT.stage2])
                .concat(out, tail, runs);
@@ -477,6 +479,31 @@ function composed(){
   return {recs, entry: offs[offs.length - 1],
           entries: entries.map(e => (e.abs !== undefined ? e.abs
                                      : at(e.rec) + e.delta) >>> 0)};
+}
+/* A released card with more than one entry (its own payload and, say, the
+   shared UI section, 2026-10-03) carries build_autorun's entry trampoline, and
+   its header points at it.  Merging that card as one more record would keep
+   its table's file offsets, which the merge moves.  So the card's trampoline
+   is recognised by its code -- the same entries.S bytes this page carries --
+   its table read, and each entry it calls joins this card's own list; the
+   record itself is dropped, the page's own trampoline calls them all. */
+function ownTrampoline(c){
+  const e = c.entry >>> 0;
+  if (!e || e >= 0x40000000) return null;
+  const offs = offsetsOf(c.records), stub = b64(CAT.trampoline.b), tbl = CAT.trampoline.tbl;
+  const i = c.records.findIndex((r, k) => offs[k] === e);
+  if (i < 0) return null;
+  const body = b64(c.records[i].b);
+  if (body.length < tbl + 8) return null;
+  for (let k = 0; k < tbl; k++) if (body[k] !== stub[k]) return null;
+  const dv = new DataView(body.buffer, body.byteOffset, body.byteLength), list = [];
+  if (dv.getUint32(tbl, true) !== e + tbl) return null;
+  for (let o = tbl + 4; o + 4 <= body.length; o += 4){
+    const w = dv.getUint32(o, true);
+    if (!w) return {rec: c.records[i], entries: list};
+    list.push(w);
+  }
+  return null;
 }
 const carriesWorker = c => !!c.shell;
 function hasShell(){ return sel().some(carriesWorker); }
@@ -598,7 +625,27 @@ function composeVshl(recs, entry){
   const cap = capFor(need);
   if (recs.length && recs[0] === CAT.fast.stage2) blobs[0] = capStage2(blobs[0], cap);
   const pad = need <= CAT.pad_to ? CAT.pad_to : cap;
-  const out = new Uint8Array(Math.max(pad, need));
+  /* A card may carry data past the loader's read that its own launcher reads
+     from the file (lossless, 2026-10-03: its menu row).  It goes exactly at
+     this card's read cap -- 0xF000, or the VBIN rounded up to 4 KiB when the
+     page raises the read -- which is where that launcher looks: it works the
+     same offset out of the VBIN header at boot (native/menu_page.c menu_at).
+     Two such cards cannot share the one place, and a card past the ceiling
+     gets no tail (its read check fails anyway). */
+  const tails = sel().filter(c => c.tail);
+  let tail = null, tailClash = '';
+  if (tails.length > 1)
+    tailClash = tails.map(c => bare(c.name)).join(' and ') + ' each carry data past the loader read';
+  else if (tails.length){
+    tail = {at: cap, bytes: b64(tails[0].tail.b), who: bare(tails[0].name)};
+    if (need > cap){
+      tailClash = tail.who + "'s menu data goes at the read cap " + hex(cap)
+                + '; the sections need ' + need.toLocaleString() + ' B';
+      tail = null;
+    }
+  }
+  const out = new Uint8Array(tail ? tail.at + tail.bytes.length : Math.max(pad, need));
+  if (tail) out.set(tail.bytes, tail.at);
   const dv = new DataView(out.buffer);
   out.set([0x56,0x42,0x49,0x4E]);
   dv.setUint32(4, recs.length, true);
@@ -609,7 +656,9 @@ function composeVshl(recs, entry){
     dv.setUint32(t, r.a >>> 0, true); dv.setUint32(t+4, blobs[i].length, true); t += 8;
     out.set(blobs[i], o); o += blobs[i].length + ((-blobs[i].length)&3);
   });
-  return {bytes: out, used: o, pad, cap, payload: blobs.reduce((s,b)=>s+b.length,0)};
+  return {bytes: out, used: o, pad: tail ? tail.at : pad, cap, tailClash,
+          tailAt: tail ? tail.at : 0,
+          payload: blobs.reduce((s,b)=>s+b.length,0)};
 }
 function composeAutorun(banner, cap){
   /* The AutoRun spells the loader out, and the loader says how much to read:
@@ -667,6 +716,11 @@ function runChecks(recs, vshl, banner, entry, entriesNow){
      inside the shared pool.  Its offsets and a payload's pool offsets are now
      two address spaces, and every destination-zero section has offset zero, so
      it flagged all of them: the page told everyone not to use any card. */
+  if (vshl.tailClash !== undefined && (vshl.tailClash || vshl.tailAt))
+    c.push({ok: !vshl.tailClash, t:'Data past the loader read keeps its place',
+            d: vshl.tailClash ? vshl.tailClash + ' — leave a product out'
+               : 'menu data at ' + hex(vshl.tailAt) + ' (the read cap), sections end at '
+                 + vshl.used.toLocaleString() + ' B'});
   c.push({ok: vshl.used <= vshl.cap, t:'The loader can read the whole card',
           d: vshl.used.toLocaleString()+' of '+vshl.cap.toLocaleString()+' B'
              + (vshl.cap === CAT.read_cap ? '' : ' (raised from '

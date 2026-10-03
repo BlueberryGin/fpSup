@@ -54,12 +54,22 @@
  * the file object that reads it -- so it asks for that, and gives it back on the
  * way out.  A payload that needs memory asks the allocator itself, in its entry,
  * and stage2 places the sections that are offsets into it afterwards. */
-.equ POOL_BYTES,  0x10000
 .equ O_FOBJ,      0x0000        /* the file object, about 3 KiB             */
 .equ O_BUF,       0x1000        /* the file: 32 KiB of it, BIN_PAD          */
+#ifdef READ_CAP
+/* build_autorun --read-cap: a card whose sections do not fit 0xF000.  Both
+ * values stay one-instruction immediates, so the loader's length -- and what
+ * the settings block holds -- does not change.  fpSup-Merge does the same in
+ * the page (2026-10-02): it rewrites these two words, and a fast card's
+ * magic, to the smallest 4 KiB multiple the selection needs. */
+.equ POOL_BYTES,  (READ_CAP + 0x1000)
+.equ MAXLEN,      READ_CAP
+#else
+.equ POOL_BYTES,  0x10000
 .equ MAXLEN,      0xF000        /* what is left of the buffer past O_BUF --
                                  * ask for more than the file can be, but
                                  * never for more than there is room for   */
+#endif
 
 .equ F_MGR,       0xC0444658
 .equ F_VOL,       0xC0444698

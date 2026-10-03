@@ -1,5 +1,6 @@
 #include "menu_page.h"
 #include "ui_pool.h"      /* fpSup/uishare: the shared string pool convention */
+#include "ui_apply.h"     /* fpSup/uishare: pages composed from each sup's FPUI block */
 
 /* Ver.5.02 runtime layout, read from the camera 2026-09-30:
  *   C37B7048              the GUI object (C055F0F0); its word +0 is the UI app
@@ -106,14 +107,6 @@ static uint32_t same(uintptr_t a, const char *s) {
         if (!c) return 1;
     }
 }
-static uint32_t fnv(uintptr_t a, uint32_t n, uint32_t h) {
-    for (uint32_t i = 0; i < n; ++i) h = (h ^ peek8(a + i)) * 16777619u;
-    return h;
-}
-/* A big-endian word in the page, as the NBU reader sees it. */
-static void put_be(uintptr_t a, uint32_t v) {
-    poke8(a, v >> 24); poke8(a + 1, v >> 16); poke8(a + 2, v >> 8); poke8(a + 3, v);
-}
 static uint32_t fail(struct fpl_menu *m, uint32_t why) { m->result = why; return why; }
 
 /* The registered variable's descriptor, or 0. */
@@ -126,13 +119,25 @@ static uintptr_t variable(uintptr_t app, const char *NAME) {
     return d;
 }
 
+/* Where the row's data starts, from the VBIN header at `h`: the loader's read
+ * cap for a VBIN that size (menu_page.h FPL_MENU_AT_*); 0 if it is no VBIN or
+ * would need more than the loader can be told to read. */
+static uint32_t menu_at(uintptr_t h) {
+    uint32_t count = peek(h + 4), body = peek(h + 12), used;
+    if (peek(h) != FPL_VBIN_MAGIC || count > FPL_MENU_AT_MAX / 8u || body > FPL_MENU_AT_MAX)
+        return 0;
+    used = 16u + 8u * count + body;
+    if (used <= FPL_MENU_AT_MIN) return FPL_MENU_AT_MIN;
+    used = (used + FPL_MENU_AT_STEP - 1u) & ~(FPL_MENU_AT_STEP - 1u);
+    return used <= FPL_MENU_AT_MAX ? used : 0;
+}
+
 uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_bytes) {
     uint32_t screen_words[5], path_words[5];
     const char *SCREEN = (const char *)screen_words, *PATH = (const char *)path_words;
-    uintptr_t screens = 0, screen = 0, app, reader, table, entry = 0;
-    uintptr_t fobj, file, page, strings, relocs, d;
-    uint32_t count, actual = 0, page_len, strings_len, reloc_count, ok, room;
-    uint32_t cache_from[8], cache_to[8], cached = 0;
+    uintptr_t screens = 0, screen = 0, app, reader, fobj, file, d;
+    uint32_t count, actual = 0, ok, room, at = 0;
+    struct uia_outcome ui;
 
     if (!m || m->result) return m ? m->result : FPL_MENU_NO_GUI;   /* once */
     SCREEN_WORDS(screen_words);
@@ -153,17 +158,11 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     if (!aligned(reader) || peek(reader + READER_SOURCE) != NBU_BASE ||
         !uis_pool_known(reader))              /* stock, or shared by the convention */
         return fail(m, FPL_MENU_READER);
-    count = peek(reader + READER_ENTRIES);
-    table = peek(reader + READER_TABLE);
-    if (!aligned(table) || !count || count > MAX_SCREENS) return fail(m, FPL_MENU_READER);
-    for (uint32_t n = 0; n < count && !entry; ++n) {
-        uintptr_t e = table + ENTRY_BYTES * n;
-        if (same(peek(e + ENTRY_NAME), SCREEN)) entry = e;
-    }
-    if (!entry || peek(entry + ENTRY_OFFSET) != MAINB2_OFFSET) return fail(m, FPL_MENU_NO_ENTRY);
+    /* Whether MainB2 is the stock page or a copy another sup composed is
+     * ui_apply's to check (uishare: stock, or announced by its header). */
 
     /* ---- the file, into memory owned for the rest of the boot --------- */
-    if ((area & 7u) || area_bytes < FILE_OBJECT + FPL_MENU_AT)
+    if ((area & 7u) || area_bytes < FILE_OBJECT + FPL_MENU_AT_STEP)
         return fail(m, FPL_MENU_ROOM);
     fobj = area;
     file = area + FILE_OBJECT;
@@ -171,58 +170,34 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     room = area_bytes - FILE_OBJECT;
     ok = f_open(fobj, PATH, 1);
     if (ok) {
-        /* The row's data rides in fpSup.BIN past what the loader reads
-         * (FPL_MENU_AT). Two reads of one open file: the first, into the same
-         * buffer, only moves past the loader's part. Should the second not
-         * continue from there, the magic below does not match and nothing
-         * is installed. */
-        ok = f_read(fobj, file, FPL_MENU_AT, &actual) && actual == FPL_MENU_AT;
+        /* The row's FPUI block rides in fpSup.BIN past what the loader
+         * reads; where that is comes from the VBIN header (menu_at). Reads of
+         * one open file: the header, then up to `room` at a time to move past
+         * the rest of the loader's part, then the block. Should a read not
+         * continue from the last, the block's magic or checksum does not
+         * match and nothing is installed. */
+        ok = f_read(fobj, file, 16u, &actual) && actual == 16u;
+        if (ok) {
+            at = menu_at(file);
+            ok = at != 0u;
+        }
+        for (uint32_t done = 16u; ok && done < at; done += actual) {
+            uint32_t want = at - done < room ? at - done : room;
+            actual = 0;
+            ok = f_read(fobj, file, want, &actual) && actual == want;
+        }
         actual = 0;
         if (ok) ok = f_read(fobj, file, room, &actual);
         f_close(fobj);
     }
     f_dtor(fobj, 2);
+    m->file_at = at;
     if (!ok) return fail(m, FPL_MENU_FILE);
     m->file_len = actual;
     if (actual >= room) return fail(m, FPL_MENU_ROOM);    /* may not be all of it */
-    page_len = peek(file + 0x08);
-    strings_len = peek(file + 0x0C);
-    reloc_count = peek(file + 0x10);
-    if (actual < FPL_MENU_FILE_HEADER || peek(file) != FPL_MENU_MAGIC ||
-        peek(file + 4) != FPL_MENU_VERSION || peek(file + 0x14) != MAINB2_OFFSET ||
-        !page_len || page_len > actual || strings_len > actual || reloc_count > actual / 8u ||
-        actual - FPL_MENU_FILE_HEADER < page_len + strings_len + 8u * reloc_count)
-        return fail(m, FPL_MENU_FORMAT);        /* padding after: putfile cannot shorten */
-    page = file + FPL_MENU_FILE_HEADER;
-    strings = page + page_len;
-    relocs = strings + strings_len;
-    if (fnv(page, page_len + strings_len + 8u * reloc_count, 2166136261u) != peek(file + 0x18))
-        return fail(m, FPL_MENU_FORMAT);
-    /* Every reference first, so a bad file changes nothing. */
-    for (uint32_t r = 0; r < reloc_count; ++r) {
-        uint32_t at = peek(relocs + 8u * r), s = peek(relocs + 8u * r + 4u), n = 0;
-        if (at > page_len - 4u || s >= strings_len) return fail(m, FPL_MENU_FORMAT);
-        while (s + n < strings_len && peek8(strings + s + n)) ++n;
-        if (!n || s + n >= strings_len) return fail(m, FPL_MENU_FORMAT);
-    }
-    /* ---- the page's private strings: offsets from the shared pool ------- */
-    for (uint32_t r = 0; r < reloc_count; ++r) {
-        uint32_t at = peek(relocs + 8u * r), s = peek(relocs + 8u * r + 4u), n = 0, off = 0, k;
-        for (k = 0; k < cached && cache_from[k] != s; ++k) {}
-        if (k < cached) {
-            off = cache_to[k];
-        } else {
-            char text[64];                 /* uis_intern wants a C string */
-            while (peek8(strings + s + n)) {
-                if (n + 1 >= sizeof text) return fail(m, FPL_MENU_FORMAT);
-                text[n] = (char)peek8(strings + s + n); ++n;
-            }
-            text[n] = 0;
-            if (uis_intern(text, n, &off) != UIS_OK) return fail(m, FPL_MENU_POOL);
-            if (cached < 8u) { cache_from[cached] = s; cache_to[cached] = off; ++cached; }
-        }
-        put_be(page + at, off);
-    }
+    if (actual < 0x20u || peek8(file) != 'F' || peek8(file + 1) != 'P' ||
+        peek8(file + 2) != 'U' || peek8(file + 3) != 'I')
+        return fail(m, FPL_MENU_FORMAT);                  /* padding after: putfile cannot shorten */
 
     /* ---- the variables: registered once, 0, memory only ---------------- */
     for (uint32_t n = 0; n < FPL_MENU_VARIABLES; ++n) {
@@ -241,10 +216,14 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     }
     publish();
 
-    /* ---- switch MainB2 to the page -------------------------------------- */
-    poke(entry + ENTRY_OFFSET, page - NBU_BASE);
-    publish();
-    m->app = app; m->reader = reader; m->entry = entry; m->page = page; m->page_len = page_len;
+    /* ---- the row: added to MainB2 by the shared UI convention ----------- */
+    m->ui_result = uia_apply(file, actual, &ui);
+    m->ui_op = ui.op;
+    if (m->ui_result != UIA_OK) return fail(m, FPL_MENU_UI);
+    m->app = app; m->reader = reader; m->page = ui.page;
+    m->page_len = peek((ui.page & ~(uintptr_t)3) - UIA_HEADER + 12);
+    m->first_id = ui.first_id;
+    m->row = ui.n_slots ? ui.slots[0] : 0;
     m->pool = peek(reader + READER_POOL); m->pool_len = peek(reader + READER_POOL_LEN);
     m->result = FPL_MENU_INSTALLED;
     return FPL_MENU_INSTALLED;

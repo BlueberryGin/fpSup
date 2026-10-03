@@ -211,6 +211,22 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
     return FPL_OK;
 }
 
+uint32_t fpl_codec_job_abort(struct fpl_codec_job *j) {
+    uint32_t native;
+    if (!j || j->magic != FPL_CODEC_JOB_MAGIC) return FPL_INVALID;
+    if (j->phase != FPL_CODEC_RUNNING) return FPL_OK;
+    /* word by word: the card build carries no .rodata for a table */
+    for (uint32_t n = 0; n < 4; ++n) j->stall_regs[n] = peek(0x300d0000u + 4u * n);
+    j->stall_regs[4] = peek(0x300d0064u);
+    j->stall_regs[5] = peek(0x300d0074u);
+    j->stall_regs[6] = peek(DEV_ENDPOS);
+    j->stall_regs[7] = peek(0x300d03fcu);
+    native_clr_flg(j->flag, 0);
+    if ((native = native_close()) != 0) return fail(j, native);
+    j->phase = FPL_CODEC_IDLE;
+    return FPL_OK;
+}
+
 uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
     uint32_t pattern = 0, native, total, aligned, pad;
     uintptr_t last;

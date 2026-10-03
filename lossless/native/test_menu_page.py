@@ -1,14 +1,13 @@
-"""The Lossless RAW row installer (menu_page.c) against a model of the camera.
+"""The Lossless RAW row installer (menu_page.c) on the real stock UI data.
 
-menu_page.c + menu_page_fixture.c on the host. The fixture holds the native
-objects exactly as read from the camera on 2026-09-30 (GUI word C37B7048 ->
-app; screen vector; the shared reader with its pool, NBU base and 44-byte
-runtime entries), the stock pool at its firmware address, a fake card file
-and a fake variable registry. What is asserted: all or nothing -- on any
-mismatch MainB2's page offset does not change and no variable is registered
--- and, when installed, that every private string the page names resolves,
-by the firmware's own rule, to that string through the SHARED pool
-(fpSup/uishare), whoever extended it first.
+The row rides in fpSup.BIN as an FPUI block (menu/build_fpui.py) and is
+composed onto MainB2 by fpSup/uishare/ui_apply.c; ui_apply's own rules are
+tested in fpSup/uishare/test_ui_apply.py. What is asserted here is the
+installer around it: where in fpSup.BIN the block is read from, the file
+object's lifetime, the private variables (registered once, OFF, with names
+the registry may borrow for good), what ON means, that the page MainB2 ends
+up with is exactly what the reference applier makes -- alone, and on top of
+another sup's addition -- and that any failure leaves the UI as it was.
 """
 import ctypes as ct
 import pathlib
@@ -20,48 +19,52 @@ import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).resolve().parent
+FPSUP = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent / 'menu'))
-import pack_menu_file as P  # noqa: E402
+sys.path.insert(0, str(FPSUP / 'uishare'))
+import build_fpui                    # noqa: E402
+import pack_menu_file as P           # noqa: E402
+from ui import fpui                  # noqa: E402
 
 INSTALLED, NO_GUI, NO_SCREEN, READER, NO_ENTRY, ROOM, FILE, FORMAT, REGISTER, VARIABLE, \
-    POOL_REFUSED = range(1, 12)
+    POOL_REFUSED, UI = range(1, 13)
 (RESULT, PAGE, POOL, POOL_LEN, REGISTERED, OOB, CTORS, DTORS, OPENS, READS, CLOSES,
  VOLUME, REG_CALLS, WRITES_N, PUBLISHES, REG_PUBLISHES, DESC_N, OPEN_MODE, PAGE_LEN,
  FILE_LEN, PATH_OK, R_READER, R_ENTRIES, R_AREA, R_APP, R_SCREENS, R_NBU,
- BORROWED_BAD) = range(28)
+ BORROWED_BAD, FILE_AT, UI_RESULT, UI_OP, FIRST_ID, ROW, NBU_WRITES, MAINB2) = range(35)
 AREA_BYTES = 0x80000
-POOL_LEN_STOCK = 176152
+NBU, NBU_SIZE = 0xC18C0460, 0x800000
+STOCK_POOL_LEN = 176152
+UIA_BLOCK, UIA_PAGE = 1, 3
+
+_BUILT = None
 
 
-def stock_pool():
-    return bytes(((i * 7 + 3) & 0xFF) for i in range(POOL_LEN_STOCK))
+def built():
+    """(FPUI block, stock page, stock pool, image from NBU) -- once."""
+    global _BUILT
+    if _BUILT is None:
+        blob, _, (stock_page, pool_stock, _page) = build_fpui.build()
+        seg0 = P.SEG0.read_bytes()
+        img = seg0[NBU - 0xC0000000:NBU - 0xC0000000 + NBU_SIZE]
+        _BUILT = (blob, stock_page, pool_stock, img)
+    return _BUILT
 
 
-PAGE_BYTES = bytes((i * 13 + 1) & 0xFF for i in range(181976))
-STRINGS = b'fpLossless_Row_GATED\0MV_fpLossless\0xxx\0Lossless RAW\0'
-S = {s: STRINGS.index(s.encode() + b'\0') for s in
-     ('fpLossless_Row_GATED', 'MV_fpLossless', 'xxx', 'Lossless RAW')}
-REFS = [(0x2440E, 'fpLossless_Row_GATED'), (0x24A9D, 'MV_fpLossless'),
-        (0x24AD3, 'MV_fpLossless'), (0x25012, 'xxx'), (0x2A9A8, 'Lossless RAW'),
-        (0x2AA97, 'Lossless RAW')]
+def vbin(used, at):
+    """The loader's part of fpSup.BIN: a VBIN header saying `used` bytes, then
+    filler that is not zero (nothing may rely on it), to file offset `at`."""
+    count = 3
+    head = struct.pack('<4sIII', b'VBIN', count, 0, used - 16 - 8 * count)
+    return head + bytes((i * 5 + 7) & 0xFF for i in range(at - len(head)))
 
 
-def menu_file(page=PAGE_BYTES, strings=STRINGS, refs=None, body_only=False):
-    """fpSup.BIN's row data, format 2 (menu/pack_menu_file.py)."""
-    refs = REFS if refs is None else refs
-    blob = b''.join(struct.pack('<II', at, S[s] if isinstance(s, str) else s) for at, s in refs)
-    head = struct.pack('<8I', P.MAGIC, P.VERSION, len(page), len(strings), len(refs),
-                       P.MAINB2_OFFSET, P.fnv(page + strings + blob), 0)
-    data = head + page + strings + blob
-    return data if body_only else data + b'\0' * (P.FILE_BYTES - len(data))
-
-
-BODY = len(menu_file(body_only=True))
+HEAD = vbin(0x61AC, 0xF000)
 
 
 def build(directory, replace=None, name='menu.dylib'):
     source = HERE / 'menu_page.c'
-    uishare = HERE.parents[1] / 'uishare'
+    uishare = FPSUP / 'uishare'
     if replace:
         old, new = replace
         text = source.read_text()
@@ -72,18 +75,21 @@ def build(directory, replace=None, name='menu.dylib'):
     out = pathlib.Path(directory) / name
     subprocess.run([shutil.which('clang') or 'clang', '-shared', '-fPIC', '-O1', '-std=c11',
                     '-Wall', '-Wextra', '-Werror', '-DFPL_MENU_HOST_TEST', '-DUIS_HOST_TEST',
-                    '-I', str(HERE), '-I', str(uishare), str(source),
-                    str(HERE / 'menu_page_fixture.c'), str(uishare / 'ui_pool.c'), '-o', str(out)],
-                   check=True, capture_output=True, text=True, timeout=60)
+                    '-DUIA_HOST_TEST', '-I', str(HERE), '-I', str(uishare), str(source),
+                    str(HERE / 'menu_page_fixture.c'), str(uishare / 'ui_pool.c'),
+                    str(uishare / 'ui_apply.c'), '-o', str(out)],
+                   check=True, capture_output=True, text=True, timeout=120)
     lib = ct.CDLL(str(out))
-    for fn, args, ret in (('reset', [], None), ('file', [ct.c_char_p, ct.c_uint32, ct.c_uint32], None),
+    for fn, args, ret in (('reset', [ct.c_char_p, ct.c_uint32], None),
+                          ('file', [ct.c_char_p, ct.c_uint32, ct.c_uint32], None),
                           ('word', [ct.c_uint32] * 2, None), ('peek', [ct.c_uint32], ct.c_uint32),
                           ('byte', [ct.c_uint32], ct.c_uint32), ('reg_result', [ct.c_uint32], None),
                           ('preregister', [ct.c_uint32], None), ('set_value', [ct.c_uint32], None),
                           ('install', [ct.c_uint32], ct.c_uint32), ('on', [], ct.c_uint32),
                           ('get', [ct.c_uint32], ct.c_uint32),
                           ('other_sup', [ct.c_char_p, ct.c_uint32], ct.c_uint32),
-                          ('resolve_page', [ct.c_uint32, ct.c_char_p, ct.c_uint32], ct.c_uint32)):
+                          ('other_block', [ct.c_char_p, ct.c_uint32], ct.c_uint32),
+                          ('read', [ct.c_uint32, ct.c_char_p, ct.c_uint32], None)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = args
         f.restype = ret
@@ -101,274 +107,206 @@ class MenuTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def setUp(self):
-        self.lib.fpl_fixture_reset()
-        self.put(menu_file())
-
-    HEAD = bytes((i * 5 + 7) & 0xFF for i in range(0xF000))   # the loader's part
+        self.blob, self.stock_page, self.pool_stock, img = built()
+        self.lib.fpl_fixture_reset(img, len(img))
+        self.put(self.blob)
 
     def put(self, data, present=1, head=None):
-        """fpSup.BIN: the loader's 61440 bytes, then the row's data."""
-        data = (self.HEAD if head is None else head) + data
+        """fpSup.BIN: the loader's part, then the row's block."""
+        data = (HEAD if head is None else head) + data
         self.lib.fpl_fixture_file(data, len(data), present)
 
     def get(self, f): return self.lib.fpl_fixture_get(f)
     def peek(self, a): return self.lib.fpl_fixture_peek(a)
 
-    def switched(self):
-        r, e = self.get(R_READER), self.get(R_ENTRIES)
-        return (self.peek(r + 0x14), self.peek(r + 0x10), self.peek(e + 44 * 2 + 8))
+    def read(self, a, n):
+        buf = ct.create_string_buffer(n)
+        self.lib.fpl_fixture_read(a, buf, n)
+        return buf.raw
 
-    STOCK = (0xC18C0474, POOL_LEN_STOCK, 0x76FF04)
+    def install(self, area=AREA_BYTES):
+        return self.lib.fpl_fixture_install(area)
 
-    def bytes_at(self, a, n):
-        return bytes(self.lib.fpl_fixture_byte(a + i) for i in range(n))
+    def page_now(self):
+        p = (NBU + self.get(MAINB2)) & 0xFFFFFFFF
+        n = self.peek((p & ~3) - 128 + 12) if self.peek((p & ~3) - 128) == 0x47505346 else len(self.stock_page)
+        return self.read(p, n)
+
+    def pool_now(self):
+        return self.read(self.peek(self.get(R_READER) + 0x14), self.peek(self.get(R_READER) + 0x10))
+
+    def reference(self, blobs):
+        pages = {'MainB2': fpui.PageCopy(self.stock_page, len(self.stock_page), 1)}
+        pool = fpui.Pool(self.pool_stock)
+        for b in blobs:
+            fpui.apply(b, pages, pool)
+        return bytes(pages['MainB2'].data), bytes(pool.data)
 
     def assert_untouched(self, result):
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), result)
-        self.assertEqual(self.switched(), self.STOCK, 'a word was switched')
-        self.assertEqual(self.get(REG_CALLS), 0, 'a variable was registered')
-        self.assertEqual(self.lib.fpl_fixture_on(), 0)
+        self.assertEqual(self.install(), result)
+        self.assertEqual(self.get(MAINB2), 0x76FF04, 'MainB2 was switched')
+        self.assertEqual(self.get(NBU_WRITES), 0)
 
-    # ---- installed ---------------------------------------------------------
-    def resolved(self, page_off):
-        buf = ct.create_string_buffer(64)
-        return buf.value.decode() if self.lib.fpl_fixture_resolve_page(page_off, buf, 64) else None
-
-    def test_every_private_string_the_page_names_resolves_through_the_shared_pool(self):
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-        page = self.get(PAGE)
-        self.assertEqual((0xC18C0460 + self.switched()[2]) & 0xFFFFFFFF, page)
-        for at, s in REFS:
-            self.assertEqual(self.resolved(at), s, f'page word {at:#x}')
-        # the rest of the page is the file's
-        self.assertEqual(self.bytes_at(page, 4096), PAGE_BYTES[:4096])
-        # the pool is the convention's copy, stock prefix unchanged
-        pool = self.switched()[0]
-        self.assertEqual(self.peek(pool - 16), 0x4C505346)
-        self.assertEqual(self.bytes_at(pool, 4096), stock_pool()[:4096])
+    # ---- installed ----------------------------------------------------------
+    def test_the_row_is_composed_exactly_as_the_reference(self):
+        self.assertEqual(self.install(), INSTALLED)
+        page, pool = self.reference([self.blob])
+        self.assertEqual(self.page_now(), page)
+        self.assertEqual(self.pool_now()[STOCK_POOL_LEN:], pool[STOCK_POOL_LEN:])
+        self.assertEqual((self.get(FIRST_ID), self.get(ROW)), (34494, 243))
+        self.assertEqual(self.get(PAGE), (NBU + self.get(MAINB2)) & 0xFFFFFFFF)
+        self.assertEqual(self.get(NBU_WRITES), 0, 'the firmware image was written')
         self.assertEqual(self.get(OOB), 0)
 
-    def test_a_string_another_sup_already_added_is_shared_and_theirs_still_resolves(self):
-        theirs = self.lib.fpl_fixture_other_sup(b'OG3K', 4)
+    def test_stock_strings_keep_their_stock_offsets(self):
+        self.install()
+        pool = self.pool_now()
+        for text, at in (('xxx', 0x2A5C4), ('Footer05', 0x12BC4)):
+            self.assertEqual(pool[at:at + len(text) + 1], text.encode() + b'\0')
+            self.assertEqual(pool.count(text.encode() + b'\0', STOCK_POOL_LEN), 0,
+                             text + ' was appended although the stock pool has it')
+
+    def test_on_top_of_another_sups_row(self):
+        # another sup composed MainB2 first: this row goes after its row
+        self.assertEqual(self.lib.fpl_fixture_other_block(self.blob, len(self.blob)), 0)
+        self.assertEqual(self.install(), INSTALLED)
+        page, _ = self.reference([self.blob, self.blob])
+        self.assertEqual(self.page_now(), page)
+        self.assertEqual((self.get(FIRST_ID), self.get(ROW)), (34494 + 23, 243 + 81))
+
+    def test_a_string_another_sup_already_added_is_shared(self):
         same = self.lib.fpl_fixture_other_sup(b'Lossless RAW', 12)
-        self.assertNotEqual(theirs, 0xFFFFFFFF)
-        pool = self.switched()[0]
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-        self.assertEqual(self.switched()[0], pool, 'a second copy of the pool')
-        for at, s in REFS:
-            self.assertEqual(self.resolved(at), s)
-        page = self.get(PAGE)
-        word = int.from_bytes(self.bytes_at(page + 0x2A9A8, 4), 'big')
-        self.assertEqual(word, same, 'the same string got a second entry')
-        buf = ct.create_string_buffer(16)
-        # their string, by the firmware's rule, is still theirs
-        length, base = self.switched()[1], self.switched()[0]
-        self.assertLess(theirs, length)
-        self.assertEqual(self.bytes_at(base + theirs, 5), b'OG3K\0')
-        del buf
+        self.assertNotEqual(same, 0xFFFFFFFF)
+        self.install()
+        pool = self.pool_now()
+        self.assertEqual(pool.count(b'Lossless RAW\0', STOCK_POOL_LEN), 1)
 
-    def test_only_mainb2_changes(self):
-        e = self.get(R_ENTRIES)
-        before = [self.peek(e + 44 * i + 8) for i in range(4)]
-        self.lib.fpl_fixture_install(AREA_BYTES)
-        after = [self.peek(e + 44 * i + 8) for i in range(4)]
-        self.assertEqual([b for i, b in enumerate(before) if i != 2],
-                         [a for i, a in enumerate(after) if i != 2])
-        self.assertNotEqual(before[2], after[2])
-
-    def test_the_page_is_switched_last(self):
-        self.lib.fpl_fixture_install(AREA_BYTES)
-        e = self.get(R_ENTRIES)
-        log = [self.get(100 + i) for i in range(self.get(WRITES_N))]
-        self.assertEqual(log[-1], e + 44 * 2 + 8 - 0x10000000)
-        self.assertEqual(log.count(e + 44 * 2 + 8 - 0x10000000), 1)
-
-    def test_published_before_and_after_the_switch(self):
-        self.lib.fpl_fixture_install(AREA_BYTES)
+    def test_published_before_the_switch(self):
+        self.install()
         self.assertGreaterEqual(self.get(PUBLISHES), 2)
 
-    def test_the_variable_is_registered_once_off_with_a_borrowed_resident_name(self):
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-        self.assertEqual((self.get(REG_CALLS), self.get(REGISTERED), self.get(DESC_N)), (3, 3, 3))
-        names = [self.bytes_at(self.peek(0x10009000 + 32 * i + 4), 20).split(b'\0')[0] for i in range(3)]
-        self.assertEqual(names, [b'MV_fpLossless', b'SUB_MV_fpLossless', b'EXCL_fpLossless'])
-        self.assertEqual([self.peek(0x10009000 + 32 * i + 8) for i in range(3)], [0, 0, 0])
-        self.assertEqual(self.get(BORROWED_BAD), 0, 'the registry was given a temporary name')
-        self.assertEqual(self.lib.fpl_fixture_on(), 0, 'not OFF by default')
+    # ---- the variables ------------------------------------------------------
+    def test_the_variables_are_registered_once_off_with_borrowed_resident_names(self):
+        self.install()
+        self.assertEqual((self.get(REG_CALLS), self.get(REGISTERED), self.get(BORROWED_BAD)), (3, 3, 0))
+        self.assertEqual(self.lib.fpl_fixture_on(), 0)
 
     def test_on_follows_the_row(self):
-        self.lib.fpl_fixture_install(AREA_BYTES)
+        self.install()
         self.lib.fpl_fixture_set_value(1)
         self.assertEqual(self.lib.fpl_fixture_on(), 1)
-        self.lib.fpl_fixture_set_value(0)
-        self.assertEqual(self.lib.fpl_fixture_on(), 0)
-        self.lib.fpl_fixture_set_value(7)                  # not a value the row writes
+        self.lib.fpl_fixture_set_value(2)
         self.assertEqual(self.lib.fpl_fixture_on(), 0)
 
     def test_an_existing_variable_of_that_name_is_used_not_registered_again(self):
         self.lib.fpl_fixture_preregister(0)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-        self.assertEqual((self.get(REG_CALLS), self.get(REGISTERED)), (2, 2))
+        self.assertEqual(self.install(), INSTALLED)
+        self.assertEqual(self.get(REGISTERED), 2)
 
+    def test_a_registration_that_fails_switches_nothing(self):
+        self.lib.fpl_fixture_reg_result(5)
+        self.assert_untouched(REGISTER)
+
+    def test_a_variable_of_that_name_but_another_type_switches_nothing(self):
+        self.lib.fpl_fixture_preregister(3)
+        self.assertNotEqual(self.install(), INSTALLED)
+        self.assertEqual(self.get(MAINB2), 0x76FF04)
+
+    # ---- the file -----------------------------------------------------------
     def test_the_file_is_read_from_the_card_and_the_object_always_destroyed(self):
-        self.lib.fpl_fixture_install(AREA_BYTES)
+        self.install()
         self.assertEqual((self.get(VOLUME), self.get(OPEN_MODE), self.get(PATH_OK)), (1, 1, 1))
         self.assertEqual((self.get(CTORS), self.get(OPENS), self.get(READS), self.get(CLOSES),
-                          self.get(DTORS)), (1, 1, 2, 1, 1))
+                          self.get(DTORS)), (1, 1, 3, 1, 1))
+        self.assertEqual(self.get(FILE_AT), 0xF000)
 
-    def test_it_installs_once(self):
-        self.lib.fpl_fixture_install(AREA_BYTES)
-        switched = self.switched()
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-        self.assertEqual(self.switched(), switched)
-        self.assertEqual(self.get(OPENS), 1)
-
-    # ---- nothing installed -------------------------------------------------
-    def test_a_camera_whose_objects_differ_gets_nothing(self):
-        app, scr, r, e = self.get(R_APP), self.get(R_SCREENS), self.get(R_READER), self.get(R_ENTRIES)
-        cases = {
-            'no GUI app': (0xC37B7048, 0, NO_GUI),
-            'screen count wild': (app + 0x80, 100000, NO_GUI),
-            'MainB2 of another app': (scr + 0x40 * 2 + 4, app + 0x100, NO_SCREEN),
-            'reader not the NBU': (r + 0x24, 0xC18C0000, READER),
-            'pool moved already': (r + 0x14, 0x12345678, READER),
-            'pool of another length': (r + 0x10, POOL_LEN_STOCK + 8, READER),
-            'entry at another offset': (e + 44 * 2 + 8, 0x76FF08, NO_ENTRY),
-        }
-        for name, (addr, value, result) in cases.items():
-            with self.subTest(case=name):
+    def test_a_bigger_vbin_moves_the_block_to_the_next_4k(self):
+        for used, at in ((0xF004, 0x10000), (0x10A00, 0x11000), (0x1F000, 0x1F000)):
+            with self.subTest(used=hex(used)):
                 self.setUp()
-                self.lib.fpl_fixture_word(addr, value)
-                self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), result)
-                self.assertEqual(self.get(REG_CALLS), 0)
-                self.assertEqual(self.get(OPENS), 0, 'the card was read before the checks')
-                self.assertEqual(self.get(WRITES_N), 0)
+                self.put(self.blob, head=vbin(used, at))
+                self.assertEqual(self.install(), INSTALLED)
+                self.assertEqual(self.get(FILE_AT), at)
 
-    def test_no_mainb2_screen_gets_nothing(self):
-        # rename the MainB2 screen/entry name string
-        scr = self.get(R_SCREENS)
-        name = self.peek(scr + 0x40 * 2 + 8)
-        self.lib.fpl_fixture_word(name, 0x6E69614D)       # "Main" then garbage
-        self.lib.fpl_fixture_word(name + 4, 0x00585842)
-        self.assert_untouched(NO_SCREEN)
+    def test_a_block_left_at_0xF000_behind_a_bigger_vbin_is_not_taken(self):
+        self.put(self.blob, head=vbin(0x10A00, 0x11000)[:0xF000])
+        self.assertNotEqual(self.install(), INSTALLED)
+        self.assertEqual(self.get(MAINB2), 0x76FF04)
+
+    def test_no_vbin_or_one_past_the_ceiling_installs_nothing(self):
+        for name, head in {'not a VBIN': b'NBIV' + HEAD[4:], 'past 0x1F000': vbin(0x1F004, 0x20000),
+                           'short file': HEAD[:12]}.items():
+            with self.subTest(name):
+                self.setUp()
+                self.put(self.blob if name != 'short file' else b'', head=head)
+                self.assert_untouched(FILE)
+                self.assertEqual(self.get(DTORS), 1)
+
+    def test_the_skip_is_read_in_pieces_no_bigger_than_the_room(self):
+        room = len(self.blob) + 0x1000
+        self.put(self.blob, head=vbin(0x1E800, 0x1F000))
+        self.assertEqual(self.install(0x1000 + room), INSTALLED)
+        self.assertEqual(self.get(READS), 1 + -(-(0x1F000 - 16) // room) + 1)
 
     def test_no_file_on_the_card(self):
-        self.put(menu_file(), present=0)
+        self.put(self.blob, present=0)
         self.assert_untouched(FILE)
-        self.assertEqual(self.get(DTORS), 1)
 
-    def test_a_file_that_is_not_ours_or_is_damaged(self):
-        good = bytearray(menu_file())
-        cases = {
-            'magic': (0, b'XXXX'),
-            'version': (4, struct.pack('<I', 3)),
-            'string length': (0x0C, struct.pack('<I', len(STRINGS) + 1)),
-            'stock page offset': (0x14, struct.pack('<I', 0x76FF00)),
-            'one page byte': (0x20 + 5000, bytes([good[0x20 + 5000] ^ 1])),
-            'one string byte': (0x20 + len(PAGE_BYTES) + 10, bytes([good[0x20 + len(PAGE_BYTES) + 10] ^ 1])),
-            'one reference byte': (BODY - 3, bytes([good[BODY - 3] ^ 1])),
-        }
-        for name, (off, patch) in cases.items():
-            with self.subTest(case=name):
-                self.setUp()
-                bad = bytearray(good)
-                bad[off:off + len(patch)] = patch
-                self.put(bytes(bad))
-                self.assert_untouched(FORMAT)
+    def test_a_block_that_is_not_ours(self):
+        self.put(b'FPLM' + self.blob[4:])
+        self.assert_untouched(FORMAT)
 
-    def test_a_truncated_file(self):
-        for data in (menu_file()[:BODY - 1], menu_file()[:16]):
-            with self.subTest(length=len(data)):
+    def test_a_damaged_or_truncated_block(self):
+        bad = bytearray(self.blob)
+        bad[0x1000] ^= 0x40
+        for name, data in {'damaged': bytes(bad), 'truncated': self.blob[:len(self.blob) // 2]}.items():
+            with self.subTest(name):
                 self.setUp()
                 self.put(data)
-                self.assert_untouched(FORMAT)
+                self.assert_untouched(UI)
+                self.assertEqual(self.get(UI_RESULT), UIA_BLOCK)
 
-    def test_bytes_after_the_declared_end_are_ignored(self):
-        # putfile cannot shorten a file: an older, longer one leaves its tail
-        data = menu_file()[:BODY] + b'\xAA' * 20
-        self.put(data)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), INSTALLED)
-
-    def test_a_bin_without_the_row_data_installs_nothing(self):
-        for head, data in ((self.HEAD[:0x8000], b''), (self.HEAD, b'')):
-            with self.subTest(length=len(head)):
-                self.setUp()
-                self.put(data, head=head)
-                self.assertIn(self.lib.fpl_fixture_install(AREA_BYTES), (FILE, FORMAT))
-                self.assertEqual(self.switched(), self.STOCK)
-
-    def test_the_data_is_taken_from_past_the_loaders_part_only(self):
-        # a data block at offset 0 (the old FPLMENU.BIN layout) is not ours
-        self.lib.fpl_fixture_file(menu_file(), len(menu_file()), 1)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), FORMAT)
+    def test_bytes_after_the_block_are_ignored(self):
+        self.put(self.blob + b'\x55' * 0x2000)
+        self.assertEqual(self.install(), INSTALLED)
 
     def test_too_little_room(self):
-        self.assertEqual(self.lib.fpl_fixture_install(0x1000 + 0xF000 - 8), ROOM)
-        self.assertEqual(self.switched(), self.STOCK)
+        self.assertEqual(self.install(0x1000 + 0x800), ROOM)
         self.setUp()
-        self.assertEqual(self.lib.fpl_fixture_install(0x1000 + P.FILE_BYTES), ROOM)
-        self.assertEqual(self.switched(), self.STOCK)
+        self.assertEqual(self.install(0x1000 + len(self.blob)), ROOM)
+        self.assertEqual(self.get(MAINB2), 0x76FF04)
 
-    def test_references_that_do_not_fit_change_nothing(self):
-        for case, refs in {'past the page': [(len(PAGE_BYTES) - 2, 'xxx')],
-                           'past the strings': [(0x100, len(STRINGS))],
-                           'into a terminator': [(0x100, len(STRINGS) - 1)]}.items():
-            with self.subTest(case=case):
-                self.setUp()
-                self.put(menu_file(refs=refs))
-                self.assert_untouched(FORMAT)
+    # ---- the camera is not what we expect -------------------------------------
+    def test_it_installs_once(self):
+        self.install()
+        page = self.page_now()
+        self.assertEqual(self.install(), INSTALLED)
+        self.assertEqual(self.page_now(), page)
+        self.assertEqual(self.get(REG_CALLS), 3)
+
+    def test_no_gui_or_no_mainb2_screen_gets_nothing(self):
+        self.lib.fpl_fixture_word(0xC37B7048, 0)
+        self.assert_untouched(NO_GUI)
+        self.setUp()
+        names = self.get(R_SCREENS)
+        self.lib.fpl_fixture_word(names + 0x40 * 2 + 8, self.peek(names + 0x40 * 3 + 8))
+        self.assert_untouched(NO_SCREEN)
 
     def test_a_pool_nobody_announced_installs_nothing(self):
         self.lib.fpl_fixture_word(self.get(R_READER) + 0x14, 0x12345678)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), READER)
-        self.assertEqual(self.get(REG_CALLS), 0)
-        self.assertEqual(self.switched()[2], 0x76FF04)
+        self.assert_untouched(READER)
 
-    def test_a_registration_that_fails_switches_nothing(self):
-        self.lib.fpl_fixture_reg_result(3)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), REGISTER)
-        self.assertEqual(self.switched()[2], 0x76FF04)
-        self.assertEqual(self.get(REG_CALLS), 1, 'retried a non-transactional registration')
-
-    def test_a_variable_of_that_name_but_another_type_switches_nothing(self):
-        self.lib.fpl_fixture_preregister(1)
-        self.assertEqual(self.lib.fpl_fixture_install(AREA_BYTES), VARIABLE)
-        self.assertEqual(self.switched()[2], 0x76FF04)
-
-
-class PackTests(unittest.TestCase):
-    def test_the_real_candidate_packs_against_the_pinned_image(self):
-        if not P.SEG0.exists():
-            self.skipTest('pinned firmware image not present')
-        with tempfile.TemporaryDirectory() as tmp:
-            data = P.build(pathlib.Path(tmp) / 'FPLMENU.BIN')
-        magic, version, page, strings, refs, offset, _, zero = struct.unpack_from('<8I', data)
-        self.assertEqual((magic, version, offset, zero), (P.MAGIC, 2, 0x76FF04, 0))
-        self.assertEqual((page, refs), (181976, 18))
-        self.assertEqual(len(data), P.FILE_BYTES)
-        self.assertEqual(set(data[0x20 + page + strings + 8 * refs:]), {0})
-        for name in P.NAMES:
-            self.assertIn(name, data[0x20 + page:0x20 + page + strings])
+    def test_a_mainb2_that_is_neither_stock_nor_ours_is_left_alone(self):
+        self.lib.fpl_fixture_word(self.get(R_ENTRIES) + 44 * 2 + 8, 0x76FF00)
+        self.assertEqual(self.install(), UI)
+        self.assertEqual(self.get(UI_RESULT), UIA_PAGE)
+        self.assertEqual(self.get(MAINB2), 0x76FF00)
 
 
 class MenuMutationTests(unittest.TestCase):
     MUTATIONS = {
-        'skips the checksum': ('    if (fnv(page, page_len + strings_len + 8u * reloc_count, 2166136261u) != peek(file + 0x18))',
-                               '    if (fnv(page, page_len + strings_len + 8u * reloc_count, 2166136261u) != peek(file + 0x18) && 0)'),
-        'leaves the builder offsets in the page': ('        put_be(page + at, off);',
-                                                   '        put_be(page + at, s + 176152u);'),
-        'writes the offset little-endian': ('        put_be(page + at, off);',
-                                            '        put_be(page + at, __builtin_bswap32(off));'),
-        'uses one cache entry for every string': (
-            '        for (k = 0; k < cached && cache_from[k] != s; ++k) {}',
-            '        for (k = 0; k < cached && cache_from[k] != s && 0; ++k) {}'),
-        'checks references only while using them': (
-            '        if (at > page_len - 4u || s >= strings_len) return fail(m, FPL_MENU_FORMAT);',
-            '        if ((at > page_len - 4u || s >= strings_len) && 0) return fail(m, FPL_MENU_FORMAT);'),
         'accepts any pool': ('        !uis_pool_known(reader))              /* stock, or shared by the convention */',
                              '        0)'),
-        'does not check the entry offset': (
-            '    if (!entry || peek(entry + ENTRY_OFFSET) != MAINB2_OFFSET)', '    if (!entry)'),
         'registers every time': ('        d = variable(app, NAME);\n        if (!d) {', '        d = 0;\n        if (!d) {'),
         'reads ON from any nonzero': ('    if (!d || peek(d + DESC_VALUE) != 1u) return 0;',
                                       '    if (!d || !peek(d + DESC_VALUE)) return 0;'),
@@ -378,12 +316,29 @@ class MenuMutationTests(unittest.TestCase):
         'defaults ON': ('            def[2] = 0u;                               /* OFF */',
                         '            def[2] = 1u;'),
         'leaks the file object': ('    f_dtor(fobj, 2);\n', ''),
-        'reads the data from the start of the BIN': (
-            '        ok = f_read(fobj, file, FPL_MENU_AT, &actual) && actual == FPL_MENU_AT;\n', ''),
+        'reads the data right after the header': (
+            '            ok = f_read(fobj, file, want, &actual) && actual == want;',
+            '            ok = 1; actual = want;'),
+        'skips in one read whatever the room': (
+            '            uint32_t want = at - done < room ? at - done : room;',
+            '            uint32_t want = at - done;'),
+        'does not round up to 4 KiB': (
+            '    used = (used + FPL_MENU_AT_STEP - 1u) & ~(FPL_MENU_AT_STEP - 1u);', ''),
+        'always at 0xF000': ('    if (used <= FPL_MENU_AT_MIN) return FPL_MENU_AT_MIN;',
+                             '    return FPL_MENU_AT_MIN;'),
+        'trusts any header': ('    if (peek(h) != FPL_VBIN_MAGIC || count > FPL_MENU_AT_MAX / 8u || body > FPL_MENU_AT_MAX)',
+                              '    if (0)'),
+        'no ceiling': ('    return used <= FPL_MENU_AT_MAX ? used : 0;', '    return used;'),
         'registers only the value': ('    for (uint32_t n = 0; n < FPL_MENU_VARIABLES; ++n) {\n        const char *NAME',
                                      '    for (uint32_t n = 0; n < 1; ++n) {\n        const char *NAME'),
         'reads ON from the lock': ('    d = variable(m->app, (const char *)m->names[0]);',
                                    '    d = variable(m->app, (const char *)m->names[2]);'),
+        'passes the padding as the block': ('    m->ui_result = uia_apply(file, actual, &ui);',
+                                            '    m->ui_result = uia_apply(file + 4, actual, &ui);'),
+        'installed although the block was refused': (
+            '    if (m->ui_result != UIA_OK) return fail(m, FPL_MENU_UI);', ''),
+        'not once': ('    if (!m || m->result) return m ? m->result : FPL_MENU_NO_GUI;   /* once */',
+                     '    if (!m) return FPL_MENU_NO_GUI;'),
     }
 
     def test_every_mutation_is_caught(self):
@@ -409,13 +364,13 @@ class ArmCompileTests(unittest.TestCase):
     def test_it_builds_freestanding_for_the_camera(self):
         clang = shutil.which('clang') or 'clang'
         with tempfile.TemporaryDirectory() as tmp:
-            out = pathlib.Path(tmp) / 'menu.o'
-            subprocess.run([clang, '--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb',
-                            '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin', '-nostdlib',
-                            '-fropi', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
-                            '-I', str(HERE.parents[1] / 'uishare'),
-                            '-c', str(HERE / 'menu_page.c'), '-o', str(out)],
-                           check=True, capture_output=True, text=True)
+            for src in (HERE / 'menu_page.c', FPSUP / 'uishare' / 'ui_apply.c'):
+                subprocess.run([clang, '--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb',
+                                '-mfloat-abi=soft', '-ffreestanding', '-fno-builtin', '-nostdlib',
+                                '-fropi', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                                '-I', str(FPSUP / 'uishare'), '-I', str(HERE),
+                                '-c', str(src), '-o', str(pathlib.Path(tmp) / (src.stem + '.o'))],
+                               check=True, capture_output=True, text=True)
 
 
 if __name__ == '__main__':

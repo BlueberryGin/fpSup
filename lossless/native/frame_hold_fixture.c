@@ -29,6 +29,7 @@
 
 static uint8_t mem[MEM_SIZE];
 static uint32_t engine[6], tilecount, endpos, uncached_hits, barriers, oob;
+static uint32_t devregs[0x40];         /* the engine's register window */
 static uint32_t enq_ids[256], enq_payload[256], enq_state[256], enq_n;
 static uint32_t barrier_log[1024], barrier_n;
 static uint32_t published(void);
@@ -38,6 +39,8 @@ static uint32_t *slot(uintptr_t a, uint32_t count) {
     if (a >= ENGINE && a < ENGINE + 24) return &engine[(a - ENGINE) / 4];
     if (a == TILECOUNT) return &tilecount;
     if (a == ENDPOS) return &endpos;
+    if (a >= 0x300d0000u && a < 0x300d0100u) return &devregs[(a - 0x300d0000u) / 4];
+    if (a == 0x300d03fcu) return &devregs[0x3f];
     if (a >= MEM + UNCACHED && a < MEM + UNCACHED + MEM_SIZE) {
         if (count) uncached_hits++;
         a -= UNCACHED;
@@ -126,8 +129,8 @@ const struct fpl_hold_natives fpl_hold_test_natives = {
 };
 
 /* ---- the fake engine ---------------------------------------------------- */
-enum { MODE_OK, MODE_REFUSE, MODE_WAIT_ERROR, MODE_NEVER };
-static uint32_t mode, latency, left, running, payload_bytes, open_ret;
+enum { MODE_OK, MODE_REFUSE, MODE_WAIT_ERROR, MODE_NEVER, MODE_NEVER_ONCE };
+static uint32_t mode, latency, left, running, payload_bytes, open_ret, stuck;
 static uintptr_t started_source, started_dest, band_table;
 static uint32_t starts, closes;
 
@@ -151,13 +154,14 @@ static uint32_t c_submit(const uint32_t *r) {
 static void c_reset(void) {}
 static uint32_t c_start(void) {
     if (running) oob++;                  /* one engine: started while running */
+    if (mode == MODE_NEVER_ONCE) { stuck = 1; mode = MODE_OK; }   /* this job only */
     running = 1; left = latency; starts++; return 0;
 }
-static uint32_t c_close(void) { running = 0; closes++; return 0; }
+static uint32_t c_close(void) { running = 0; stuck = 0; closes++; return 0; }
 static uint32_t c_twai(uint32_t f, uint32_t w, uint32_t m, uint32_t *p, uint32_t t) {
     (void)f; (void)w; (void)m; (void)t;
     if (mode == MODE_WAIT_ERROR) return 0xffffffefu;
-    if (mode == MODE_NEVER) return E_TMOUT;
+    if (mode == MODE_NEVER || stuck) return E_TMOUT;
     if (left) { left--; return E_TMOUT; }
     if (mode == MODE_REFUSE) { *p = 5; return 0; }
     /* "encode": the source's marker, then filler, into our output */
@@ -201,6 +205,8 @@ static struct fpl_frame_hold *const lanes[2] = {&hold, &hold_b};
 static void task_pass(void) { fpl_lanes_task(lanes); }
 static void collect_both(void) { fpl_hold_collect(&hold); fpl_hold_collect(&hold_b); }
 void fpl_fixture_reenter(uint32_t v) { reenter = v; }
+/* 0: the codec task does not run while stop sleeps (starved) */
+void fpl_fixture_task_in_sleep(uint32_t v) { task_in_sleep = v; }
 static struct fpl_flush_stats flush_stats;
 static uint32_t writer_count;
 static uint32_t published(void) {
@@ -251,7 +257,7 @@ uint32_t fpl_fixture_reset(uint32_t latency_polls, uint32_t payload, uint32_t lo
     enq_n = uncached_hits = barriers = oob = tilecount = endpos = barrier_n = 0;
     memset(&flush_stats, 0, sizeof flush_stats);
     writer_count = 1;
-    mode = MODE_OK; latency = latency_polls; left = running = 0;
+    mode = MODE_OK; latency = latency_polls; left = running = stuck = 0;
     payload_bytes = payload; open_ret = 0; starts = closes = 0;
     width = 520; height = 368; format = 0;
     for (uint32_t n = 0; n < 18; ++n) descriptor[n] = 0x2000u + n;
@@ -344,6 +350,7 @@ uint32_t fpl_fixture_lane_get(uint32_t n, uint32_t field) {
     case 15: return h->last_result;
     case 16: { uint32_t m = 0; for (uint32_t i = 0; i < 8; ++i) m |= (h->refused_by[i] != 0) << i; return m; }
     case 17: return h->arrivals;
+    case 18: return h->stalls;
     default: return 0xFFFFFFFFu;
     }
 }

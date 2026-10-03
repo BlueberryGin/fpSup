@@ -139,7 +139,16 @@ uint32_t fpl_fixture_clip(const uint8_t *file, uint32_t len, uint32_t size, uint
     allocs = releases = 0;
     return fpl_play_clip(&play, 0xDE5C, size, busy);
 }
+/* clip open then the player's pool, as the camera does: the old pool
+ * freed first when the size changed, then made */
+uint32_t fpl_fixture_open(const uint8_t *file, uint32_t len, uint32_t size, uint32_t busy) {
+    uint32_t r = fpl_fixture_clip(file, len, size, busy);
+    fpl_play_end(&play);
+    fpl_play_pool(&play);
+    return r;
+}
 void fpl_fixture_end(void) { fpl_play_end(&play); }
+void fpl_fixture_pool(void) { fpl_play_pool(&play); }
 /* A frame as the player leaves it: `file` read into BUF, capacity `cap`. */
 void fpl_fixture_load(const uint8_t *file, uint32_t len, uint32_t cap) {
     memset(mem, 0xA5, SCRATCH - MEM);

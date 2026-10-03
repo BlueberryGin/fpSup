@@ -295,6 +295,11 @@ def main():
                          'section that overlaps the logger or lands in the '
                          'loader\'s read window fails the build rather than '
                          'the camera.')
+    ap.add_argument('--boot-bin', action='append', default=[], metavar='FILE:OFFSET',
+                    help='a further run-in-place payload, passed to build_autorun.py '
+                         'after the logger\'s own: its entry follows the logger\'s '
+                         '(OpenGate\'s UI section, fpSup/uishare). Without it nothing '
+                         'changes.')
     ap.add_argument('--vshl-entry', type=lambda s: int(s, 0), default=None,
                     help='optional absolute entry for the extra sections; '
                          'called after the USB worker and gyro launcher')
@@ -366,6 +371,8 @@ def main():
     bf = tmp / 'gsup_launch.bin'
     bf.write_bytes(boot_blob)
     cmd += ['--boot-bin', f'{bf}:0']
+    for spec in a.boot_bin:
+        cmd += ['--boot-bin', spec]
     if a.vshl_entry:
         # build_autorun already orders worker, boot-bin, then this entry.
         cmd += ['--vshl-entry', f'0x{a.vshl_entry:08X}']

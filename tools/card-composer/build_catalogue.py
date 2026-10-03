@@ -339,6 +339,30 @@ def refs(product='og3k'):
     tmp = pathlib.Path(tempfile.mkdtemp(prefix=f'{product}ref-'))
     og3k = latest(product)
     og_entry, og_records = parse(payload(og3k).read_bytes())
+    # An OpenGate card that carries the shared UI section (fpSup/uishare,
+    # OG_UISHARE) has two entries and build_autorun's trampoline: the UI
+    # section, then the restore. The section goes to the reference as a
+    # --boot-bin (its entry follows gyro's, as the page orders it), the
+    # trampoline is left out, and the restore is the absolute entry.
+    boots = []
+    tramp_code, tramp_tbl = trampoline()
+    card = dict(entry=og_entry, records=[dict(a=a, b=base64.b64encode(b).decode())
+                                         for a, b in og_records])
+    own = own_trampoline(card, tramp_code, tramp_tbl)
+    if own:
+        absolute = [e for e in own[1] if e >= 0x40000000]
+        if len(absolute) > 1:
+            raise SystemExit(f'{og3k.name} has more than one absolute entry')
+        og_entry = absolute[0] if absolute else 0
+        offs = offsets(og_records)
+        for e in own[1]:
+            if e < 0x40000000:
+                hit = [i for i, o in enumerate(offs) if o == e and og_records[i][0] == 0]
+                if len(hit) != 1:
+                    raise SystemExit(f'{og3k.name}: entry 0x{e:X} is not a run-in-place section')
+                boots.append(og_records[hit[0]][1])
+        drop = {base64.b64decode(own[0]['b'])} | set(boots)
+        og_records = [og_records[0]] + [(a, b) for a, b in og_records[1:] if not (a == 0 and b in drop)]
     if og_entry and (og_entry < 0x40000000 or og_entry % 4):
         raise SystemExit(f'{og3k.name} carries an unsupported entry point')
     helpers = [(address, blob) for address, blob in og_records
@@ -369,6 +393,10 @@ def refs(product='og3k'):
                '--four-box-bar',
                '--banner', f'fpSup-{product.upper()}-Gyro!', '--out', str(d),
                *section_args]
+        for i, boot in enumerate(boots):
+            bp = tmp / f'boot_{i}.bin'
+            bp.write_bytes(boot)
+            cmd += ['--boot-bin', f'{bp}:0']
         if og_entry:
             cmd += ['--vshl-entry', f'0x{og_entry:08X}']
         if debug:
@@ -458,6 +486,14 @@ PRODUCTS = {
                           'Saturation pick the shadow display and the colour matrix; '
                           'all of it is remembered across a power-off. The recorded '
                           'RAW is not changed. Test build.'),
+    'lossless': dict(id='lossless', name='fpSup-Lossless', category='shooting',
+                     tail_at=0xF000,
+                     desc='Lossless-compressed CinemaDNG by the camera\'s own hardware '
+                          'codec: a Lossless RAW row (SHOOT page 2, CINE), OFF at every '
+                          'power-on and never saved. Frames the codec cannot finish in '
+                          'time are written uncompressed, the first frame of every take '
+                          'too; compressed clips play back in the camera. With OpenGate '
+                          'it needs OG3K v0.2.8a / OG2K v0.1.5a or later. Test build.'),
 }
 # usbshell first: picked() walks this order, so the generated trampoline calls
 # the worker before gyro and the optional OG restore entry.  Its file layout
@@ -465,10 +501,17 @@ PRODUCTS = {
 # every original section and this ordered call chain without fixing offsets.
 # og2k last: the merge checks below reproduce cards that predate it, and
 # picked() walks this order, so appending cannot change their bytes.
-ORDER = ['usbshell', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view']
+ORDER = ['usbshell', 'lossless', 'gyro', 'gyro-base', 'og3k', 'og2k', 'raw-view']
 # gyro-base right after gyro (2026-09-26): the two are exclusive, so no
 # existing combination changes, and its launcher runs before the OG restore
 # the way gyro's does.
+# lossless second (2026-10-03): its launcher runs right after the worker and
+# before the OG restore, the order of the Lossless test cards (build_card.py:
+# worker -> lossless -> OG).  No existing combination carries it, so none moves.
+# Its fpSup.BIN has a TAIL: the menu row's data past the loader's read, read by
+# its launcher at the card's read cap (0xF000 in the release, tail_at; the page
+# puts it at the raised cap when a merge needs one -- menu_page.c works the same
+# offset out of the VBIN header).
 # raw-view last (2026-09-27): appending changes no existing combination, and its
 # launcher runs after the OG restore, so its stock-word guards see whatever the
 # others installed and it stands down rather than overwrite them.  Its 48
@@ -737,6 +780,47 @@ def load(card):
     return vshl, ar
 
 
+def own_trampoline(card, tramp, tbl):
+    """(record, [entries]) when the card's header points at its own entry
+    trampoline (build_autorun's, the same bytes as `tramp`), else None.  The
+    page does the same (template.html ownTrampoline)."""
+    e = card['entry']
+    if not e or e >= 0x40000000:
+        return None
+    recs = card['records']
+    blobs = [(r['a'], base64.b64decode(r['b'])) for r in recs]
+    for r, off, (_, body) in zip(recs, offsets(blobs), blobs):
+        if off != e:
+            continue
+        if len(body) < tbl + 8 or body[:tbl] != tramp[:tbl] or \
+                struct.unpack_from('<I', body, tbl)[0] != e + tbl:
+            return None
+        out, o = [], tbl + 4
+        while o + 4 <= len(body):
+            w = struct.unpack_from('<I', body, o)[0]
+            if not w:
+                return r, out
+            out.append(w)
+            o += 4
+        return None
+    return None
+
+
+def split_tail(card, vshl):
+    """The bytes a card carries past the loader's read (lossless: its menu
+    row's FPLM block at 0xF000).  Only a product that declares tail_at has one;
+    the VBIN in front of it must end before it."""
+    at = card.get('tail_at')
+    if at is None or len(vshl) <= at:
+        return b''
+    _, count, _, body = struct.unpack_from('<4sIII', vshl)
+    if 16 + 8 * count + body > at:
+        raise SystemExit(f'{card["id"]}: VBIN runs past its tail at 0x{at:X}')
+    if any(vshl[16 + 8 * count + body:at]):
+        raise SystemExit(f'{card["id"]}: bytes between the VBIN and its tail')
+    return vshl[at:]
+
+
 def check_js(page):
     """Refuse to write a page whose script does not parse.
 
@@ -768,6 +852,7 @@ def main():
     for card in discover():
         vshl, ar = load(card)
         entry, recs = parse(vshl)
+        tail = split_tail(card, vshl)
         ban = banner_of(ar)
         templates[ban] = ar.split('# pad -- see PAD_TO')[0].replace(ban, '@@BANNER@@')
         out_cards.append(dict(
@@ -781,6 +866,9 @@ def main():
                           l=FIXED.get(a, LABELS.get(a, '')),
                           k='fixed' if a in FIXED else 'sec')
                      for a, b in recs]))
+        if tail:
+            out_cards[-1]['tail'] = dict(at=card['tail_at'],
+                                         b=base64.b64encode(tail).decode())
         print(f'  {card["id"]:9} {len(recs):3} sections  entry '
               f'0x{entry:08X}  "{ban}"')
 
@@ -845,8 +933,9 @@ def main():
     bad = False
     for card, spec in zip(out_cards, discover()):
         vshl, ar = load(spec)
+        tail = split_tail(spec, vshl)
         got = compose([(r['a'], base64.b64decode(r['b'])) for r in card['records']],
-                      card['entry'])
+                      card['entry'], spec['tail_at'] if tail else None) + tail
         ok_v = got == vshl
         bad |= not ok_v
         print(f'  {"OK  " if ok_v else "FAIL"}  {card["id"]} payload')
@@ -868,6 +957,7 @@ def main():
             if c['id'] not in ids:
                 continue
             recs_in = by[c['id']]['records']
+            own = own_trampoline(by[c['id']], tramp, tramp_tbl)
             # The FIRST section is the loader's own second half, whichever card
             # it came from, because that is where loader.S branches: the end of
             # the table.  Dropped, and one canonical helper put back below --
@@ -879,7 +969,7 @@ def main():
             # staging buffer, and so does this trampoline.  Dropping those would
             # have taken the worker off the card silently.
             for i, r in enumerate(recs_in):
-                if i == 0:
+                if i == 0 or (own and r is own[0]):
                     continue
                 # Only the explicitly identified Shell card owns this option.
                 # A destination-zero gyro launcher is not a USB worker, and an
@@ -900,20 +990,20 @@ def main():
                 # has to agree or the two cannot be compared.
                 (runs if r['a'] == 0 else
                  tail if r['a'] == cat['entry_at'] else out).append(r)
-            # This card's entry, as something that survives being re-laid-out.
-            e = by[c['id']]['entry']
-            if e == 0:
-                continue
-            if e >= 0x40000000:
-                entries.append(('abs', e, 0))
-                continue
-            blobs = [(r['a'], base64.b64decode(r['b'])) for r in recs_in]
-            for i, off in enumerate(offsets(blobs)):
-                if off <= e < off + len(blobs[i][1]):
-                    entries.append(('in', recs_in[i], e - off))
-                    break
-            else:
-                raise SystemExit(f'{c["id"]}: entry 0x{e:08X} is in no section')
+            # This card's entries, as something that survives being re-laid-out.
+            for e in (own[1] if own else [by[c['id']]['entry']]):
+                if e == 0:
+                    continue
+                if e >= 0x40000000:
+                    entries.append(('abs', e, 0))
+                    continue
+                blobs = [(r['a'], base64.b64decode(r['b'])) for r in recs_in]
+                for i, off in enumerate(offsets(blobs)):
+                    if off <= e < off + len(blobs[i][1]):
+                        entries.append(('in', recs_in[i], e - off))
+                        break
+                else:
+                    raise SystemExit(f'{c["id"]}: entry 0x{e:08X} is in no section')
 
         recs = [cat['stage2']] + out + tail + runs
         if len(entries) > 1:

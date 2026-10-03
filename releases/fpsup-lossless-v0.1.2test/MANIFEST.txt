@@ -1,0 +1,44 @@
+SIGMA fp — Lossless CinemaDNG (v0.1.2test)
+banner: fpSup-LL-v0.1.2test!
+firmware: SIGMA fp Ver.5.02 only
+
+AutoRun.txt  32,772B  sha256=82b623e752b9833d22f648bd82ce012827257a1d9e431261b345de680ce4be7d
+fpSup.BIN    94,208B  sha256=57e79160f18e03c6e4611e5aa2650919467ec045608a56ce845fe301c2f48e93
+
+Built 2026-10-03:
+  fpSup/lossless/build_card.py --plain --no-shell --banner 'fpSup-LL-v0.1.2test!'
+No USB shell, no Fast Start 2 (the merge page adds those).
+
+fpSup.BIN layout:
+  0x00000..0x0EFFF  the VBIN the loader reads (MAXLEN 0xF000)
+  0x0F000..          the Lossless RAW row as an FPUI block (30,844 B): what the row
+                     ADDS to the stock MainB2 page (fpSup/uishare/ui, built by
+                     lossless/menu/build_fpui.py). The launcher finds it from the
+                     VBIN header (at the card's read cap: 0xF000, or the VBIN's end
+                     rounded up to 4 KiB in a bigger merge; fpSup-Merge puts it
+                     there) and composes it onto MainB2 with ui_apply.c -- onto the
+                     stock page or onto a copy another sup already added to.
+
+Sections:
+  0x00000000  stage2 (this card's own, plain loader)
+  0x00000000  Lossless launcher, 30,064 B, sha256=09e7884c6459b5403b11f10220fde945c2d87f7d69030fc4378ae5dd44fb29e5
+  8 hook sites, each declared with the firmware's own word so the
+  power-off write-back restores it (see build.json).
+
+What is byte for byte card testcard-20261002-af-og3k (OG3K + shell + FS2,
+on the camera 2026-10-02): the 8 site words, and the recording/playback code.
+What changed since (2026-10-03), none of it on the camera yet:
+  - the menu row is no longer a whole private MainB2 (196 KB) but an FPUI
+    block of additions composed at boot (fpSup/uishare/ui_apply.c). Applied
+    to the stock page it gives exactly af's page (host, reference applier,
+    and the ARM build in unicorn), and it stacks with other sups' rows;
+  - its private strings are interned with a stock-pool hint: no scan of the
+    176 KB stock pool at boot (each scan cost ~0.25 s on the camera);
+  - the block is found from the VBIN header, so the card merges with
+    RAW-View and with anything else that grows the VBIN.
+Host tests: uishare test_ui_pool / test_ui_apply / test_options, lossless
+test_menu_page (26, 17 mutations), card emulation (16, incl. the menu
+installed by the ARM launcher bytes against the pinned image).
+
+Settings block: nothing is written to it.  The row's value lives in the UI
+variable registry (memory only); every boot starts OFF.

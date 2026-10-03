@@ -411,6 +411,21 @@ class PlainCardRestoreTests(unittest.TestCase):
             self.assertEqual(bytes(cam.mu.mem_read(d, n)),
                              cam.stock[d - 0xC0000000:d - 0xC0000000 + n], hex(d))
 
+    def test_entry_receives_aligned_stack_and_own_address(self):
+        class EntryABI(Camera):
+            seen = False
+            def _hook(self, mu, addr, size, data):
+                if self.entry is not None and addr == self.entry:
+                    assert self.r(UC_ARM_REG_SP) % 8 == 0
+                    assert self.r(UC_ARM_REG_R0) == addr
+                    self.seen = True
+                super()._hook(mu, addr, size, data)
+        for incoming in (STACK - 0x1000, STACK - 0x1004):
+            cam = EntryABI(self.loader, self.bin)
+            _, returned = cam.call(CAVE_LOW, sp=incoming)
+            self.assertTrue(cam.seen)
+            self.assertEqual(returned, incoming)
+
 
 if __name__ == '__main__':
     unittest.main()

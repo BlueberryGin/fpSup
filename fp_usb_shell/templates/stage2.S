@@ -127,8 +127,15 @@ stage2:
     movt    r3, #0x4000                 @ 0x40000000
     cmp     r0, r3
     addlo   r0, r0, r6
+    /* The native caller can arrive four bytes off. Keep the public entry ABI
+     * (r0 = resolved entry), but provide an AAPCS-aligned call frame. r4 is
+     * saved above and must survive the entry; restore the exact incoming SP
+     * before pass 2. This also aligns every entry in entries.S. */
+    mov     r4, sp
+    bic     sp, sp, #7
     mov     ip, r0
     blx     ip
+    mov     sp, r4
 1:  mov     r8, #0                      @ pass 2: offsets into the entry's pool
     bl      s2_pass
     bl      s2_publish                  @ the pool code just landed; publish it too

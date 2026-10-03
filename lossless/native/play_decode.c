@@ -192,6 +192,7 @@ uint32_t fpl_play_clip(struct fpl_play *p, uintptr_t desc, uint32_t size, uint32
     if (!p) return size;
     saturate(&p->clips);
     p->clip_size_was = size;
+    p->scratch_want = 0;
     if (busy || !desc) return size;
     for (uint32_t n = 0; n < FPL_PLAY_HEADER / 4u; ++n) p->header[n] = 0;
     if (!first_frame(desc, p->file, (uint8_t *)p->header, FPL_PLAY_HEADER, &got) ||
@@ -200,30 +201,41 @@ uint32_t fpl_play_clip(struct fpl_play *p, uintptr_t desc, uint32_t size, uint32
         return size;
     }
     h = (uintptr_t)p->header;
-    if (rd32(h, 1) != TIFF_LE || rd32(h + 4, 1) == ROOT_STOCK) return size;   /* stock */
+    if (rd32(h, 1) != TIFF_LE) return size;
     if (!read_ifd(h, got, ROOT_STOCK, &f0, 1) || !stock_strip(&f0)) {
-        saturate(&p->clip_failed);
-        return size;
+        if (rd32(h + 4, 1) != ROOT_STOCK) saturate(&p->clip_failed);   /* ours, unreadable */
+        return size;                     /* a format we do not decode: stock */
+    }
+    /* One tile row's stream and output, for the tallest tile the engine
+     * takes; taken when the pool is made (fpl_play_pool). For EVERY clip of
+     * a format we decode: a take's first frame is left uncompressed (card.c,
+     * for DaVinci), so the first frame cannot say whether later ones are. */
+    need = 2u * kib(pitch_of(f0.w, f0.bits) * MAX_TILE_H);
+    p->scratch_want = need;
+    if (rd32(h + 4, 1) == ROOT_STOCK) {
+        saturate(&p->clips_first_stock);
+        return size;                     /* already a stock frame's size */
     }
     saturate(&p->clips_ours);
     /* the stock frame file: header, then the strip padded to 512 B */
     stock = f0.soff + ((f0.scnt + 0x1ffu) & ~0x1ffu);
     want = stock > size ? stock : size;
     p->clip_size_set = want;
-    /* one tile row's stream and output, for the tallest tile the engine takes */
-    need = 2u * kib(pitch_of(f0.w, f0.bits) * MAX_TILE_H);
-    if (p->scratch && p->scratch_bytes < need) fpl_play_end(p);
-    if (!p->scratch) {
-        p->scratch = scratch_get(p->obj, need);
-        if (!p->scratch || (p->scratch & 0x3ffu)) {
-            if (p->scratch) scratch_put(p->obj);
-            p->scratch = 0;
-            saturate(&p->scratch_failed);
-        } else {
-            p->scratch_bytes = need;
-        }
-    }
     return want;
+}
+
+void fpl_play_pool(struct fpl_play *p) {
+    if (!p || !p->scratch_want) return;
+    if (p->scratch && p->scratch_bytes < p->scratch_want) fpl_play_end(p);
+    if (p->scratch) return;
+    p->scratch = scratch_get(p->obj, p->scratch_want);
+    if (!p->scratch || (p->scratch & 0x3ffu)) {
+        if (p->scratch) scratch_put(p->obj);
+        p->scratch = 0;
+        saturate(&p->scratch_failed);
+    } else {
+        p->scratch_bytes = p->scratch_want;
+    }
 }
 
 /* ---- a frame -------------------------------------------------------------- */

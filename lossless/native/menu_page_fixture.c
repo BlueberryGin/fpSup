@@ -6,14 +6,16 @@
  * and the area the module is given. Any access outside them is counted. The
  * native objects are laid out exactly as read from the camera 2026-09-30. */
 #include <string.h>
+#include <stdlib.h>
 #include "menu_page.h"
 #include "ui_pool.h"
+#include "ui_apply.h"
 
 #define NBU        0xC18C0460u
-#define NBU_SIZE   0x30000u
+#define NBU_SIZE   0x800000u           /* the real image from C18C0460: pool + MainB2 */
 #define GUIW       0xC37B7048u
 #define HEAP       0x10000000u
-#define HEAP_SIZE  (2u << 20)
+#define HEAP_SIZE  (16u << 20)
 #define APP        (HEAP + 0x0000u)
 #define SCREENS    (HEAP + 0x1000u)          /* pointer array */
 #define SCREEN_AT  (HEAP + 0x2000u)          /* screen i at +i*0x40 */
@@ -27,7 +29,9 @@
 #define POOL_LEN   176152u
 #define NSCREENS   4u
 
-static uint8_t nbu[NBU_SIZE], heap[HEAP_SIZE];
+static uint8_t *nbu, *heap;
+static uint32_t nbu_writes;
+#define OTHER_BLOCK (HEAP + 0xA000u)          /* another sup's FPUI block */
 static uint32_t guiw, oob;
 static uint8_t file[0x80000];
 static uint32_t file_len, file_present, open_mode, file_pos;
@@ -48,7 +52,11 @@ static uint8_t *at(uintptr_t a) {
     return 0;
 }
 static uint32_t rd8(uintptr_t a) { uint8_t *p = at(a); return p ? *p : 0; }
-static void wr8(uintptr_t a, uint32_t v) { uint8_t *p = at(a); if (p) *p = (uint8_t)v; }
+static void wr8(uintptr_t a, uint32_t v) {
+    uint8_t *p = at(a);
+    if (a >= NBU && a < NBU + NBU_SIZE) nbu_writes++;
+    if (p) *p = (uint8_t)v;
+}
 static uint32_t rd(uintptr_t a) {
     uint8_t *p = at(a); uint32_t v = 0;
     if (!p || !at(a + 3)) return 0;
@@ -56,6 +64,7 @@ static uint32_t rd(uintptr_t a) {
 }
 static void wr_raw(uintptr_t a, uint32_t v) { uint8_t *p = at(a); if (p && at(a + 3)) memcpy(p, &v, 4); }
 static void wr(uintptr_t a, uint32_t v) {
+    if (a >= NBU && a < NBU + NBU_SIZE) nbu_writes++;
     /* the three words that switch the page: logged in order */
     if (a == READER + 0x10 || a == READER + 0x14 || a == ENTRIES + 44 * 2 + 8)
         if (writes_n < 64) writes_log[writes_n++] = (uint32_t)(a - HEAP);
@@ -122,6 +131,8 @@ static uintptr_t uis_alloc(uint32_t n) {
     return a;
 }
 const struct uis_natives uis_test_natives = { rd, wr, rd8, wr8, uis_alloc, publish };
+static void ic(void) { }
+const struct uia_natives uia_test_natives = { rd, wr, rd8, wr8, uis_alloc, publish, ic };
 const struct fpl_menu_natives fpl_menu_test_natives = {
     rd, wr, rd8, wr8, f_ctor, f_open, f_read, f_close, f_dtor, lookup, reg, publish
 };
@@ -130,14 +141,18 @@ const struct fpl_menu_natives fpl_menu_test_natives = {
 static const char *screen_names[NSCREENS] = {"MenuItem_SelectJump", "MainB1", "MainB2", "MainY4"};
 static const uint32_t entry_offsets[NSCREENS] = {0x10, 0x74d796, 0x76ff04, 0x889c60};
 
-void fpl_fixture_reset(void) {
-    memset(nbu, 0, sizeof nbu); memset(heap, 0, sizeof heap); memset(&menu, 0, sizeof menu);
+/* image: the firmware's bytes from C18C0460 on (stock pool, NBU, MainB2) */
+void fpl_fixture_reset(const uint8_t *image, uint32_t n) {
+    if (!nbu) nbu = malloc(NBU_SIZE);
+    if (!heap) heap = malloc(HEAP_SIZE);
+    memset(nbu, 0, NBU_SIZE); memset(heap, 0, HEAP_SIZE); memset(&menu, 0, sizeof menu);
+    memcpy(nbu, image, n < NBU_SIZE ? n : NBU_SIZE);
+    nbu_writes = 0;
     memset(file, 0, sizeof file); memset(path_seen, 0, sizeof path_seen);
     oob = file_len = open_mode = ctors = dtors = opens = reads = closes = ctor_volume = 0;
     reg_calls = reg_result = reg_publishes = lookups = publishes = writes_n = desc_n = 0;
     borrowed_bad = 0; uis_next = 0;
     file_present = 1;
-    for (uint32_t i = 0; i < POOL_LEN; ++i) nbu[0x14 + i] = (uint8_t)(i * 7 + 3);  /* the pool */
     guiw = APP;
     wr_raw(APP + 0x80, NSCREENS); wr_raw(APP + 0x8C, SCREENS);
     wr_raw(APP + 0x888, REGISTRY_H);
@@ -183,6 +198,14 @@ uint32_t fpl_fixture_resolve_page(uint32_t page_off, char *out, uint32_t cap) {
     return 1;
 }
 uint32_t fpl_fixture_on(void) { return fpl_menu_on(&menu); }
+/* another sup that already added to MainB2 through the convention */
+uint32_t fpl_fixture_other_block(const uint8_t *blob, uint32_t n) {
+    struct uia_outcome o;
+    memcpy(at(OTHER_BLOCK), blob, n);
+    return uia_apply(OTHER_BLOCK, n, &o);
+}
+/* bytes of the page MainB2 points at now */
+void fpl_fixture_read(uint32_t a, uint8_t *out, uint32_t n) { for (uint32_t i = 0; i < n; ++i) out[i] = (uint8_t)rd8(a + i); }
 uint32_t fpl_fixture_get(uint32_t f) {
     if (f >= 100 && f < 164) return writes_log[f - 100];
     switch (f) {
@@ -200,7 +223,10 @@ uint32_t fpl_fixture_get(uint32_t f) {
     case 20: return (uint32_t)!strcmp(path_seen, "\\fpSup.BIN");
     case 21: return READER; case 22: return ENTRIES; case 23: return AREA;
     case 24: return APP; case 25: return SCREEN_AT; case 26: return NBU;
-    case 27: return borrowed_bad;
+    case 27: return borrowed_bad; case 28: return menu.file_at;
+    case 29: return menu.ui_result; case 30: return menu.ui_op; case 31: return menu.first_id;
+    case 32: return menu.row; case 33: return nbu_writes;
+    case 34: return rd(ENTRIES + 44 * 2 + 8);
     default: return 0xFFFFFFFFu;
     }
 }

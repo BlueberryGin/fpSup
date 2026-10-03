@@ -4,12 +4,15 @@
 The card reads this file at boot (the loader's own file API) and switches
 MainB2 to it; see menu_page.h. Layout, little-endian words:
 
-  +00 "FPLM"   +04 version 2   +08 page bytes   +0C private string bytes
+  +00 "FPLM"   +04 version 3   +08 page bytes   +0C private string bytes
   +10 reference count           +14 stock MainB2 page offset (0x76FF04)
   +18 FNV-1a of page + strings + references    +1C 0
   +20 the page, then the private strings (NUL-terminated), then one
-      {page offset, string offset} pair per field that names a private
-      string, then zeros to FILE_BYTES.
+      {page offset, string offset, stock_at} per field that names a private
+      string, then zeros to FILE_BYTES. stock_at is where the stock pool
+      already holds that string -- the first place uis_intern's scan would
+      find it -- or 0xFFFFFFFF; the camera then never scans the stock pool
+      (uis_intern_hinted, fpSup/uishare/ui_pool.h).
 
 No string offset is fixed here: on the camera each private string gets its
 offset from the shared pool (fpSup/uishare/ui_pool.h) and is written into
@@ -33,7 +36,8 @@ ROOT = HERE.parents[2]
 SEG0 = ROOT / 'out/seg0_c0000000.bin'
 AUDIT = ROOT / 'research/ui/tools/native_ui_audit.py'
 SEG0_SHA = 'aaa5208a028d9c4aebb9cc8614add723d456e96b2a95914f433079954320e622'
-MAGIC, VERSION = 0x4D4C5046, 2
+MAGIC, VERSION = 0x4D4C5046, 3
+NOT_STOCK = 0xFFFFFFFF
 FILE_BYTES = 0x30000
 STOCK_POOL, STOCK_POOL_LEN, MAINB2_OFFSET = 0xC18C0474, 176152, 0x76FF04
 NAMES = (b'MV_fpLossless\0', b'SUB_MV_fpLossless\0', b'EXCL_fpLossless\0')
@@ -73,6 +77,13 @@ def references(page, pool, manifest):
     return sorted(set(refs))
 
 
+def stock_at(stock, s):
+    """Where ui_pool.c find() would first match `s` in the stock pool: s
+    followed by a NUL, at any offset (a string that ends another counts)."""
+    i = stock.find(s + b'\0')
+    return NOT_STOCK if i < 0 else i
+
+
 def pack(page, pool, seg0, manifest):
     prefix = seg0[STOCK_POOL - 0xC0000000:][:STOCK_POOL_LEN]
     if pool[:STOCK_POOL_LEN] != prefix:
@@ -82,7 +93,10 @@ def pack(page, pool, seg0, manifest):
         if name not in tail:
             raise SystemExit(f'{name!r} is not in the private strings')
     refs = references(page, pool, manifest)
-    blob = b''.join(struct.pack('<II', at, off - STOCK_POOL_LEN) for at, off in refs)
+    def text(off):
+        return pool[off:pool.index(b'\0', off)]
+    blob = b''.join(struct.pack('<III', at, off - STOCK_POOL_LEN, stock_at(prefix, text(off)))
+                    for at, off in refs)
     head = struct.pack('<8I', MAGIC, VERSION, len(page), len(tail), len(refs),
                        MAINB2_OFFSET, fnv(page + tail + blob), 0)
     data = head + page + tail + blob

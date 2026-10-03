@@ -1,0 +1,35 @@
+SIGMA fp — RAW monitoring (v0.2.3test)
+banner (ordinary card): fpSup-RAW-v0.2.3test!
+firmware: SIGMA fp Ver.5.02 only
+
+AutoRun.txt  32,772B  sha256=ad1b6d244a699f28ce55ef9d127209f5f31150c32c50344914fb7107839a5235
+fpSup.BIN    61,440B  sha256=c455213848c4c2b080e3f89a603dbdb95f4302389dd6ef0cbf5dfc07205dca5d
+
+Built 2026-10-03: projects/rawview/build/build_rawview.py --release --banner 'fpSup-RAW-v0.2.3test!'
+(rv_launch.S with UISHARE=1). Ordinary card only; no FastStart2/ folder or zips
+this time (the merge page makes Fast Start 2 cards).
+
+Against v0.2.2test:
+  - the launcher no longer guards or writes the H1 file site (C05E5BEC) and
+    the nine ColorButtonMenu / ColorModeAdvancedSettings words; 23,864 -> 23,528 B
+    (stub_fv and the CSV blobs stay in the resident, unused);
+  - stub_ai (the SA/GA glyph names in the Effect box) compares a name's OFFSET in
+    the string pool the UI uses now, not an absolute stock address: with
+    Lossless (or any sup that adds strings) the UI resolves names in the
+    shared pool copy, and v0.2.2test then showed -5/+5 instead of SA/GA
+    (camera, 2026-10-03, lossless+gyro+og3k+raw-view card). Test reproduces it;
+  - a UI section (fpSup/uishare: ui_apply + the FPUI block of
+    ui/options.py color_raw()): the three COLOR CSVs get the RAW row
+    appended in copies (Left/Right wrap fixed as before), set_flash_1.xci is
+    served as the RAW icon, and copies of the two resource sets get the
+    same nine limits -- through the shared file-redirect handler at
+    C05E5BEC, which other sups' sections reuse;
+  - the AEL page's MenuMode word (C1D6ED48, 12 -> 16) stays the launcher's, in
+    place as in v0.2.2test: a copy of ColorModeAdvancedSettings did not take on the
+    camera (first v0.2.3test build: "more options" missing, 2026-10-03);
+  - build_autorun's entry trampoline (the launcher, then the UI section).
+Every other section (48 declared stock words) is byte for byte v0.2.2test.
+build_rawview.py --legacy-ui still rebuilds v0.2.2test's 49 sections exactly.
+Tests: test_rawview_build 23 OK; test_rawview_image 28 OK (the UI section
+run on the real image: H1 -> shared handler -> the composed CSVs and icon;
+the limits in the set copies, the image untouched).

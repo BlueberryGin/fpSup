@@ -44,10 +44,24 @@ The header is 16 bytes, immediately before the pool:
 A sup whose own code checks the pool, as OG's string alias hook does, must
 accept either the stock pool or `uis_pool_known()`.
 
+### Boot cost: pass the stock hint
+
+`uis_intern` scans the whole 176,152-byte stock pool once per string, about
+0.25 s each on the camera (Sensor Lab, 80 strings: ~20 s of boot). A builder
+knows the stock pool -- it is in the pinned image -- so it passes, per string,
+where that scan would find it, or `UIS_NOT_STOCK`:
+
+    uis_intern_hinted(s, n, stock_at, &offset)
+
+A hint is checked (n + 1 bytes) before it is used, a wrong one falls back to
+the full scan, and `UIS_NOT_STOCK` searches only what sups appended after the
+stock bytes. Hinted and unhinted callers get the same offsets.
+`fpSup/lossless/menu/pack_menu_file.py` `stock_at()` computes the hint.
+
 Tests: `python3 -B -m unittest test_ui_pool` (host model plus mutations; the
 ARM build must have no `.rodata` and no `.text` relocations).
 
-Users: `fpSup/lossless/native/menu_page.c`.
+Users: `fpSup/lossless/native/menu_page.c`, `fpSup/lcdflip/native/lcd_menu_page.c`.
 
 ## Build
 
@@ -57,6 +71,28 @@ needs nothing from the rest of fpSup.
 `fpSup/lossless/build_card.py` shows a unity build that keeps the code free of
 relocations: it makes the public `uis_` functions static and adds the `-I`
 path for `uishare`.
+
+## ui_apply — pages, lists and files by addition (2026-10-03)
+
+A sup describes what it ADDS in Python (`ui/`: `rows.add_row`-style blocks,
+`options.color_raw`, `options.resolution`); the result is an FPUI block
+(`ui/fpui.py` is the format and the reference applier). On the camera
+`ui_apply.c` carries it out at boot:
+
+- a page (a resource set with a runtime entry: MainB2, B2_5, ColorButtonMenu,
+  ...) is served from a COPY with an `FSPG` header; each sup copies the page
+  as it is now, inserts its records and adds to counters, and switches the
+  entry when every op succeeded;
+- a list's CSV is served from a copy through the shared file-redirect
+  handler (`fv_handler.S` at C05E5BEC, table `FSFV`); each sup appends rows;
+- object IDs, row indices and string offsets are handed out on the camera.
+
+A sup carries the applier either linked in (Lossless) or as a ready section
+(`build_section.py`: section.S + ui_pool + ui_apply + its block) passed as a
+`--boot-bin`; declare the sites in `info['sites']` with their stock words.
+
+Tests: `test_ui_apply.py`, `test_options.py` (both C against the reference,
+on the pinned image, with mutations). Plan and status: `MENU_MERGE_PLAN.md`.
 
 ## Not yet here
 

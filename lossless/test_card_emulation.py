@@ -34,10 +34,10 @@ from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,  # n
 SITES = {'rec': (0xC03A33C8, 0xEBFFFC1A), 'arrive': (0xC038BFF0, 0xE12FFF33),
          'stop': (0xC0398D88, 0xE92D49F0), 'flush': (0xC03A5490, 0xEB0BD652),
          'play': (0xC05C0EA4, 0xE595201C), 'clip': (0xC05BDDAC, 0xE58430A0),
-         'end': (0xC05C2E90, 0xE92D4070)}
+         'end': (0xC05C2E90, 0xE92D4070), 'pool': (0xC05C2D10, 0xE92D44F0)}
 VENEER_AT = {'rec': 0, 'arrive': 8, 'stop': 16, 'flush': 24,      # the record at +32
-             'play': 48, 'clip': 56, 'end': 64}
-CAVE_BYTES = 72
+             'play': 48, 'clip': 56, 'end': 64, 'pool': 72}
+CAVE_BYTES = 80
 CAVE_BUMP, CAVE_ARENA, CAVE_END = 0xC072E060, 0xC072E064, 0xC072EFB4
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_card  # noqa: E402
@@ -47,7 +47,7 @@ BLOCK = 0x45300000                    # where our allocation lands in emulation:
                                       # hands the loader lower in the same heap
 ORIGINAL = {'prepare': 0xC03A2438, 'enqueue': 0xC037DD50, 'flush': 0xC069ADE0,
             'stop_resume': 0xC0398D8C, 'tk_cre_tsk': 0xC0016A58, 'tk_sta_tsk': 0xC0016BC0,
-            'end_resume': 0xC05C2E94}
+            'end_resume': 0xC05C2E94, 'pool_resume': 0xC05C2D14}
 # A clip's first frame, as fpl_play_clip opens it -- open refused. Installed
 # only after boot: the loader reads fpSup.BIN through the same file API.
 CLIP_FILE = {'clip_volume': 0xC069B930, 'clip_path': 0xC069B9B8, 'f_ctor': 0xC0365E90,
@@ -64,7 +64,13 @@ def build_card():
     sets = [(int(a, 16), int(v, 16)) for a, v in
             re.findall(r'^mem set (0x[0-9A-Fa-f]+) (0x[0-9A-Fa-f]+)', text, re.M)]
     loader = {a: v for a, v in sets if T.CAVE_LOW <= a < T.CAVE_LOW + 0x200}
+    global LAYOUT
+    import json
+    LAYOUT = json.loads((out / 'layout.json').read_text())['fields']
     return loader, (out / 'fpSup.BIN').read_bytes(), (out / 'lossless.bin').read_bytes()
+
+
+LAYOUT = {}
 
 
 class CardCamera(T.Camera):
@@ -101,7 +107,7 @@ class CardCamera(T.Camera):
             if name == 'ORIG_tk_cre_tsk':
                 d = self.r(UC_ARM_REG_R0)
                 self.task_descriptors.append(struct.unpack('<8I', bytes(mu.mem_read(d, 32))))
-            if name in ('ORIG_stop_resume', 'ORIG_end_resume'):
+            if name in ('ORIG_stop_resume', 'ORIG_end_resume', 'ORIG_pool_resume'):
                 mu.emu_stop()                 # mid-function: look, do not run on
                 return
             return self._ret(self.returns[name])
@@ -166,14 +172,14 @@ class CardEmulationTests(unittest.TestCase):
         words = symbols(HERE / 'native' / 'card.S',
                         ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
                         [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
-                                                 'CLIP', 'END')])
+                                                 'CLIP', 'END', 'POOL')])
         lo, hi = words['g_card'], words['stop_resume']
-        self.assertEqual(hi - lo, 36)
+        self.assertEqual(hi - lo, 40)
         resident = bytes(cam.mu.mem_read(BLOCK, len(self.blob)))
         self.assertEqual(resident[:lo], self.blob[:lo])
         self.assertEqual(resident[hi:], self.blob[hi:])
-        self.assertEqual(self.blob[lo:hi], b'\0' * 36)
-        filled = struct.unpack('<9I', resident[lo:hi])
+        self.assertEqual(self.blob[lo:hi], b'\0' * 40)
+        filled = struct.unpack('<10I', resident[lo:hi])
         self.assertTrue(all(filled), 'a resident word was left empty')
         calls = [c for c in cam.calls if c in ('H_GET', 'H_ADDR', 'DCACHE', 'ICACHE')]
         self.assertEqual(calls, ['H_GET', 'H_ADDR', 'DCACHE', 'ICACHE',
@@ -186,7 +192,7 @@ class CardEmulationTests(unittest.TestCase):
         words = symbols(HERE / 'native' / 'card.S',
                         ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
                         [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
-                                                 'CLIP', 'END')])
+                                                 'CLIP', 'END', 'POOL')])
         self.assertEqual(len(cam.task_descriptors), 1)
         exinf, atr, entry, pri, stksz, n0, n1, tail = cam.task_descriptors[0]
         self.assertEqual((exinf, atr, pri, stksz, tail), (0, 0x41, 12, 0x2000, 0))
@@ -207,7 +213,7 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual(cave, CAVE_ARENA)
         for i, (name, (site, _)) in enumerate(SITES.items()):
             word = cam.word(site)
-            op = 0xEA000000 if name in ('stop', 'end') else 0xEB000000
+            op = 0xEA000000 if name in ('stop', 'end', 'pool') else 0xEB000000
             self.assertEqual(word & 0xFF000000, op, name)
             disp = word & 0xFFFFFF
             disp = disp - 0x1000000 if disp & 0x800000 else disp
@@ -355,6 +361,144 @@ class CardEmulationTests(unittest.TestCase):
         pushed = struct.unpack('<4I', cam.mu.mem_read(sp, 16))
         self.assertEqual(pushed[0], 0x44444444)
         self.assertEqual(pushed[3], T.DONE)
+
+
+    def test_pool_runs_the_displaced_push_and_continues_into_the_original(self):
+        cam = self.armed()
+        self.enter(cam, 'pool', (0x66, 0x77, 0, 0))
+        (name, regs, sp, _lr), = [o for o in cam.originals if o[0] == 'ORIG_pool_resume']
+        self.assertEqual(regs[:2], (0x66, 0x77))
+        self.assertEqual(sp, T.STACK - 0x2000 - 24)          # push {r4-r7, sl, lr}
+        pushed = struct.unpack('<6I', cam.mu.mem_read(sp, 24))
+        self.assertEqual(pushed[0], 0x44444444)
+        self.assertEqual(pushed[5], T.DONE)
+
+
+# ---- the Lossless RAW row, composed by ui_apply in the ARM build -------------
+GUI_OBJECT = 0xC37B7048
+UI_AREA = 0xC3A00000                  # app, screens, reader, entries, names: unused BSS
+APP, SCREENS, SCREEN, READER, ENTRIES, NAMES, REGISTRY, DESCS = (
+    UI_AREA + o for o in (0x0, 0x1000, 0x2000, 0x3000, 0x4000, 0x6000, 0x8000, 0x9000))
+UIA_HEAP, UIA_HEAP_SIZE = 0x46000000, 0x01000000
+SCREEN_NAMES = ['MainB1', 'MainB2', 'MainY4']
+ENTRY_OFFSETS = [0x74D796, 0x76FF04, 0x889C60]
+REG_LOOKUP, REG_ADD = 0xC05DB418, 0xC05DB308          # Thumb, entered with bit 0 clear
+
+
+class MenuCamera(CardCamera):
+    """The card camera plus the native UI objects the row installer expects
+    (laid out as read from the camera, fp-native-ui §8a), a sequential file,
+    a real allocator for the UI copies, and the variable registry."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        mu = self.mu
+        mu.mem_map(UIA_HEAP, UIA_HEAP_SIZE)
+        self.uia_next = UIA_HEAP
+        self.file_pos = 0
+        self.vars = {}
+        self.ui_ready = False
+
+    def setup_ui(self):
+        mu, w = self.mu, lambda a, v: self.mu.mem_write(a, struct.pack('<I', v))
+        w(GUI_OBJECT, APP)
+        w(APP + 0x80, len(SCREEN_NAMES)); w(APP + 0x8C, SCREENS); w(APP + 0x888, REGISTRY - 0x60)
+        for i, (name, off) in enumerate(zip(SCREEN_NAMES, ENTRY_OFFSETS)):
+            s, n = SCREEN + 0x40 * i, NAMES + 0x40 * i
+            mu.mem_write(n, name.encode() + b'\0')
+            w(SCREENS + 4 * i, s); w(s + 4, APP); w(s + 8, n); w(s + 0x24, READER)
+            w(ENTRIES + 44 * i + 4, n); w(ENTRIES + 44 * i + 8, off)
+        w(READER + 0x10, 176152); w(READER + 0x14, 0xC18C0474); w(READER + 0x24, 0xC18C0460)
+        w(READER + 0xA8, len(SCREEN_NAMES)); w(READER + 0xAC, ENTRIES)
+        self.by_addr[REG_LOOKUP] = 'REG_LOOKUP'
+        self.by_addr[REG_ADD] = 'REG_ADD'
+        self.ui_ready = True
+
+    def _hook(self, mu, addr, size, _):
+        name = self.by_addr.get(addr)
+        if self.ui_ready and name in ('REG_LOOKUP', 'REG_ADD', 'F_OPEN', 'F_READ', 'H_ADDR'):
+            r = [self.r(x) for x in (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3)]
+            self.calls.append(name)
+            if name == 'REG_LOOKUP':
+                d = self.vars.get(self.cstr(r[1]), 0)
+                mu.mem_write(r[2], struct.pack('<I', d))
+                return self._ret(0)
+            if name == 'REG_ADD':
+                kind, nameptr, value = struct.unpack('<3I', mu.mem_read(r[2], 12))
+                d = DESCS + 32 * len(self.vars)
+                mu.mem_write(d, struct.pack('<3I', kind, nameptr, value))
+                self.vars[self.cstr(nameptr)] = d
+                return self._ret(0)
+            if name == 'F_OPEN':
+                self.file_pos = 0
+                return self._ret(1)
+            if name == 'F_READ':                 # (obj, buf, len, &actual) -> 1
+                data = self.bin[self.file_pos:self.file_pos + r[2]]
+                mu.mem_write(r[1], data)
+                self.file_pos += len(data)
+                mu.mem_write(r[3], struct.pack('<I', len(data)))
+                return self._ret(1)
+            if name == 'H_ADDR':
+                size_ = self.h_get[-1][2] if self.h_get else 0
+                if self.launching and size_ == CARD_BLOCK:
+                    return self._ret(BLOCK)
+                got = self.uia_next
+                self.uia_next = (self.uia_next + size_ + 0xFFF) & ~0xFFF
+                assert self.uia_next <= UIA_HEAP + UIA_HEAP_SIZE, 'emulated heap exhausted'
+                return self._ret(got)
+        return super()._hook(mu, addr, size, _)
+
+
+class MenuEmulationTests(unittest.TestCase):
+    """The row installer and ui_apply as the camera runs them: the card's own
+    launcher bytes, Thumb, against the stock NBU in the pinned image."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.loader, cls.bin, cls.blob = build_card()
+        sys.path.insert(0, str(HERE / 'menu'))
+        sys.path.insert(0, str(HERE.parent / 'uishare'))
+        import build_fpui
+        from ui import fpui
+        cls.fpui = fpui
+        cls.block, _, (cls.stock_page, cls.pool_stock, _) = build_fpui.build()
+
+    def boot_with_ui(self):
+        case = CardEmulationTests()
+        case.loader, case.bin, case.blob = self.loader, self.bin, self.blob
+        global CardCamera
+        saved, CardCamera = CardCamera, MenuCamera
+        try:
+            cam = case.boot()
+        finally:
+            CardCamera = saved
+        cam.setup_ui()
+        case.launch(cam)
+        return cam
+
+    def field(self, cam, path):
+        state = cam.word(cam.word(CAVE_BUMP) - CAVE_BYTES + 36)
+        return cam.word(state + LAYOUT[path])
+
+    def test_the_row_is_installed_and_mainb2_is_the_reference_page(self):
+        cam = self.boot_with_ui()
+        self.assertEqual(self.field(cam, 'menu.result'), 1, 'menu not installed')
+        self.assertEqual(self.field(cam, 'menu.registered'), 3)
+        off = cam.word(ENTRIES + 44 * 1 + 8)
+        self.assertNotEqual(off, 0x76FF04, 'MainB2 not switched')
+        page_at = (0xC18C0460 + off) & 0xFFFFFFFF
+        hdr = struct.unpack('<32I', bytes(cam.mu.mem_read((page_at & ~3) - 128, 128)))
+        self.assertEqual(hdr[0], 0x47505346)
+        page = bytes(cam.mu.mem_read(page_at, hdr[3]))
+        pages = {'MainB2': self.fpui.PageCopy(self.stock_page, len(self.stock_page), 1)}
+        pool = self.fpui.Pool(self.pool_stock)
+        self.fpui.apply(self.block, pages, pool)
+        self.assertEqual(page, bytes(pages['MainB2'].data))
+        p, n = cam.word(READER + 0x14), cam.word(READER + 0x10)
+        self.assertEqual(bytes(cam.mu.mem_read(p + 176152, n - 176152)), bytes(pool.data[176152:]))
+        self.assertEqual(set(cam.vars), {'MV_fpLossless', 'SUB_MV_fpLossless', 'EXCL_fpLossless'})
+        # the firmware image itself is untouched: MainB2's stock bytes
+        self.assertEqual(bytes(cam.mu.mem_read(0xC2030364, len(self.stock_page))), self.stock_page)
 
 
 if __name__ == '__main__':
