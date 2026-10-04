@@ -35,9 +35,11 @@ fpSup.BIN     必要(2026-09-19 之前的版本叫 VSHL.BIN,讀的人兩個名�
 ABOUT.txt     必要(給網站用的一行說明,中英各一行)
 README.txt    給使用者
 MANIFEST.txt  可選,雜湊與建置紀錄
+FPSUPUI/      使用載入畫面的版本需包含完整的 0.BIN～4.BIN
 ```
 
-`AutoRun.txt` 與 `fpSup.BIN` 就是卡片的全部 —— 放進 SD 卡根目錄即可。
+把 `AutoRun.txt`、`fpSup.BIN` 放進 SD 卡根目錄；如果該版附有 `FPSUPUI/`，
+也要把整個資料夾放在根目錄，依該版 `README.txt` 安裝。
 
 `ABOUT.txt` 是**首頁表格那一格的唯一來源**:
 

@@ -1,0 +1,49 @@
+{
+  "scope": "Actual ARM gcsv_format plus gcsv_last. Synthetic instruction counts are not CPU cycles, hardware timing, or evidence of an audio fix.",
+  "before_sha256": "91dca49db60ebfc629a7912a6ddad0a215e0067d7610f958a43387fa7b054259",
+  "after_sha256": "c6e9f98bffaf057768bd099c587d903f031f378bc656692fdc17fb0bb07472bb",
+  "cases": [
+    {
+      "name": "small_axes_start",
+      "records": 2048,
+      "gyro_records": 2008,
+      "accel_records": 40,
+      "before": {
+        "arm_instructions": 400398,
+        "held_record_write_bytes": 16064,
+        "put_u32_instructions": 213512,
+        "put_u32_calls": 8152
+      },
+      "after": {
+        "arm_instructions": 282908,
+        "put_u32_instructions": 120104,
+        "put_u32_calls": 8152,
+        "held_record_write_bytes": 8
+      },
+      "output_bytes": 23266,
+      "output_sha256": "09fe5c826524c795ee2b79af656359f255bc799f87c9f5a09989041a1a363cbf",
+      "saved_arm_instructions": 117490
+    },
+    {
+      "name": "extreme_axes_later",
+      "records": 2048,
+      "gyro_records": 2008,
+      "accel_records": 40,
+      "before": {
+        "arm_instructions": 777126,
+        "held_record_write_bytes": 16064,
+        "put_u32_instructions": 584216,
+        "put_u32_calls": 8152
+      },
+      "after": {
+        "arm_instructions": 669756,
+        "put_u32_instructions": 500928,
+        "put_u32_calls": 8152,
+        "held_record_write_bytes": 8
+      },
+      "output_bytes": 56984,
+      "output_sha256": "1bd87836de76fd130b384127ce0fb6ad0742f057c07dda5bbbf99e8bcc663e94",
+      "saved_arm_instructions": 107370
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+fpSup-Gyro v1.14.1test — frozen public test build
+Firmware: SIGMA fp Ver.5.02 only
+Camera test: not yet performed; audio drift fix is unverified.
+Build: python3 -B gyro/release_card.py gcsv v1.14.1test --readme releases/fpsup-gyro-v1.14.1test/README.txt
+Validation: 10 ARM GCSV tests plus 3 release-packaging tests passed; zero skips.
+GCSV rows matched pre-optimization ARM output byte for byte; one write per 2,048-record block.
+Two synthetic cases executed 29.343% and 13.816% fewer ARM instructions, respectively.
+Instruction counts are not camera timing or audio-sync measurements.
+Profile: projects/gyro-sup/validation/20261004-gcsv-direct-output/instruction-counts.json
+
+SHA-256 — frozen release files:
+5eb467112bd7593ce6611437f5ee16704b63ac42e13bb8909e02f1bdb8f71484  ABOUT.txt
+5dc89b8506e8ce408276a9eab61fbb9fda94d4a194b65f2fd17c9e410b8fe642  AutoRun.txt
+d2e440c936bd4a48e67f018b342f4d1c233bf2cd7a5e551682ed4cb5da08f2d2  fpSup.BIN
+8493898cc4debf1088726d35a497561c941b7111a9d6faeccbed095a98ae78b1  README.txt
+89cd5a002595ea0a22f7cbd5a05990612477dd5da2c2d561b9fad8a3aed7c6ea  FPSUPUI/0.BIN
+48dddff9f4b9d2a352faf43e80afd18383fe0d48a3c0617a060b2b977d81f0fb  FPSUPUI/1.BIN
+d5567299a7b695afa26090c124f941a15b3ca701b60a58629af45eb10943efbe  FPSUPUI/2.BIN
+c1a5c9cc59528f7dbe88ee6a6631cb2c93c0ad4575234a29f7c271f9f48ccd2c  FPSUPUI/3.BIN
+065a09b93c88784f0774ce819ae5f6fa3a5aba41d8c4e9ddd7e902e3b20921d3  FPSUPUI/4.BIN
+
+SHA-256 — standalone archive:
+be8d5afb8e652a391acfea96a70b770c7cfdd6e5bfa60ce0e76d5ff260cc3f67  gyro/release/fp-gyro-sup-v1.14.1test.zip
+
+SHA-256 — source and tests:
+3589615490355d5e99be0c5a594993dca19021c942b0026bcb0eb0974e64b17a  gyro/gcsv_rows.S
+e0032728f471d198ae31ac4e3216030b5848f6d482d7f0b27abedf9ddc146c61  gyro/test_gcsv_direct.py
+fe09c90a196d896625f597e2dd15b7b0dfd0e77eefd3b3a0139b339c97ed0afa  gyro/release_card.py
+9bcf39e33604d9961a716a2262523b39dd53264371eeba9f5c121d7497b6cd1d  gyro/test_release_card.py

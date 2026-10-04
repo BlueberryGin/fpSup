@@ -37,7 +37,7 @@ card, use the composer rather than copying both.
 | product | version | what it does |
 |---|---|---|
 <!-- releases:begin:en -->
-| [`fpsup-gyro`](releases/fpsup-gyro-v1.14.0/) | v1.14.0 | Writes Gyroflow's `.gcsv` and `.json` while recording — every sample at 2500 Hz, distortion read off the lens. The profile now carries the size the take was actually recorded at, which open gate got wrong. |
+| [`fpsup-gyro`](releases/fpsup-gyro-v1.14.1test/) | v1.14.1test | Writes Gyroflow .gcsv motion and .json lens files while recording CinemaDNG. This test build needs on-camera audio sync validation. |
 | [`fpsup-gyro-base`](releases/fpsup-gyro-base-v1.14.0/) | v1.14.0 | Writes the gyro and accelerometer as a raw .GYR in the root of the disk the take went to — every sample, nothing on the camera but the stream — converted afterwards in a browser. Same code as fpGyroSup v1.14.0. |
 | [`fpsup-lossless`](releases/fpsup-lossless-v0.1.2test/) | v0.1.2test | Lossless-compressed CinemaDNG, by the camera's own hardware codec: a Lossless RAW row (SHOOT page 2, CINE) turns it on; frames the codec cannot finish in time are written uncompressed, and compressed clips play back in the camera. Test build. |
 | [`fpsup-og2k`](releases/fpsup-og2k-v0.1.5a/) | v0.1.5a | The same open gate at 2016×1344, on the sensor's quiet readout at every frame rate. 98 MB/s at 24p 12-bit, 8.3 ms rolling shutter. Test build. |
@@ -145,7 +145,7 @@ Each page says what has been proven, what is being worked on, and what is open.
 | 產品 | 版本 | 做什麼 |
 |---|---|---|
 <!-- releases:begin:zh -->
-| [`fpsup-gyro`](releases/fpsup-gyro-v1.14.0/) | v1.14.0 | 錄影當下就把 Gyroflow 要的 `.gcsv` 與 `.json` 寫進片段資料夾。2500 Hz 每個樣本都在,畸變直接讀鏡頭。profile 的尺寸改成實際錄下的那個 —— open gate 下先前是錯的。 |
+| [`fpsup-gyro`](releases/fpsup-gyro-v1.14.1test/) | v1.14.1test | 錄製 CinemaDNG 時寫出 Gyroflow 的 .gcsv 運動紀錄與 .json 鏡頭檔。此測試版的聲畫同步仍待實機驗證。 |
 | [`fpsup-gyro-base`](releases/fpsup-gyro-base-v1.14.0/) | v1.14.0 | 在錄影那顆磁碟的根目錄寫一個原始 .GYR(陀螺儀與加速度計每個樣本都在),機上只做串流,事後在瀏覽器轉換。與 fpGyroSup v1.14.0 同一份程式。 |
 | [`fpsup-lossless`](releases/fpsup-lossless-v0.1.2test/) | v0.1.2test | 用相機自己的硬體編碼器錄無損壓縮 CinemaDNG:SHOOT 第 2 頁(CINE)多一列 Lossless RAW 開關;來不及壓的畫格照原樣寫入未壓縮,壓縮過的片段可在機內回放。測試版。 |
 | [`fpsup-og2k`](releases/fpsup-og2k-v0.1.5a/) | v0.1.5a | 同樣的 open gate,2016×1344,每個幀率都走感光元件的安靜讀出。24p 12-bit 為 98 MB/s,捲簾 8.3 ms。測試版。 |

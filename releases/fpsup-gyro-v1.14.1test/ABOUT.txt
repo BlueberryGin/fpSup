@@ -1,0 +1,2 @@
+en: Writes Gyroflow .gcsv motion and .json lens files while recording CinemaDNG. This test build needs on-camera audio sync validation.
+zh: 錄製 CinemaDNG 時寫出 Gyroflow 的 .gcsv 運動紀錄與 .json 鏡頭檔。此測試版的聲畫同步仍待實機驗證。

@@ -27,8 +27,8 @@ import base64, hashlib, json, pathlib, re, shutil, struct, subprocess, sys, temp
 from collections import Counter
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parent.parent.parent
-GYRO = ROOT / 'fpSup' / 'gyro'
+REPO = HERE.parent.parent
+GYRO = REPO / 'gyro'
 
 PARK_AT, F_WRITE_AT = 0xC072EFB4, 0xC03660E8
 # build_base_card.py passes these two as `--also`, not `--also-bin`, so its own
@@ -51,7 +51,7 @@ LABELS = {
 TEMPLATE_FLAGS = {'plain': ['--no-shell'], 'shell': ['--no-ep-patches'], 'shellpush': []}
 
 
-SHELL_DIR = ROOT / 'fpSup' / 'fp_usb_shell'
+SHELL_DIR = REPO / 'fp_usb_shell'
 
 
 def push_sections():
@@ -279,7 +279,7 @@ def build_templates(extra=()):
     for name, flags in TEMPLATE_FLAGS.items():
         f = tmp / f'{name}.txt'
         r = subprocess.run([sys.executable,
-                            str(ROOT / 'fpSup' / 'fp_usb_shell' / 'build_autorun.py'),
+                            str(REPO / 'fp_usb_shell' / 'build_autorun.py'),
                             '--loader', '--four-box-bar', *flags, *extra,
                             '--banner', '@@BANNER@@',
                             '--vshl-entry', '0xC072E064', '--out', str(f)],
@@ -430,7 +430,7 @@ def payload(d):
     return None
 
 
-RELEASES = ROOT / 'fpSup' / 'releases'
+RELEASES = REPO / 'releases'
 
 # Named the way the card names itself.  The page used to say "OpenGate 3K" and
 # "fpGyroSup" while the banner said fpSup-OG3K and the tag said fpsup-og3k --
@@ -448,7 +448,8 @@ PRODUCTS = {
     'gyro':     dict(id='gyro', name='fpSup-Gyro', category='shooting', excl=['gyro-base'],
                      guide='guide/gyro.html',
                      desc='Writes .gcsv and .json into the clip folder while '
-                          'recording. The released card, unmodified.'),
+                          'recording. v1.14.1test reduces GCSV formatting work; '
+                          'audio sync still needs an on-camera test.'),
     'gyro-base': dict(id='gyro-base', name='fpSup-Gyro-Base', category='shooting',
                       guide='guide/gyro-base.html',
                       excl=['gyro'],
@@ -581,7 +582,7 @@ DRAM_IMAGE = (0xC0000000, 0xC2F30800)
 
 def pool_size():
     import re
-    src = (ROOT / 'fpSup' / 'gyro' / 'gsup_launch.S').read_text()
+    src = (REPO / 'gyro' / 'gsup_launch.S').read_text()
     eq = dict(re.findall(r'\.equ\s+(\w+)\s*,\s*(0x[0-9A-Fa-f]+|\d+)', src))
     return int(eq['POOL_BYTES'], 0)
 
@@ -763,7 +764,7 @@ def read_cap():
     What survives is a size: the loader reads at most MAXLEN bytes.
     """
     import re
-    src = (ROOT / 'fpSup' / 'fp_usb_shell' / 'templates' / 'loader.S').read_text()
+    src = (REPO / 'fp_usb_shell' / 'templates' / 'loader.S').read_text()
     eq = dict(re.findall(r'\.equ\s+(\w+)\s*,\s*(0x[0-9A-Fa-f]+|\d+)', src))
     return int(eq['MAXLEN'], 0)
 
@@ -854,8 +855,14 @@ def main():
         vshl, ar = load(card)
         entry, recs = parse(vshl)
         tail = split_tail(card, vshl)
-        ban = banner_of(ar)
-        templates[ban] = ar.split('# pad -- see PAD_TO')[0].replace(ban, '@@BANNER@@')
+        printed_banner = banner_of(ar, required=False)
+        # Current four-box cards draw artwork instead of a text banner.  Keep a
+        # versioned catalogue label while comparing their actual AutoRun bytes
+        # with the current shared loader template.
+        ban = printed_banner or f'{card["name"]}-v{card["version"]}!'
+        shipped_template = ar.split('# pad -- see PAD_TO')[0]
+        templates[ban] = (shipped_template.replace(printed_banner, '@@BANNER@@')
+                          if printed_banner else shipped_template)
         out_cards.append(dict(
             id=card['id'], name=card['name'] + ' v' + card['version'],
             desc=card['desc'], excl=card.get('excl', []),

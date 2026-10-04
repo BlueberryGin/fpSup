@@ -14,6 +14,7 @@ payload container that hashed differently.
 import argparse
 import hashlib
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -21,6 +22,8 @@ import zipfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 FILES = ('AutoRun.txt', 'fpSup.BIN', 'README.txt')
+SPLASH_FILES = tuple(f'FPSUPUI/{i}.BIN' for i in range(5))
+SPLASH_REF = re.compile(r'^display osdfile \\FPSUPUI\\([0-9]+)\.BIN(?:\s|$)', re.M)
 
 # Every section the card must carry, and what it is.  A build that drops one
 # still produces a perfectly valid AutoRun and a camera that does nothing.
@@ -59,6 +62,24 @@ SUMS = {'base': 'base-', 'gcsv': ''}
 
 def sha(p):
     return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+
+
+def package_files(out):
+    """Keep every frame the built AutoRun needs alongside the card files."""
+    refs = {f'FPSUPUI/{i}.BIN' for i in SPLASH_REF.findall(
+        (out / 'AutoRun.txt').read_text())}
+    if not refs:
+        return FILES                 # Legacy text banner needs no artwork.
+    if refs - set(SPLASH_FILES):
+        raise SystemExit(f'AutoRun references unknown splash frames: '
+                         f'{sorted(refs - set(SPLASH_FILES))}')
+    # Frame 4 is shown by the BIN's finish helper, so AutoRun itself may only
+    # name 0..3.  All five generated files still belong on the card.
+    for name in SPLASH_FILES:
+        path = out / name
+        if not path.is_file() or not path.stat().st_size:
+            raise SystemExit(f'AutoRun requires missing or empty {path}')
+    return FILES + SPLASH_FILES
 
 
 def check_sections(path, edition):
@@ -152,9 +173,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('edition', choices=sorted(EXPECT))
     ap.add_argument('version', help='e.g. v1.10a')
+    ap.add_argument('--readme', type=pathlib.Path,
+                    help='version-specific README to put in the release build')
     ap.add_argument('--force', action='store_true',
                     help='overwrite an archive that already exists')
     a = ap.parse_args()
+    if a.readme and not a.readme.is_file():
+        raise SystemExit(f'README source does not exist: {a.readme}')
+    readme = a.readme.read_bytes() if a.readme else None
     out = HERE / 'release' / a.edition
     r = subprocess.run([sys.executable, str(HERE / 'build_base_card.py'),
                         '--edition', a.edition, '--version', a.version,
@@ -165,6 +191,9 @@ def main():
         raise SystemExit('build_base_card failed')
     print(r.stdout.rstrip().splitlines()[-1].strip())
     check_sections(out / 'fpSup.BIN', a.edition)
+    if readme is not None:
+        (out / 'README.txt').write_bytes(readme)
+    files = package_files(out)
 
     name = f'{STEM[a.edition]}-{a.version}'
     zpath = HERE / 'release' / f'{name}.zip'
@@ -177,10 +206,10 @@ def main():
         raise SystemExit(f'{zpath.name} already exists.  Give it a new version, '
                          f'or pass --force if you are certain nobody has it.')
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
-        for f in FILES:
+        for f in files:
             z.write(out / f, f'{name}/{f}')
     sums = HERE / 'release' / f'SHA256SUMS-{SUMS[a.edition]}{a.version}.txt'
-    lines = [f'{sha(out / f)}  {f}' for f in FILES]
+    lines = [f'{sha(out / f)}  {f}' for f in files]
     lines.append(f'{sha(zpath)}  {zpath.name}')
     sums.write_text('\n'.join(lines) + '\n')
 
