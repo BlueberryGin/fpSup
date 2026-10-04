@@ -489,6 +489,9 @@ class MenuEmulationTests(unittest.TestCase):
         page_at = (0xC18C0460 + off) & 0xFFFFFFFF
         hdr = struct.unpack('<32I', bytes(cam.mu.mem_read((page_at & ~3) - 128, 128)))
         self.assertEqual(hdr[0], 0x47505346)
+        self.assertGreaterEqual((page_at & ~3) - 128, BLOCK)
+        self.assertLessEqual(page_at + hdr[3], BLOCK + CARD_BLOCK,
+                             'the page escaped the launcher block')
         page = bytes(cam.mu.mem_read(page_at, hdr[3]))
         pages = {'MainB2': self.fpui.PageCopy(self.stock_page, len(self.stock_page), 1)}
         pool = self.fpui.Pool(self.pool_stock)

@@ -158,6 +158,13 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(self.get(NBU_WRITES), 0, 'the firmware image was written')
         self.assertEqual(self.get(OOB), 0)
 
+    def test_page_copy_reuses_the_module_area(self):
+        self.assertEqual(self.install(), INSTALLED)
+        page, area = self.get(PAGE), self.get(R_AREA)
+        self.assertGreaterEqual(page - 128, area + 0x1000 + self.get(FILE_LEN))
+        self.assertLessEqual(page + self.get(PAGE_LEN), area + AREA_BYTES)
+        self.assertEqual(self.get(35), 1, 'only the shared string pool needs a new allocation')
+
     def test_stock_strings_keep_their_stock_offsets(self):
         self.install()
         pool = self.pool_now()
@@ -333,8 +340,12 @@ class MenuMutationTests(unittest.TestCase):
                                      '    for (uint32_t n = 0; n < 1; ++n) {\n        const char *NAME'),
         'reads ON from the lock': ('    d = variable(m->app, (const char *)m->names[0]);',
                                    '    d = variable(m->app, (const char *)m->names[2]);'),
-        'passes the padding as the block': ('    m->ui_result = uia_apply(file, actual, &ui);',
-                                            '    m->ui_result = uia_apply(file + 4, actual, &ui);'),
+        'passes the padding as the block': (
+            '    m->ui_result = uia_apply_in_arena(file, actual, &ui, page_area,',
+            '    m->ui_result = uia_apply_in_arena(file + 4, actual, &ui, page_area,'),
+        'throws away the reusable page area': (
+            '    uintptr_t page_area = (file + actual + 7u) & ~(uintptr_t)7u;',
+            '    uintptr_t page_area = area + area_bytes;'),
         'installed although the block was refused': (
             '    if (m->ui_result != UIA_OK) return fail(m, FPL_MENU_UI);', ''),
         'not once': ('    if (!m || m->result) return m ? m->result : FPL_MENU_NO_GUI;   /* once */',

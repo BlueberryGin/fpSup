@@ -217,7 +217,13 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     publish();
 
     /* ---- the row: added to MainB2 by the shared UI convention ----------- */
-    m->ui_result = uia_apply(file, actual, &ui);
+    /* The 512 KiB launcher block owns the input for the whole boot. After
+     * the FPUI bytes it still has room for MainB2's persistent copy; use
+     * that space instead of taking another ~182 KiB from the USER heap. */
+    uintptr_t page_area = (file + actual + 7u) & ~(uintptr_t)7u;
+    uintptr_t area_end = area + area_bytes;
+    m->ui_result = uia_apply_in_arena(file, actual, &ui, page_area,
+                                      page_area <= area_end ? (uint32_t)(area_end - page_area) : 0u);
     m->ui_op = ui.op;
     if (m->ui_result != UIA_OK) return fail(m, FPL_MENU_UI);
     m->app = app; m->reader = reader; m->page = ui.page;

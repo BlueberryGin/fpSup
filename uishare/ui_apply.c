@@ -146,6 +146,17 @@ struct uia_work {
     uint32_t first_id, active;
 };
 
+struct uia_arena { uintptr_t next, end; };
+
+static uintptr_t ui_alloc(struct uia_arena *arena, uint32_t n) {
+    uintptr_t p;
+    if (!arena) return alloc(n);
+    p = (arena->next + 7u) & ~(uintptr_t)7u;
+    if (p < arena->next || p > arena->end || n > arena->end - p) return alloc(n);
+    arena->next = p + n;
+    return p;
+}
+
 static uint32_t current(const struct uia_work *w, uint32_t pos, uint32_t *at) {
     uint32_t c = pos;
     if (pos > w->stock_len) return 0;
@@ -168,7 +179,8 @@ static uintptr_t find_entry(uintptr_t reader, uintptr_t name, uint32_t n) {
     return 0;
 }
 
-static uint32_t open_page(struct uia_work *w, uintptr_t name, uint32_t name_n, const uint32_t *a) {
+static uint32_t open_page(struct uia_work *w, uintptr_t name, uint32_t name_n,
+                          const uint32_t *a, struct uia_arena *arena) {
     uintptr_t reader = uis_reader(), e, old, block, hdr;
     uint32_t old_len, old_next, old_n = 0, deltas_cap;
     if (!reader || !(e = find_entry(reader, name, name_n))) return UIA_NO_UI;
@@ -193,7 +205,7 @@ static uint32_t open_page(struct uia_work *w, uintptr_t name, uint32_t name_n, c
     if (old_next + a[4] > 0x10000u || old_n + a[6] < old_n) return UIA_FULL;
     deltas_cap = old_n + a[6];
     w->cap = old_len + a[5];
-    block = alloc(8u * deltas_cap + UIA_HEADER + 4u + w->cap);
+    block = ui_alloc(arena, 8u * deltas_cap + UIA_HEADER + 4u + w->cap);
     if (!block || (block & 7u)) return UIA_NO_MEMORY;
     w->deltas = block;
     w->page = block + 8u * deltas_cap + UIA_HEADER + (old & 3u);   /* the source's alignment */
@@ -233,7 +245,8 @@ struct uia_file {
  * else installed now from the handler code in the block. a: site, stock word,
  * capacity, fragment offset, length, entry offset, cave bump word, arena end,
  * veneer word, offset of the handler's table word. */
-static uint32_t hook_fv(const uint32_t *a, uintptr_t frag, uint32_t nf, uintptr_t *table) {
+static uint32_t hook_fv(const uint32_t *a, uintptr_t frag, uint32_t nf,
+                         uintptr_t *table, struct uia_arena *arena) {
     uintptr_t site = a[0], block, entry, veneer, bump;
     uint32_t w = peek(site), off, hw1, hw2, s, j1, j2, i1, i2;
     if (w != a[1]) {                                     /* someone's B.W: ours? */
@@ -258,7 +271,7 @@ static uint32_t hook_fv(const uint32_t *a, uintptr_t frag, uint32_t nf, uintptr_
         return UIA_OP;
     bump = peek(a[6]);
     if ((bump & 3u) || bump + 8u > a[7] || bump < a[6]) return UIA_FULL;
-    block = alloc(((a[4] + 3u) & ~3u) + 16u + 12u * a[2]);
+    block = ui_alloc(arena, ((a[4] + 3u) & ~3u) + 16u + 12u * a[2]);
     if (!block || (block & 7u)) return UIA_NO_MEMORY;
     move(block, frag + a[3], a[4]);
     *table = block + ((a[4] + 3u) & ~3u);
@@ -377,14 +390,37 @@ static uint32_t csv_cell(struct uia_file *f, uint32_t row, uint32_t col, uintptr
     return UIA_OK;
 }
 
+/* Lossless's 18 string references name only seven strings. Pool offsets remain
+ * valid when the shared pool grows: its existing prefix is copied unchanged.
+ * Resolve each string index only once per block. */
+static uint32_t string_offset(uint32_t index, const uintptr_t *str_at,
+                              const uint32_t *str_n, const uint32_t *str_hint,
+                              uint32_t *cached, uint32_t *known, uint32_t *offset) {
+    char text[64];
+    uint32_t mask = 1u << (index & 31u);
+    if (!(known[index >> 5] & mask)) {
+        for (uint32_t c = 0; c <= str_n[index]; ++c)
+            text[c] = (char)peek8(str_at[index] + c);
+        if (uis_intern_hinted(text, str_n[index], str_hint[index], &cached[index]) != UIS_OK)
+            return UIA_STRING;
+        known[index >> 5] |= mask;
+    }
+    *offset = cached[index];
+    return UIA_OK;
+}
+
 /* ---- the block ------------------------------------------------------------ */
-uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
+static uint32_t apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out,
+                      struct uia_arena *arena) {
     uintptr_t str_at[MAX_STRINGS], ops, frag, table = 0;
     uint32_t str_n[MAX_STRINGS], str_hint[MAX_STRINGS];
+    uint32_t str_cached[MAX_STRINGS];
+    uint32_t str_known[2];
     uint32_t total, ns, nw, nf, cur, i, n_pages = 0, n_files = 0;
     struct uia_work w, pages[MAX_PAGES];
     struct uia_file f, files[MAX_FILES];
     w.active = 0; f.active = 0;
+    str_known[0] = str_known[1] = 0;
     out->result = UIA_BLOCK; out->op = 0; out->first_id = 0; out->n_slots = 0; out->page = 0;
     if (!b || bytes < 0x20u || le(b) != 0x49555046u || le(b + 4) != 1u || le(b + 28) != 0)
         return UIA_BLOCK;
@@ -418,10 +454,10 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
             if (w.active || f.active || n != 7u || args[0] >= ns || str_hint[args[0]] != NAME_STRING ||
                 n_pages >= MAX_PAGES)
                 return out->result = UIA_OP;
-            r = open_page(&w, str_at[args[0]], str_n[args[0]], args);
+            r = open_page(&w, str_at[args[0]], str_n[args[0]], args, arena);
         } else if (code == OP_HOOK_FV) {
             if (n != 10u || table) r = UIA_OP;
-            else r = hook_fv(args, frag, nf, &table);
+            else r = hook_fv(args, frag, nf, &table, arena);
         } else if (code == OP_FILE) {
             uint32_t copy = args[0], size = args[1];
             if (w.active || f.active || !table || n != 3u || n_files >= MAX_FILES ||
@@ -429,7 +465,7 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
             for (i = 0; i < n_files; ++i) if (files[i].stock == args[0]) { r = UIA_OP; goto done; }
             table_find(table, args[0], &copy, &size);
             f.cap = size + args[2];
-            f.buf = alloc(f.cap + 4u);
+            f.buf = ui_alloc(arena, f.cap + 4u);
             if (!f.buf) { r = UIA_NO_MEMORY; goto done; }
             move(f.buf, copy, size);
             f.stock = args[0]; f.len = size; f.appended = 0; f.rows_before = 0; f.active = 1;
@@ -488,15 +524,13 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
             else put_be(w.page + at, v);
         } else if (code == OP_SETSTR_SLOT) {
             uint32_t at, idx, v;
-            char text[64];
             if (n < 4u || n > MAX_ARGS || args[0] >= out->n_slots || args[3] >= ns ||
                 str_hint[args[3]] == NAME_STRING) { r = UIA_OP; goto done; }
             idx = out->slots[args[0]] - args[1];
             if (idx >= args[2] || idx >= n - 4u || !current(&w, args[4 + idx], &at) ||
                 at + 4u > w.len) { r = UIA_OP; goto done; }
-            for (uint32_t c = 0; c <= str_n[args[3]]; ++c) text[c] = (char)peek8(str_at[args[3]] + c);
-            if (uis_intern_hinted(text, str_n[args[3]], str_hint[args[3]], &v) != UIS_OK)
-                { r = UIA_STRING; goto done; }
+            r = string_offset(args[3], str_at, str_n, str_hint, str_cached, str_known, &v);
+            if (r != UIA_OK) goto done;
             put_be(w.page + at, v);
         } else if (code == OP_INSERT) {
             uint32_t pos = args[0], off, len, at;
@@ -513,10 +547,8 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
                 if (kind == R_LOCAL_ID) v = w.first_id + arg;
                 else if (kind == R_STRING) {
                     if (arg >= ns || str_hint[arg] == NAME_STRING) { r = UIA_OP; goto done; }
-                    char text[64];               /* uis_intern wants a C string */
-                    for (uint32_t c = 0; c <= str_n[arg]; ++c) text[c] = (char)peek8(str_at[arg] + c);
-                    if (uis_intern_hinted(text, str_n[arg], str_hint[arg], &v) != UIS_OK)
-                        { r = UIA_STRING; goto done; }
+                    r = string_offset(arg, str_at, str_n, str_hint, str_cached, str_known, &v);
+                    if (r != UIA_OK) goto done;
                 } else if (kind == R_SLOT_U32 || kind == R_SLOT_F32) {
                     if (arg >= out->n_slots) { r = UIA_OP; goto done; }
                     v = out->slots[arg];
@@ -573,4 +605,21 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
     for (i = 0; i < n_pages; ++i) poke(pages[i].entry + ENTRY_OFFSET, pages[i].page - NBU_BASE);
     publish();
     return out->result = UIA_OK;
+}
+
+uint32_t uia_apply(uintptr_t block, uint32_t bytes, struct uia_outcome *out) {
+    return apply(block, bytes, out, 0);
+}
+
+uint32_t uia_apply_in_arena(uintptr_t block, uint32_t bytes, struct uia_outcome *out,
+                            uintptr_t arena, uint32_t arena_bytes) {
+    struct uia_arena a;
+    if (!arena || arena_bytes > UINTPTR_MAX - arena || bytes > UINTPTR_MAX - block ||
+        (arena < block + bytes && block < arena + arena_bytes)) {
+        out->result = UIA_BLOCK;
+        return UIA_BLOCK;
+    }
+    a.next = arena;
+    a.end = arena + arena_bytes;
+    return apply(block, bytes, out, &a);
 }
