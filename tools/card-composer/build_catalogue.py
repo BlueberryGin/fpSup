@@ -486,7 +486,9 @@ PRODUCTS = {
                           'latitude curves (SA/GA) on a 709 screen. AEL Contrast and '
                           'Saturation pick the shadow display and the colour matrix; '
                           'all of it is remembered across a power-off. The recorded '
-                          'RAW is not changed. Test build.'),
+                          'RAW is not changed. v0.2.4test: at Saturation +0.2 the '
+                          'CinemaDNG keeps the same white balance as at 0 -- found '
+                          'and fixed with Luka, thank you. Test build.'),
     'lossless': dict(id='lossless', name='fpSup-Lossless', category='shooting',
                      guide='guide/lossless.html',
                      tail_at=0xF000,
