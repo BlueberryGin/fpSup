@@ -495,7 +495,9 @@ PRODUCTS = {
                           'power-on and never saved. Frames the codec cannot finish in '
                           'time are written uncompressed, the first frame of every take '
                           'too; compressed clips play back in the camera. With OpenGate '
-                          'it needs OG3K v0.2.8a / OG2K v0.1.5a or later. Test build.'),
+                          'it needs OG3K v0.2.8a / OG2K v0.1.5a or later. '
+                          'v0.1.3test reduces menu memory use; a reported '
+                          '100p + 10-bit freeze remains unverified. Test build.'),
 }
 # usbshell first: picked() walks this order, so the generated trampoline calls
 # the worker before gyro and the optional OG restore entry.  Its file layout
