@@ -264,27 +264,8 @@ figure.shot figcaption{font-size:.84rem; color:var(--dim); margin-top:7px}
 .support .kofi:hover{border-color:#FF5E5B; background:#FF5E5B14}
 .support .discord:hover{border-color:#5865F2; background:#5865F214}
 .support a:focus-visible{outline:2px solid currentColor; outline-offset:2px}
-/* WeChat is a button, not a link: the group QR opens in a popover. */
-.support button.wechat{display:inline-flex; align-items:center; gap:7px; font:inherit;
-  font-size:.86rem; font-weight:500; padding:9px 15px; border-radius:4px; cursor:pointer;
-  border:1px solid var(--line); color:var(--ink); background:var(--panel);
-  transition:border-color .12s, background .12s}
-.support .wechat svg{fill:#07C160}
-.support .wechat:hover{border-color:#07C160; background:#07C16014}
-.support .wechat:focus-visible{outline:2px solid #07C160; outline-offset:2px}
-.support.compact button.wechat{font-size:.79rem; padding:6px 11px; gap:6px}
-.wechat-pop{border:1px solid var(--line); border-top:3px solid #07C160; border-radius:8px;
-  background:var(--panel); color:var(--ink); padding:26px 28px 22px; text-align:center;
-  box-shadow:0 18px 50px #0004; max-width:calc(100vw - 32px)}
-.wechat-pop::backdrop{background:#0008; backdrop-filter:blur(3px)}
-.wechat-pop .qr{background:#1f1f1f; padding:14px; border-radius:6px; margin:0 auto 14px;
-  width:max-content; max-width:100%; box-sizing:border-box}
-.wechat-pop .qr img{display:block; width:240px; max-width:100%; height:auto}
-.wechat-pop b{display:block; font-size:1rem}
-.wechat-pop small{display:block; color:var(--dim); margin-top:4px}
-.wechat-pop .x{position:absolute; top:6px; right:8px; border:0; background:none;
-  font-size:1.4rem; line-height:1; color:var(--dim); cursor:pointer; padding:4px 8px}
-.wechat-pop .x:hover{color:var(--ink)}
+.support .telegram svg{fill:#26A5E4}
+.support .telegram:hover{border-color:#26A5E4; background:#26A5E414}
 /* In the hero: smaller, so the two buttons read as a shortcut rather than as the
    point of the page. Some people arrive only wanting the Discord invite or the
    Ko-fi link, and they should not have to scroll past the whole funnel to find it. */
