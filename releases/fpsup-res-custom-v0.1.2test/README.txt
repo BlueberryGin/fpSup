@@ -57,11 +57,19 @@ WHAT HAS BEEN VERIFIED
   and that each format programs the sensor exactly as the card it comes
   from (OG3K/OG2K) or as Jose's patched modes (S16/OG3.5K/OG4K).
 
-  On the camera (earlier builds of this core, not these exact files):
-  the menu and Quick Set with all five formats; recording OG3K 12-bit,
-  S16 12-bit (with its standby framing), OG4K 8-bit and OG3.5K 8-bit
-  (correct DNG sizes, clean pictures); MOV with a format chosen records
-  normal MOV.
-  NOT yet tested on the camera: Crop Mode with OG3.5K/OG4K, the greyed
-  frame rates and Crop Mode, OG3K/OG2K/S16 100p, OG4K standby framing,
-  a format coming back after a restart.
+  On the camera (2026-10-07/08, development builds up to this release):
+  all five formats load and record with correct DNG sizes; the menu and
+  Quick Set; frame rates and Crop Mode greyed where a format cannot use
+  them; OG3.5K with Crop Mode recording; S16 standby framing; switching
+  live view without freezing; MOV with a format chosen records normal
+  MOV; OG3K coming back after a restart; the camera's own settings keep
+  only stock values.
+  NOT yet tested on the camera: OG3K/OG2K/S16 100p (needs an SSD), S16
+  4x magnify, S16/OG3.5K/OG4K coming back after a restart.
+
+KNOWN PROBLEMS
+
+  - S16, OG3.5K and OG4K: the DNG's frame-rate tag may name the base
+    mode's rate (S16 60, OG3.5K/OG4K 30) instead of the rate you chose.
+    The recording itself runs at the chosen rate; set the clip's frame
+    rate in your editor.  To be fixed in the next release.
