@@ -147,9 +147,20 @@ header .lang{position:absolute;top:0;right:0}
 /* In the hero: smaller, so the two buttons read as a shortcut rather than as the
    point of the page. Some people arrive only wanting the Discord invite or the
    Ko-fi link, and they should not have to scroll past the whole funnel to find it. */
+/* Switch to the older fpSup-Merge (tools/card-composer has the same bar) */
+.pageswitch{display:flex;margin:0 0 18px;border:1px solid var(--line);border-radius:4px;overflow:hidden;
+  width:max-content;max-width:100%;font-family:var(--mono);font-size:.78rem}
+.pageswitch a{padding:6px 12px;text-decoration:none;color:var(--dim);background:var(--panel)}
+.pageswitch a + a{border-left:1px solid var(--line)}
+.pageswitch a[aria-current="page"]{background:var(--sig-soft);color:var(--sig);font-weight:600}
+.pageswitch a:hover{color:var(--ink)}
 </style>
 </head>
 <body>
+<nav class="pageswitch" aria-label="fpSup-Merge">
+  <a href="./" aria-current="page" data-t="swNew"></a>
+  <a href="../card-composer/" data-t="swOld"></a>
+</nav>
 <header>
   <div class="lang" role="group" aria-label="Language / 語言 / 语言">
     <button type="button" data-lang="en">EN</button>
@@ -417,6 +428,7 @@ const T = {
     intro: '勾選要放進同一張卡的 sup,下載 zip,把裡面資料夾的內容全部複製到 SD 卡根目錄。Loader v3 卡是一個資料夾：每個 sup 一個檔案，合併就是放在一起。只支援 Ver.5.02。',
     card: '卡片內容', hashes: '檔案雜湊',
     kofi: '在 Ko-fi 支持我',
+    swNew: 'fpSup-Merge v3(新版)', swOld: '舊格式的卡(舊版)',
     install: '安裝說明',
     /* Andy_hal9000's tip (no per-character AutoRun delay) is the first line of
        every v3 card's AutoRun, so the thanks is always shown -- the old page
@@ -446,6 +458,7 @@ const T = {
     intro: 'Tick the sups for one card, download the zip, and copy what is inside its folder to the SD card root. A Loader v3 card is a folder: one file per sup, so merging is putting them together. Ver.5.02 only.',
     card: 'Card contents', hashes: 'File hashes',
     kofi: 'supMe on Ko-fi',
+    swNew: 'fpSup-Merge v3 (new)', swOld: 'Older cards',
     install: 'Install',
     flash: '⚡ Thanks to our Flash, <b>Andy_hal9000</b>, whose tip cut start-up from 11.5 s to 3 s, on every card.',
     steps: [
