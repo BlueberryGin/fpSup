@@ -26,7 +26,7 @@ import json, pathlib, subprocess, shutil, sys, re
 
 HERE = pathlib.Path(__file__).resolve().parent
 TEMPLATE = HERE / 'template.html'
-INDEX = HERE / 'index.html'
+INDEX = HERE / 'legacy' / 'index.html'   # tools/card-composer/ itself serves the v3 page
 ARTIFACT = HERE / 'artifact.html'
 
 HEAD = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'

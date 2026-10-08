@@ -284,10 +284,10 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);
 .v3-notice button{font:inherit;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:9px 14px;cursor:pointer}
 </style>
 
-<a class="back" id="back" href="../../">&larr; fpSup</a>
+<a class="back" id="back" href="../../../">&larr; fpSup</a>
 
 <nav class="pageswitch" aria-label="fpSup-Merge">
-  <a href="../merge-v3/">fpSup-Merge v3 · 新版</a>
+  <a href="../">fpSup-Merge v3 · 新版</a>
   <a href="./" aria-current="page">Older cards · 舊版</a>
 </nav>
 <header>
@@ -1086,7 +1086,7 @@ let addTileEl = null;   // the "+ Add a .BIN" tile; kept, because resetting the
 /* A product's how-to page.  The catalogue stores it relative to the site root;
    on the published site that is two folders up, anywhere else (a file:// copy,
    the Artifact host) the links go to the published site. */
-const SITE = /github\.io$/.test(location.hostname) ? '../../' : 'https://ijigen.github.io/fpSup/';
+const SITE = /github\.io$/.test(location.hostname) ? '../../../' : 'https://ijigen.github.io/fpSup/';
 const guideHref = g => SITE + g;
 function renderCatalogue(){
   const addTile = addTileEl || (addTileEl = document.getElementById('drop'));
@@ -1463,7 +1463,7 @@ render();
   <p class="zh">新版 fpSup-Merge 已推出：新產品 Res-Custom、Gyro2、ScreenFlip,以及最新的 Lossless、RAW-View
   都在新版頁面(Loader v3 卡)。這一頁保留給舊格式的卡(OG3K、OG2K、Gyro、Gyro-Base)。兩種格式不能放在同一張卡。</p>
   <div class="row">
-    <a class="go" href="../merge-v3/">Go to the new page · 前往新版</a>
+    <a class="go" href="../">Go to the new page · 前往新版</a>
     <button type="button" id="v3-notice-stay">Stay here · 繼續用舊版</button>
   </div>
 </dialog>

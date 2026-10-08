@@ -1114,12 +1114,12 @@ def main():
     # template.html is shaped for the Artifact host, which supplies the doctype
     # (local copy below)
     css, rest = page.split('</style>', 1)
-    (HERE / 'index.html').write_text(
+    (HERE / 'legacy' / 'index.html').write_text(
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
         + css + '</style>\n</head>\n<body>\n' + rest + '\n</body>\n</html>\n')
-    print(f'\n  wrote  {HERE / "index.html"}  '
-          f'{(HERE / "index.html").stat().st_size:,} bytes')
+    print(f'\n  wrote  {HERE / "legacy" / "index.html"}  '
+          f'{(HERE / "legacy" / "index.html").stat().st_size:,} bytes')
     for product in list(REFS):
         shutil.rmtree(REFS[product]['_tmp'], ignore_errors=True)
     if REFS:

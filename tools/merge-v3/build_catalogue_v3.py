@@ -29,6 +29,9 @@ RELEASES = FPSUP / 'releases'
 TEMPLATE = HERE / 'template.html'
 GUIDE = FPSUP / 'guide'
 OUT = HERE / 'index.html'
+# The site's fpSup-Merge address is tools/card-composer/ (user 2026-10-08): the same
+# page is written there too; the older page lives in tools/card-composer/legacy/.
+SITE_COPY = HERE.parent / 'card-composer' / 'index.html'
 
 SHARED = ['AutoRun.txt', 'fpSup/LOADER.BIN'] + [f'fpSup/UI/{i}.BIN' for i in range(5)]
 SUP_RE = re.compile(r'^[0-9]{2}[A-Z0-9]{1,6}\.BIN$')
@@ -277,6 +280,8 @@ def main():
     # </script> cannot occur in base64 or in the ABOUT text we embed, but guard anyway.
     blob = json.dumps(cat, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
     OUT.write_text(page.replace('@@CATALOGUE@@', blob), encoding='utf-8')
+    if not a.out:
+        SITE_COPY.write_text(page.replace('@@CATALOGUE@@', blob), encoding='utf-8')
 
     print(f'wrote {OUT} ({OUT.stat().st_size:,} B)')
     for p in cat['products']:

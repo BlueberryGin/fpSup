@@ -19,7 +19,7 @@
 <link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="../assets/site.css">
+<link rel="stylesheet" href="../assets/site.css?v=d947bc40">
 </head>
 <body>
 
@@ -34,69 +34,80 @@
 
 <header class="hero">
   <h1>fpSup-Gyro2</h1>
-  <p class="lede en">The camera's own gyro and level data go <b>inside every CinemaDNG frame</b>.
-  In DaVinci Resolve, the <b>Gyroflow (fpSup)</b> plugin reads them from the frames and
-  stabilises the clip. No extra files, no sync. Test it before you shoot something important.</p>
-  <p class="lede zh">相機自己的陀螺儀與水平儀資料會寫進<b>每一張 CinemaDNG 畫面裡</b>。
-  在 DaVinci Resolve 用 <b>Gyroflow (fpSup)</b> 外掛,直接從畫面讀取並防震。
-  不用另外的檔案,也不用同步。拍重要的東西之前先測過。</p>
+  <p class="lede en">Stabilise SIGMA fp footage in <b>DaVinci Resolve</b>. It takes two parts, used together:</p>
+  <p class="lede zh">在 <b>DaVinci Resolve</b> 裡幫 SIGMA fp 的影片防震。要兩樣東西一起用:</p>
 </header>
 
-<section class="credit" id="credits" aria-labelledby="credits-h">
-  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
-  <h2 id="credits-h" class="credit-h"><span class="en">Thank you, Gyroflow</span><span class="zh">感謝 Gyroflow</span></h2>
-  <p class="credit-doc"><a href="https://gyroflow.xyz/">Gyroflow</a> &middot; AdrianEddy and contributors &middot;
-  <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a> (GPL-3.0)</p>
-  <p class="en">The stabilisation itself is done by <b>Gyroflow</b>. Gyro2 only records the camera's
-  motion; turning that motion into a steady picture &mdash; rolling-shutter correction, lens
-  correction, smoothing &mdash; is Gyroflow's work. The <b>Gyroflow (fpSup)</b> plugin is a fork of
-  Gyroflow's own <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a>
-  (GPL-3.0): it adds only the part that reads the fp's frames and hands them to Gyroflow in its own
-  camera format. Its source is at
-  <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>.
-  Problems with this plugin are ours: please report them to fpSup, not to Gyroflow.</p>
-  <p class="zh">防震本身是 <b>Gyroflow</b> 做的。Gyro2 只負責記錄相機的動作;把動作變成穩定的畫面
-  —— 果凍效應修正、鏡頭修正、平滑 —— 都是 Gyroflow 的功勞。<b>Gyroflow (fpSup)</b> 外掛是
-  Gyroflow 官方 <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a>
-  的分支(GPL-3.0),只加了讀取 fp 畫面、用 Gyroflow 自己的相機格式交給它的那一段。
-  原始碼在 <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>。
-  這個外掛的問題是我們的:請回報給 fpSup,不要回報給 Gyroflow。</p>
-</section>
+<div class="pair">
+  <div>
+    <p class="pair-k"><span class="en">1 &middot; in the camera</span><span class="zh">1 &middot; 相機</span></p>
+    <p class="pair-t">Gyro2 sup</p>
+    <p class="en">Records the camera's shake into every CinemaDNG frame. <a href="../tools/card-composer/">Make the card &rarr;</a></p>
+    <p class="zh">錄 CinemaDNG 時,把相機的晃動記錄進每一格。<a href="../tools/card-composer/">做卡 &rarr;</a></p>
+  </div>
+  <div>
+    <p class="pair-k"><span class="en">2 &middot; on the computer</span><span class="zh">2 &middot; 電腦</span></p>
+    <p class="pair-t">Gyroflow (fpSup)</p>
+    <p class="en">A DaVinci Resolve plugin. Reads the shake and stabilises the clip. <a href="#plugin">Install it &darr;</a></p>
+    <p class="zh">DaVinci Resolve 外掛。讀出晃動、把畫面穩住。<a href="#plugin">安裝 &darr;</a></p>
+  </div>
+</div>
+<p class="note en">The sup alone does not stabilise anything: without the plugin the clip looks the same as before.</p>
+<p class="note zh">只裝 sup 不會讓畫面變穩:沒有外掛,影片跟原本一樣。</p>
 
-<p class="en">Put Gyro2 on the card from the <a href="../tools/merge-v3/#install">v3 merge page</a>; how to install the card is written there.</p>
-<p class="zh">用 <a href="../tools/merge-v3/#install">v3 合併頁</a>把 Gyro2 做進卡片;卡片怎麼裝寫在那裡。</p>
 
 <!-- 1. INSTALL PLUGIN -->
 <h2 id="plugin"><span class="en">Install the Resolve plugin</span><span class="zh">裝 Resolve 外掛</span></h2>
 <ol class="steps">
   <li>
-    <h3><span class="en">Download</span><span class="zh">下載</span></h3>
-    <p class="en">From the <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest"><b>latest
-    release</b></a>, take the file for your computer: <code>fpSupGyroflow-OpenFX-macos.dmg</code> (or
-    <code>-macos.zip</code>) for a Mac, <code>fpSupGyroflow-OpenFX-windows.zip</code> for Windows.</p>
-    <p class="zh">到<a href="https://github.com/ijigen/gyroflow-plugins/releases/latest"><b>最新版</b></a>,
-    下載你電腦用的檔案:Mac 用 <code>fpSupGyroflow-OpenFX-macos.dmg</code>(或 <code>-macos.zip</code>),
-    Windows 用 <code>fpSupGyroflow-OpenFX-windows.zip</code>。</p>
-  </li>
-  <li>
-    <h3><span class="en">Put the bundle in the plugin folder</span><span class="zh">把外掛放進外掛資料夾</span></h3>
-    <div class="scroll">
-    <table>
-      <tbody>
-        <tr><td>macOS</td><td><code>/Library/OFX/Plugins/fpSupGyroflow.ofx.bundle</code></td></tr>
-        <tr><td>Windows</td><td><code>C:\Program Files\Common Files\OFX\Plugins\fpSupGyroflow.ofx.bundle</code></td></tr>
-      </tbody>
-    </table>
+    <h3><span class="en">Download and install</span><span class="zh">下載並安裝</span></h3>
+
+    <h4><span class="en">Mac</span><span class="zh">Mac 安裝</span></h4>
+    <div class="tabs">
+      <input type="radio" name="mac-install" id="mac-pkg" checked><label for="mac-pkg"><span class="en">Installer</span><span class="zh">pkg 安裝</span></label>
+      <input type="radio" name="mac-install" id="mac-term"><label for="mac-term"><span class="en">Terminal</span><span class="zh">終端機安裝</span></label>
+      <div class="tab">
+        <ol class="en">
+          <li>Download <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest/download/fpSupGyroflow-OpenFX-macos.pkg"><code>fpSupGyroflow-OpenFX-macos.pkg</code></a> and open it. It is blocked: press <b>Done</b>.</li>
+          <li><b>System Settings &rarr; Privacy &amp; Security</b>, scroll down, press <b>Open Anyway</b>.</li>
+          <li>Follow the installer.</li>
+        </ol>
+        <ol class="zh">
+          <li>下載 <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest/download/fpSupGyroflow-OpenFX-macos.pkg"><code>fpSupGyroflow-OpenFX-macos.pkg</code></a>,打開。會被擋下,按<b>完成</b>。</li>
+          <li><b>系統設定 &rarr; 隱私權與安全性</b>,捲到最下面,按<b>強制打開</b>。</li>
+          <li>照安裝程式按下去。</li>
+        </ol>
+      </div>
+      <div class="tab">
+        <p class="en">Open <b>Terminal</b>, paste this, press Enter, type your password. It downloads and installs the latest version.</p>
+        <p class="zh">打開<b>終端機</b>,貼上這段,按 Enter,輸入密碼。會自動下載並裝好最新版。</p>
+        <div class="cmd"><pre><code>curl -L -o /tmp/fpSupGyroflow.zip https://github.com/ijigen/gyroflow-plugins/releases/latest/download/fpSupGyroflow-OpenFX-macos.zip
+sudo mkdir -p /Library/OFX/Plugins
+sudo rm -rf /Library/OFX/Plugins/fpSupGyroflow.ofx.bundle
+sudo unzip -q /tmp/fpSupGyroflow.zip -d /Library/OFX/Plugins</code></pre><button type="button" class="copy"><span class="en">Copy</span><span class="zh">複製</span></button></div>
+      </div>
     </div>
-    <p class="en">On macOS the plugin is not notarized by Apple, so a downloaded copy is blocked
-    until you clear the download mark, once, in Terminal:</p>
-    <p class="zh">macOS 上這個外掛沒有經過 Apple 公證,下載來的檔案會被擋,
-    要在「終端機」清掉下載標記一次:</p>
-    <pre><code>sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/fpSupGyroflow.ofx.bundle</code></pre>
-    <p class="note en">It sits beside the official Gyroflow plugin; you can keep both.
-    Tested on Apple-silicon Macs only. Windows and Linux builds exist but are not tested yet.</p>
-    <p class="note zh">它跟官方 Gyroflow 外掛並存,兩個都可以留著。
-    只在 Apple 晶片的 Mac 上實測過;Windows 與 Linux 版有建置,但<strong>還沒測</strong>。</p>
+
+    <h4><span class="en">Windows</span><span class="zh">Windows 安裝</span></h4>
+    <ol class="en">
+      <li>Download <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest/download/fpSupGyroflow-OpenFX-windows.zip"><code>fpSupGyroflow-OpenFX-windows.zip</code></a> and unzip it.</li>
+      <li>Right-click <b>Install-Windows.bat</b> &rarr; <b>Run as administrator</b>. (SmartScreen: <b>More info &rarr; Run anyway</b>.)</li>
+    </ol>
+    <ol class="zh">
+      <li>下載 <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest/download/fpSupGyroflow-OpenFX-windows.zip"><code>fpSupGyroflow-OpenFX-windows.zip</code></a>,解壓縮。</li>
+      <li>在 <b>Install-Windows.bat</b> 按右鍵 &rarr; <b>以系統管理員身分執行</b>。(跳警告就按<b>其他資訊 &rarr; 仍要執行</b>。)</li>
+    </ol>
+
+    <p class="note en">Mac needs one extra step because the plugin is not notarized by Apple. It installs next to the
+    official Gyroflow plugin; you can keep both. Tested on Apple-silicon Macs only.</p>
+    <p class="note zh">Mac 多一步是因為外掛沒有經過 Apple 公證。它跟官方 Gyroflow 外掛並存,兩個都可以留著。
+    只在 Apple 晶片的 Mac 上實測過。</p>
+    <p class="note en">The plugin is a modified version of Gyroflow's
+    <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a> (GPL-3.0); source at
+    <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>.
+    Report problems with it to fpSup, not to Gyroflow.</p>
+    <p class="note zh">外掛是以 Gyroflow 的 <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a>(GPL-3.0)修改而成,原始碼在
+    <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>。外掛的問題請回報給 fpSup,不要回報給 Gyroflow。</p>
   </li>
   <li>
     <h3><span class="en">Check Resolve sees it</span><span class="zh">確認 Resolve 看得到</span></h3>
@@ -263,8 +274,8 @@ then switch the camera off. There is no menu setting to set back. Plugin: delete
   <tbody>
     <tr><td><span class="en">No <b>Gyroflow (fpSup)</b> in Effects</span><span class="zh">特效裡沒有 <b>Gyroflow (fpSup)</b></span></td>
         <td><span class="en">Check the bundle's folder, tick it in Preferences &rarr; Video Plugins, restart Resolve.
-        On macOS, run the <code>xattr</code> line above.</span><span class="zh">確認外掛放的資料夾、在偏好設定 &rarr; Video Plugins 打勾、重開 Resolve。
-        macOS 上執行上面那行 <code>xattr</code>。</span></td></tr>
+        On a Mac, reinstall with the <b>Terminal</b> tab above.</span><span class="zh">確認外掛放的資料夾、在偏好設定 &rarr; Video Plugins 打勾、重開 Resolve。
+        Mac 可以改用上面的<b>終端機安裝</b>重裝一次。</span></td></tr>
     <tr><td><span class="en">Status says the take has no Vd frame sync</span><span class="zh">Status 說這段沒有 Vd 幀同步</span></td>
         <td><span class="en">The clip was not recorded with Gyro2 loaded (or with an early test build). Check the
         card has <code>fpSup/20GYR2.BIN</code> and record again.</span><span class="zh">這段錄的時候沒有載入 Gyro2(或是早期測試版錄的)。
@@ -287,6 +298,14 @@ then switch the camera off. There is no menu setting to set back. Plugin: delete
   <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="https://github.com/ijigen/gyroflow-plugins/releases">Gyroflow (fpSup)</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
 </footer>
 
+<script>
+document.addEventListener('click', e => {
+  const b = e.target.closest('button.copy'); if (!b) return;
+  navigator.clipboard.writeText(b.previousElementSibling.textContent).then(() => {
+    b.classList.add('done'); setTimeout(() => b.classList.remove('done'), 1500);
+  });
+});
+</script>
 <script src="../assets/lang.js?v=7c49866d" defer></script>
 </body>
 </html>

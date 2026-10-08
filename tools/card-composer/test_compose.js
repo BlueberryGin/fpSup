@@ -9,7 +9,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '../..');
-const page = path.resolve(process.argv[2] || path.join(__dirname, 'index.html'));
+const page = path.resolve(process.argv[2] || path.join(__dirname, 'legacy', 'index.html'));
 const html = fs.readFileSync(page, 'utf8');
 const block = id => {
   const hit = html.match(new RegExp('<script id="' + id + '"[^>]*>([\\s\\S]*?)<\\/script>'));

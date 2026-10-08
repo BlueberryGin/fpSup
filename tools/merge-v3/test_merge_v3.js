@@ -129,6 +129,11 @@ ok(CAT.shared.some(f => f.path === 'AutoRun.txt' && Buffer.from(f.data, 'base64'
   ok(sups.join() === [...sups].sort().join(), 'sups in the zip are in file-name order');
 }
 
+// 6e. tools/card-composer/ serves this same page (only for the real build)
+if (!process.env.MERGE_INDEX)
+  ok(fs.readFileSync(path.join(HERE, '..', 'card-composer', 'index.html'), 'utf8') === page,
+     'tools/card-composer/index.html = this page');
+
 // 7. credits survive (author is empty for the site's own sups)
 ok(CAT.products.every(p => Array.isArray(p.credits) && typeof p.author === 'string'), 'author/credits fields present');
 
