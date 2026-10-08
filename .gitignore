@@ -15,3 +15,7 @@ raw/*
 # committing the masters would publish them too. (The logo is the exception and
 # is tracked, in assets/src/ -- tools/build_assets.py reads it on every run.)
 h2u_asess/
+
+# notes kept outside this repo (symlinks into the research tree)
+focus/geometry/NATIVE_CONFIRMATION_AUDIT.md
+focus/geometry/NATIVE_HOOK_PLAN.md
