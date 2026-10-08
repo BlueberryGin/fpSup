@@ -1,0 +1,2 @@
+en: Lossless-compressed CinemaDNG, by the camera's own hardware codec: a Lossless RAW row (SHOOT page 2, CINE) turns it on; frames the codec cannot finish in time are written uncompressed, and compressed clips play back in the camera. Test build.
+zh: 用相機自己的硬體編碼器錄無損壓縮 CinemaDNG:SHOOT 第 2 頁(CINE)多一列 Lossless RAW 開關;來不及壓的畫格照原樣寫入未壓縮,壓縮過的片段可在機內回放。測試版。

@@ -1,4 +1,17 @@
-# fpGyroSup v1.11b
+# fpGyroSup releases
+
+Current GCSV download: [**v1.14.1test ZIP**](fp-gyro-sup-v1.14.1test.zip) ·
+[version-specific instructions and test status](../../releases/fpsup-gyro-v1.14.1test/README.txt).
+This public test build reduces GCSV formatting work. Its effect on the reported
+audio drift has **not** been verified on a camera. Copy `AutoRun.txt`, `fpSup.BIN`
+and the complete `FPSUPUI` folder from this ZIP to the boot SD card root.
+
+目前 GCSV 測試版：[**v1.14.1test 下載**](fp-gyro-sup-v1.14.1test.zip) ·
+[此版安裝與測試說明](../../releases/fpsup-gyro-v1.14.1test/README.txt)。
+本版減少 GCSV 轉文字工作；聲畫同步改善**尚未經實機驗證**。請把壓縮包內的
+`AutoRun.txt`、`fpSup.BIN` 和完整 `FPSUPUI` 資料夾放在開機 SD 卡根目錄。
+
+## Historical v1.11b notes / 舊版 v1.11b 說明
 
 [![supMe on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/fpsup)
 [![Join the fpSup Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/WVTCcpGUYC)

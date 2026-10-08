@@ -32,7 +32,7 @@ import gen_strings_code                   # noqa: E402
 import test_ui_apply as TA                # noqa: E402
 import test_qs_option as TQO              # noqa: E402
 
-PUBLIC = ['uia_apply', 'uis_reader', 'uis_pool_known', 'uis_intern', 'uis_intern_hinted',
+PUBLIC = ['uia_apply', 'uia_apply_in_arena', 'uis_reader', 'uis_pool_known', 'uis_intern', 'uis_intern_hinted',
           'uis_intern_many', 'uis_layer_base', 'uis_layer_add', 'uis_layer_add_qs',
           'uis_layer_fixed', 'uis_stock_has', 'uis_qs_shared', 'uia_test_qs_call']
 PAD = '    .rept 7\n    .word 0xE7F000F0\n    .endr\n'      # udf: a wrong entry offset traps

@@ -48,10 +48,10 @@
   <h1>fpSup-RAW-View</h1>
   <p class="lede en">Adds a <b>RAW</b> row to the COLOR menu. With it selected and the camera set to
   CinemaDNG 12-bit, the screen shows the RAW the camera is about to record, not a finished
-  picture. The recorded RAW is not changed. Version <b>v0.2.1test</b> &mdash; a <b>test build</b>.<br>Display curves after <a href="#credits">Ole Berek&rsquo;s Rec709 LUT guide</a>.</p>
+  picture. The recorded RAW is not changed. Version <b>v0.3.0test</b> &mdash; a <b>test build</b>.<br>Display curves after <a href="#credits">Ole Berek&rsquo;s Rec709 LUT guide</a>; the CinemaDNG colour tags corrected <a href="#credits-luka">with Luka</a>.</p>
   <p class="lede zh">在 COLOR 選單加上一列 <b>RAW</b>。選到它、而且錄影格式是 CinemaDNG 12-bit 時,
   螢幕顯示的是即將錄下的 RAW,而不是修飾過的畫面。錄下的 RAW 不會被改動。
-  版本 <b>v0.2.1test</b> —— 這是<b>測試版</b>。<br>顯示曲線依據 <a href="#credits">Ole Berek 的 Rec709 LUT 指南</a>。</p>
+  版本 <b>v0.3.0test</b> —— 這是<b>測試版</b>。<br>顯示曲線依據 <a href="#credits">Ole Berek 的 Rec709 LUT 指南</a>;CinemaDNG 色彩標籤的修正<a href="#credits-luka">來自 Luka</a>。</p>
 </header>
 
 <section class="credit" id="credits" aria-labelledby="credits-h">
@@ -67,6 +67,21 @@
   fp 在每個 ISO 於 18% 中灰上下各有幾檔(第 2 頁);<b>GA</b> 曲線則是它的
   「LA - SIGMA Rec709」曲線(第 4 頁)數位化而來。沒有他細心的整理,這個畫面就只能用猜的。
   我們套用時若有任何錯誤,責任在我們,不在這份指南。</p>
+</section>
+
+<section class="credit" id="credits-luka" aria-labelledby="credits-luka-h">
+  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
+  <h2 id="credits-luka-h" class="credit-h"><span class="en">Thank you, Luka</span><span class="zh">感謝 Luka</span></h2>
+  <p class="en">Luka tested RAW-View on their own fp with control shots seconds apart and showed, frame
+  by frame, that the RAW is not altered. Then Luka found what our own checks could not: at
+  Saturation +0.2 the CinemaDNG colour tags described the camera's white balance as a different
+  white, so Resolve showed the clip about 1100&nbsp;K cooler than the same shot at 0. Luka worked out
+  the fix, with tests built to fail on the old tags, and v0.2.4test carries it. Luka also shared a
+  chart-fitted colour matrix and an ARRI-style view that we are still evaluating.</p>
+  <p class="zh">Luka 用自己的 fp 以相隔幾秒的對照拍攝測試 RAW-View,逐格證明 RAW 沒有被改動。
+  接著 Luka 找到我們自己的驗算看不到的問題:飽和度 +0.2 時,CinemaDNG 的色彩標籤把相機的白平衡描述成另一個白,
+  Resolve 顯示的畫面比同場景在 0 時偏冷約 1100&nbsp;K。Luka 推導出修正,連同專門會在舊標籤上失敗的測試,
+  v0.2.4test 採用了它。Luka 也分享了色卡擬合的色彩矩陣與 ARRI 風格的畫面,我們還在評估。</p>
 </section>
 
 <!-- 1. INSTALL: the card's install steps live once, on the merge page -->
@@ -153,8 +168,9 @@ Sharpness is held at 0.</p>
         <td><span class="en">The camera's own calibration matrix (the one the other colour modes use)
         is applied.</span><span class="zh">套用相機自己的校色矩陣(其他色彩模式用的那一組)。</span></td>
         <td><span class="en">The same matrix is written into the ColorMatrix tags, so Resolve shows the
-        colours you monitored. The raw pixels are not changed.</span><span class="zh">同一組寫進 ColorMatrix 標籤,
-        Resolve 顯示的顏色與監看一致。RAW 像素本身不動。</span></td></tr>
+        colours you monitored, at the same white balance as at 0. The raw pixels are not
+        changed.</span><span class="zh">同一組寫進 ColorMatrix 標籤,
+        Resolve 顯示的顏色與監看一致,白平衡與 0 時相同。RAW 像素本身不動。</span></td></tr>
   </tbody>
 </table>
 </div>
@@ -193,10 +209,14 @@ before you shoot something that matters.</div>
   <thead><tr><th><span class="en">tested on the camera</span><span class="zh">已在相機上測過</span></th><th><span class="en">not tested</span><span class="zh">沒測過</span></th></tr></thead>
   <tbody>
     <tr><td><span class="en">The same RAW-View code (byte for byte) ran on a development card on
-        2026-09-27: RAW with SA/GA, Contrast and Saturation came back after a power-off.</span><span class="zh">同一份 RAW-View 程式碼(逐位元組相同)
-        2026-09-27 在開發卡上跑過:RAW 連同 SA/GA、對比度、飽和度在關機後回來了。</span></td>
-        <td><span class="en">The two release cards themselves (ordinary and Fast Start 2) have not been
-        booted.</span><span class="zh">兩張發布卡本身(一般卡與 Fast Start 2)還沒開機測過。</span></td></tr>
+        2026-10-04: OFF, SA and GA at Saturation 0 wrote the stock colour tags; SA at +0.2 wrote the
+        corrected ones, at the same white balance.</span><span class="zh">同一份 RAW-View 程式碼(逐位元組相同)
+        2026-10-04 在開發卡上跑過:OFF、SA、GA 在飽和度 0 寫原廠色彩標籤;SA 在 +0.2 寫修正後的標籤,白平衡不變。</span></td>
+        <td><span class="en">The v0.2.4test release card itself has not been booted. GA at +0.2 was not
+        recorded in that test.</span><span class="zh">v0.2.4test 發布卡本身還沒開機測過。那次測試沒錄 GA 在 +0.2。</span></td></tr>
+    <tr><td><span class="en">Earlier builds: RAW with SA/GA, Contrast and Saturation came back after a
+        power-off (2026-09-27).</span><span class="zh">之前的版本:RAW 連同 SA/GA、對比度、飽和度在關機後回來了(2026-09-27)。</span></td>
+        <td></td></tr>
     <tr><td><span class="en">Starting the camera without the card showed Standard, with no fault.</span><span class="zh">不插卡開機顯示 Standard,沒有故障。</span></td>
         <td><span class="en">MOV and 8/10-bit CinemaDNG: not supported, not made to match.</span><span class="zh">MOV 與 8/10-bit CinemaDNG:不支援,沒有對它們調。</span></td></tr>
     <tr><td><span class="en">Merged with shell + gyro + OG3K (Fast Start 2): it loaded and RAW was
@@ -280,7 +300,7 @@ and do it in order. Until then, avoid the COLOR button menu while it shows Stand
 </div>
 
 <footer>
-  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="../releases/fpsup-raw-view-v0.2.1test/README.txt">README.txt</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
+  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="../releases/fpsup-raw-view-v0.2.4test/README.txt">README.txt</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
 </footer>
 
 <script src="../assets/lang.js?v=7c49866d" defer></script>

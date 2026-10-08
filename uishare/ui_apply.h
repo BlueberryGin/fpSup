@@ -49,6 +49,13 @@ struct uia_outcome {
 
 uint32_t uia_apply(uintptr_t block, uint32_t bytes, struct uia_outcome *out);
 
+/* Prefer already-owned, persistent USER memory for this block's copies. The
+ * caller must keep [arena, arena + arena_bytes) alive for the whole boot and
+ * separate from the FPUI input. If it is too small, the usual allocator is
+ * used so a valid menu does not disappear on a smaller launcher block. */
+uint32_t uia_apply_in_arena(uintptr_t block, uint32_t bytes, struct uia_outcome *out,
+                            uintptr_t arena, uint32_t arena_bytes);
+
 #if defined(UIA_HOST_TEST)
 struct uia_natives {
     uint32_t (*read)(uintptr_t);

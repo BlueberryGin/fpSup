@@ -2,18 +2,22 @@
 
 [English](#english) | [繁體中文](#繁體中文)
 
-Gyro, six-axis logging and the Gyroflow workflow. **Status: released**, in two
-editions · [release notes](../gyro/release/)
+Gyro, six-axis logging and the Gyroflow workflow. **v1.14.1test is available
+for testing; its audio synchronisation has not been verified on camera.** The
+earlier versions remain available · [release notes](../gyro/release/)
 
 | | The camera writes | Converting |
 |---|---|---|
+| [**fpGyroSup v1.14.1test**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-v1.14.1test.zip) | `.gcsv` and `.json` during CinemaDNG recording; audio sync test requested | nothing to convert |
 | [**fpGyroSup v1.11b**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-v1.11b.zip) | `.gcsv` and `.json`, during the take, every sample | nothing to do |
 | [**fpGyroSup Base v1**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-base-v1.zip) | `.GYR`, one per take, every sample | [in a browser](https://ijigen.github.io/fpSup/gyro/convert/) or `gyro/gyr7.py` |
 
-Gyro、六軸記錄與 Gyroflow 工作流。**狀態：已發布**,有兩個版本 · [說明](../gyro/release/)
+Gyro、六軸記錄與 Gyroflow 工作流。**v1.14.1test 已開放測試，聲畫同步尚未經
+相機實拍驗證。** 舊版仍可下載 · [說明](../gyro/release/)
 
 | | 相機寫出 | 轉檔 |
 |---|---|---|
+| [**fpGyroSup v1.14.1test**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-v1.14.1test.zip) | 錄 CinemaDNG 時寫 `.gcsv` 與 `.json`；需要聲畫同步實測 | 不必轉檔 |
 | [**fpGyroSup v1.11b**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-v1.11b.zip) | 錄影當下寫 `.gcsv` 與 `.json`,一筆不漏 | 不用做 |
 | [**fpGyroSup Base v1**](https://github.com/ijigen/fpSup/raw/main/gyro/release/fp-gyro-sup-base-v1.zip) | 每趟一個 `.GYR`,一筆不漏 | [瀏覽器](https://ijigen.github.io/fpSup/gyro/convert/) 或 `gyro/gyr7.py` |
 

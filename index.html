@@ -164,18 +164,18 @@ fpSup-Merge</a> and make your card.</p>
   <thead><tr><th><span class="en">product</span><span class="zh">產品</span></th><th><span class="en">version</span><span class="zh">版本</span></th><th><span class="en">what it does</span><span class="zh">做什麼</span></th></tr></thead>
   <tbody>
 <!-- releases:begin -->
-    <tr><td><a href="releases/fpsup-gyro-v1.14.0/README.txt">fpsup-gyro</a></td><td>v1.14.0</td>
-        <td><span class="en">Writes Gyroflow's <code>.gcsv</code> and <code>.json</code> while recording — every sample at 2500 Hz, distortion read off the lens. The profile now carries the size the take was actually recorded at, which open gate got wrong.</span><span class="zh">錄影當下就把 Gyroflow 要的 <code>.gcsv</code> 與 <code>.json</code> 寫進片段資料夾。2500 Hz 每個樣本都在,畸變直接讀鏡頭。profile 的尺寸改成實際錄下的那個 —— open gate 下先前是錯的。</span></td></tr>
+    <tr><td><a href="releases/fpsup-gyro-v1.14.1test/README.txt">fpsup-gyro</a></td><td>v1.14.1test</td>
+        <td><span class="en">Writes Gyroflow .gcsv motion and .json lens files while recording CinemaDNG. This test build needs on-camera audio sync validation.</span><span class="zh">錄製 CinemaDNG 時寫出 Gyroflow 的 .gcsv 運動紀錄與 .json 鏡頭檔。此測試版的聲畫同步仍待實機驗證。</span></td></tr>
     <tr><td><a href="releases/fpsup-gyro-base-v1.14.0/README.txt">fpsup-gyro-base</a></td><td>v1.14.0</td>
         <td><span class="en">Writes the gyro and accelerometer as a raw .GYR in the root of the disk the take went to — every sample, nothing on the camera but the stream — converted afterwards in a browser. Same code as fpGyroSup v1.14.0.</span><span class="zh">在錄影那顆磁碟的根目錄寫一個原始 .GYR(陀螺儀與加速度計每個樣本都在),機上只做串流,事後在瀏覽器轉換。與 fpGyroSup v1.14.0 同一份程式。</span></td></tr>
-    <tr><td><a href="releases/fpsup-lossless-v0.1.2test/README.txt">fpsup-lossless</a></td><td>v0.1.2test</td>
+    <tr><td><a href="releases/fpsup-lossless-v0.1.3test/README.txt">fpsup-lossless</a></td><td>v0.1.3test</td>
         <td><span class="en">Lossless-compressed CinemaDNG, by the camera's own hardware codec: a Lossless RAW row (SHOOT page 2, CINE) turns it on; frames the codec cannot finish in time are written uncompressed, and compressed clips play back in the camera. Test build.</span><span class="zh">用相機自己的硬體編碼器錄無損壓縮 CinemaDNG:SHOOT 第 2 頁(CINE)多一列 Lossless RAW 開關;來不及壓的畫格照原樣寫入未壓縮,壓縮過的片段可在機內回放。測試版。</span></td></tr>
     <tr><td><a href="releases/fpsup-og2k-v0.1.5a/README.txt">fpsup-og2k</a></td><td>v0.1.5a</td>
         <td><span class="en">The same open gate at 2016×1344, on the sensor's quiet readout at every frame rate. 98 MB/s at 24p 12-bit, 8.3 ms rolling shutter. Test build.</span><span class="zh">同樣的 open gate,2016×1344,每個幀率都走感光元件的安靜讀出。24p 12-bit 為 98 MB/s,捲簾 8.3 ms。測試版。</span></td></tr>
     <tr><td><a href="releases/fpsup-og3k-v0.2.8a/README.txt">fpsup-og3k</a></td><td>v0.2.8a</td>
         <td><span class="en">The sensor's whole 3:2 area at 3024×2010, eight frame rates from 23.976 to 100, native UI in Settings and Quick Set. 221 MB/s at 24p 12-bit — this needs an external SSD, not an SD card. Alpha.</span><span class="zh">感光元件完整的 3:2 面積,3024×2010,八個幀率從 23.976 到 100,Settings 與 QS 有原生 UI。24p 12-bit 為 221 MB/s ——這個碼率要外接 SSD,SD 卡不夠。Alpha。</span></td></tr>
-    <tr><td><a href="releases/fpsup-raw-view-v0.2.3test/README.txt">fpsup-raw-view</a></td><td>v0.2.3test</td>
-        <td><span class="en">RAW monitoring for CinemaDNG 12-bit: a RAW row in the COLOR menu makes the LCD show what will be recorded — recording gain in standby, sensor saturation as white, two latitude curves (SA/GA) mapped onto a 709 screen. The recorded RAW is not changed. Test build; ordinary card and Fast Start 2.</span><span class="zh">CinemaDNG 12-bit 的 RAW 監看:COLOR 選單多一列 RAW,螢幕顯示即將錄下的內容——待機用錄影增益、感光元件飽和即白、兩條寬容度曲線(SA/GA)映射到 709 螢幕。錄下的 RAW 不被改動。測試版;附一般卡與 Fast Start 2 卡。</span></td></tr>
+    <tr><td><a href="releases/fpsup-raw-view-v0.2.4test/README.txt">fpsup-raw-view</a></td><td>v0.2.4test</td>
+        <td><span class="en">RAW monitoring for CinemaDNG 12-bit: a RAW row in the COLOR menu makes the LCD show what will be recorded — recording gain in standby, sensor saturation as white, two latitude curves (SA/GA) mapped onto a 709 screen. The recorded RAW is not changed. Test build.</span><span class="zh">CinemaDNG 12-bit 的 RAW 監看:COLOR 選單多一列 RAW,螢幕顯示即將錄下的內容——待機用錄影增益、感光元件飽和即白、兩條寬容度曲線(SA/GA)映射到 709 螢幕。錄下的 RAW 不被改動。測試版。</span></td></tr>
     <tr><td><a href="releases/fpsup-usbshell-v3.3.0/README.txt">fpsup-usbshell</a></td><td>v3.3.0</td>
         <td><span class="en">The shell that answers <code>shl</code> over USB, parasitic on the camera's own PTP gadget so the firmware keeps owning the endpoints.</span><span class="zh">透過 USB 回應 <code>shl</code> 的 shell。寄生在相機自己的 PTP gadget 上,端點仍由韌體管。</span></td></tr>
 <!-- releases:end -->

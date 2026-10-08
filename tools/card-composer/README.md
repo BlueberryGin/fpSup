@@ -19,6 +19,12 @@ filters the display: it does not select, deselect or remove a previously
 selected sup from the merged output. OG3K and OG2K remain mutually exclusive.
 Fast Start 3 stays a separate, off-by-default settings switch, not a sup tile.
 
+Uploaded `.BIN` files are remembered in this browser and shown under every
+category. They return unticked after a reload. Rename or delete them on their
+tiles; uploading identical bytes again keeps one copy. A ✗ on a tile explains
+why that file cannot be merged with the current selection, or why a remembered
+file cannot be read. Clearing browser storage also clears remembered files.
+
 When adding a sup, set its `category` string in `PRODUCTS` in
 `build_catalogue.py` (`shooting` or `development` for the current products).
 The page derives category buttons from the catalogue, including new category
@@ -27,9 +33,11 @@ names; missing metadata falls back to `uncategorized`.
 ## Current inputs and boot contract
 
 `build_catalogue.py` selects the latest frozen directory for each product from
-`releases/`; it never rebuilds or overwrites a frozen release. The 2026-09-25
-refresh uses USB Shell 3.3.0, gyro 1.14.0, gyro-base 1.14.0 (added 2026-09-26;
-exclusive with gyro), OG3K 0.2.6a and OG2K 0.1.3a: the
+`releases/`; it never rebuilds or overwrites a frozen release. The current Gyro
+input is v1.14.1test, a public GCSV formatter test build. Its audio sync during
+real camera recording has not yet been confirmed. Gyro-Base remains v1.14.0
+and is exclusive with Gyro. The 2026-09-25 refresh used USB Shell 3.3.0, Gyro
+1.14.0, Gyro-Base 1.14.0 (added 2026-09-26), OG3K 0.2.6a and OG2K 0.1.3a: the
 same payloads as before on the new loader and stage2, which write back every
 firmware word a card changed when the camera powers off (gyro no longer carries
 a power-off routine of its own).
@@ -163,8 +171,9 @@ loader cache calls, Fast stack alignment, payload-independent AutoRun, and
 
 `test_catalog_ui.js` runs the generated page's scripts and event handlers with
 a small offline DOM stub. It checks category defaults, selection across filters,
-OG exclusivity, upload/removal and the independent Fast switch. This tests UI
-behaviour, not browser layout or on-camera operation.
+OG exclusivity, remembered uploads, rename/delete, clash explanations and the
+independent Fast switch. This tests UI behaviour, not browser layout or
+on-camera operation.
 
 `render.py` without `--check` is only for presentation edits: it reuses the
 already embedded catalogue. To refresh releases or boot templates, run

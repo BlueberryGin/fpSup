@@ -1355,7 +1355,7 @@ function addFiles(list){
         saveUploads(); note.hidden = true; render();
       } catch (err) {
         note.hidden = false;
-        note.innerHTML = '<b>' + f.name + ' could not be read.</b> ' + err.message;
+        note.textContent = f.name + ' could not be read. ' + (err.message || String(err));
       }
     };
     rd.readAsArrayBuffer(f);

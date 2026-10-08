@@ -282,6 +282,16 @@ document.getElementById('drop').onkeydown({key: 'Enter', preventDefault() {}});
 fileInput.click = clickWas;
 assert.equal(opened, 2, 'add tile must open the file input on click and on Enter');
 assert.deepEqual(selection(), ['gyro', 'og3k']);
+// A failed local upload can have a hostile filename.  Its diagnostic is text,
+// not markup executed on the public Pages origin.
+const hostileName = '<img src=x onerror=alert(1)>.BIN';
+input.files = [{name: hostileName, bytes: Buffer.from('bad')}];
+input.onchange(event(input));
+const note = document.getElementById('dlnote');
+assert.equal(note.hidden, false);
+assert(note.textContent.includes(hostileName));
+assert.equal(note.innerHTML, '', 'failed upload inserted filename as HTML');
+assert.equal(remembered().length, 0, 'failed upload must not be remembered');
 
 console.log('PASS catalogue UI: shooting default, five tiles, add-tile last in the grid, Gyro/Gyro-Base exclusivity, category filters preserve files, cross-category chips, ' +
-  'OG exclusivity, push, Fast on/off and filter persistence, metadata-derived categories, upload, remembering across reloads, rename, delete, ✗ for clashing or unreadable files.');
+  'OG exclusivity, push, Fast on/off and filter persistence, metadata-derived categories, upload, remembering across reloads, rename, delete, ✗ for clashing or unreadable files, escaped upload errors.');

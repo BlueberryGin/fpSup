@@ -20,9 +20,9 @@ sys.path.insert(0, str(HERE.parent / 'fp_usb_shell'))
 from armasm import assemble, symbols
 
 SOURCE = HERE / 'gcsv_task.S'
-REPORT = (HERE.parent.parent / 'projects/gyro-sup/validation'
+REPORT = (HERE.parent / 'projects/gyro-sup/validation'
           / '20261004-gcsv-direct-output')
-BASELINE = REPORT / 'before'
+BASELINE = HERE / 'testdata/gcsv-direct-before'
 POOL, CODE = 0x45000000, 0x45044000
 INPUT, JOB = 0x46000000, 0x46008000
 OUTPUT, STACK, STOP = 0x47000003, 0x10000000, 0x10100000

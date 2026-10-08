@@ -194,6 +194,13 @@ class OptionsApplyTests(unittest.TestCase):
                 self.setUp()
                 self.same_as_reference(order)
 
+    def test_og2k_and_lossless_either_order(self):
+        og2k = O.resolution('OG2K 2000x1334', 'OG2K').encode()
+        for order in ([self.lossless, og2k], [og2k, self.lossless]):
+            with self.subTest(order=[len(b) for b in order]):
+                self.setUp()
+                self.same_as_reference(order)
+
     def test_the_site_gets_a_bw_to_a_cave_veneer_once(self):
         self.cam.apply(self.color)
         bump = self.lib.fx_peek(O.CAVE_BUMP)

@@ -133,8 +133,9 @@ static uint32_t reg(uintptr_t app, uint32_t count, const uint32_t *defs) {
     return 0;
 }
 static void publish(void) { publishes++; }
-static uint32_t uis_next;
+static uint32_t uis_next, uis_allocs;
 static uintptr_t uis_alloc(uint32_t n) {
+    uis_allocs++;
     uintptr_t a = UIS_HEAP + uis_next;
     if (uis_next + n > HEAP_SIZE - 0x180000u) return 0;
     memset(&heap[a - HEAP], 0xA5, n);
@@ -165,7 +166,7 @@ void fpl_fixture_reset(const uint8_t *image, uint32_t n) {
     memset(file, 0, sizeof file); memset(path_seen, 0, sizeof path_seen);
     oob = file_len = open_mode = ctors = dtors = opens = reads = closes = ctor_volume = 0;
     reg_calls = reg_result = reg_publishes = lookups = publishes = writes_n = desc_n = 0;
-    borrowed_bad = 0; uis_next = 0;
+    borrowed_bad = 0; uis_next = uis_allocs = 0;
     file_present = 1;
     guiw = APP;
     wr_raw(APP + 0x80, NSCREENS); wr_raw(APP + 0x8C, SCREENS);
@@ -241,6 +242,7 @@ uint32_t fpl_fixture_get(uint32_t f) {
     case 29: return menu.ui_result; case 30: return menu.ui_op; case 31: return menu.first_id;
     case 32: return menu.row; case 33: return nbu_writes;
     case 34: return rd(ENTRIES + 44 * 2 + 8);
+    case 35: return uis_allocs;
     default: return 0xFFFFFFFFu;
     }
 }
