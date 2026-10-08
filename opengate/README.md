@@ -5,6 +5,10 @@ whole 3:2 area instead of the 16:9 window the camera crops to. v0.2.3a fixes
 the format-table pass-through defect in v0.2.2a while retaining its 8-bit and
 10-bit CinemaDNG support. Release package: **`fpsup-og3k-v0.2.3a`**.
 
+> **HSW / FastSpeed is a separate experimental target and is not part of this
+> OG3K release.** Its camera evidence, current blockers and release gates are
+> recorded in [`HSW_DEVELOPMENT_STATUS.md`](HSW_DEVELOPMENT_STATUS.md).
+
 Firmware **Ver.5.02 only.** Everything is RAM-only: remove `AutoRun.txt`, fully
 power-cycle, and the camera is stock. Nothing is ever written to flash.
 

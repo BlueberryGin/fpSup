@@ -39,7 +39,8 @@
 #define UIS_HEADROOM     0x4000u        /* 16 KiB beyond the first need */
 
 enum uis_result { UIS_OK = 0, UIS_NO_READER = 1, UIS_UNKNOWN_POOL = 2,
-                  UIS_NO_MEMORY = 3, UIS_INVALID = 4 };
+                  UIS_NO_MEMORY = 3, UIS_INVALID = 4,
+                  UIS_HOOK = 5 };                /* a string site holds code that is not a layer */
 
 /* The shared NBU reader, or 0 if the UI is not what Ver.5.02 builds. */
 uintptr_t uis_reader(void);
@@ -71,6 +72,70 @@ uint32_t uis_intern_hinted(const char *s, uint32_t n, uint32_t stock_at, uint32_
  * search only what was appended after the stock bytes). */
 uint32_t uis_intern_many(const char *const *s, uint32_t count, uint32_t stock_at, uint32_t *offsets);
 
+/* ---- nested string layers (NESTED_HOOKS.md, 2026-10-04) -------------------
+ *
+ * The way to add strings now: nothing is copied and the pool is never touched.
+ * Each sup's private strings live in a layer of its own, hung on the firmware's
+ * string functions (resolve C05E5B58, owns C05E61C8, remain C05E61E0) in front
+ * of whatever was there; a layer answers for its offsets [base, base+count)
+ * and its bytes, and passes everything else inward. The innermost layer does
+ * what the firmware did. Offsets are handed out at load time, from
+ * UIS_LAYER_FIRST up, each layer after the one inside it.
+ *
+ * uis_layer_base: where the next layer's offsets start, or UIS_HOOK if a site
+ *   holds anything other than its stock word or a layer (then nothing may be
+ *   added; nothing has been changed).
+ * uis_layer_add: install a layer holding s[0..count) (s[i] has n[i] bytes and a
+ *   NUL; 0 < n[i] < 64); string i resolves at *base + i. The strings are copied.
+ * uis_stock_has: 1 if the reader's pool holds s (n bytes + NUL) at stock_at, a
+ *   stock offset a builder computed (the stock bytes never move).
+ *
+ * Whose layer (header v2, 2026-10-06): the first 8 bytes of a layer are the
+ * name of the sup that put it there -- the base name of the file Loader v3
+ * loaded it from ("10LOSS", "31FMT"), NUL-padded. While a Loader v3 runs
+ * entries it publishes its service table (sloader.h SL_SVC_AT); then the name
+ * comes from svc->self(), and a layer found on a site counts only if its name
+ * is a sup the loader's books list as holding that site (svc->holder()).
+ * Without a running Loader v3 (an AutoRun/stage2 card) the name is
+ * UIS_LAYER_LEGACY ("FSDL") and only that name is recognised.
+ *
+ * uis_layer_fixed: a layer for offsets a sup already hands the firmware
+ *   (fixed ids from code there is no source for): [base, base+count) must lie
+ *   at or above UIS_LAYER_FIXED and clear of every layer already in the chain;
+ *   string i is the word at table + 4*i, used in place (not copied: table and
+ *   strings must live as long as the boot); owns/remain answer for [lo, hi).
+ *   Offsets handed out later skip it. */
+#define UIS_LAYER_FIRST  0x40000000u
+#define UIS_LAYER_FIXED  0xF0000000u    /* boot-issued offsets stay below this */
+#define UIS_LAYER_LEGACY 0x4C445346u    /* "FSDL": the name without a Loader v3 */
+#define UIS_LAYER_VERSION 5u            /* v5 (2026-10-07): self-describing -- the header holds
+                                           its length and its entries' offsets, each entry is
+                                           preceded by its offset; code changes no longer need a
+                                           new version. Fields are only ever added at the end
+                                           (read past +72 only if H_LEN says so); the version
+                                           changes only if a field's meaning changes. */
+#define UIS_LAYER_NAME_BYTES 8u
+uint32_t uis_layer_base(uint32_t *base);
+uint32_t uis_layer_add(const uintptr_t *s, const uint32_t *n, uint32_t count, uint32_t *base);
+uint32_t uis_layer_fixed(uintptr_t table, uint32_t count, uint32_t base, uintptr_t lo, uintptr_t hi);
+uint32_t uis_stock_has(uintptr_t s, uint32_t n, uint32_t stock_at);
+
+/* Quick Set "current format" images (QS_SHARE.md §4.3). Three offsets, handed
+ * out once per boot by the first QS sup (the first holder of UIS_RES_QSCUR,
+ * a resource every QS sup claims SHARED_UI), name the big tile's third-state
+ * images; each QS sup's layer answers them with its own three names while the
+ * resolution value is its enum.
+ *   uis_qs_shared: *qsid = the three offsets' first, found in the layer of the
+ *     sup the books list first for UIS_RES_QSCUR; UIS_HOOK if that sup has no
+ *     such layer yet (then *qsid = 0 and *issuer = 1 if that sup is this one:
+ *     it hands them out itself, from its own strings).
+ *   uis_layer_add_qs: uis_layer_add, the layer answering [qsid, qsid+3) with
+ *     strings own..own+2 of this layer while the value is `enum_value`. */
+#define UIS_RES_QSCUR 0x55435351u      /* "QSCU": a claim_res id */
+uint32_t uis_qs_shared(uint32_t *qsid, uint32_t *issuer);
+uint32_t uis_layer_add_qs(const uintptr_t *s, const uint32_t *n, uint32_t count, uint32_t *base,
+                          uint32_t qsid, uint32_t enum_value, uint32_t own);
+
 #if defined(UIS_HOST_TEST)
 struct uis_natives {
     uint32_t (*read)(uintptr_t);
@@ -79,7 +144,14 @@ struct uis_natives {
     void (*write_byte)(uintptr_t, uint32_t);
     uintptr_t (*alloc)(uint32_t bytes);        /* 8-aligned, never freed; 0 fails */
     void (*publish)(void);
+    void (*icache)(void);                      /* I-cache invalidate (C000EABC) */
 };
 extern const struct uis_natives uis_test_natives;
+/* A running Loader v3, as a host model has it: model addresses of
+ * NUL-terminated paths, like svc->self / svc->holder.  Weak and 0 in
+ * ui_pool.c (no loader, the legacy name), so a fixture that does not model
+ * one needs nothing; ui_apply_fixture.c defines them. */
+extern uintptr_t (*uis_test_loader_self)(void);
+extern uintptr_t (*uis_test_loader_holder)(uintptr_t addr, uint32_t i);
 #endif
 #endif

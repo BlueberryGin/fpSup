@@ -44,7 +44,18 @@ static uint32_t borrowed_bad;
 static struct fpl_menu menu;
 
 
+/* The three string sites (uishare/NESTED_HOOKS.md) and the cave their
+ * veneers come from: writable, as on the camera. */
+static const uint32_t SITE_AT[3] = {0xC05E5B58u, 0xC05E61C8u, 0xC05E61E0u};
+static const uint32_t SITE_STOCK[3] = {0x3FFFF1B1u, 0x428A6942u, 0x69406902u};
+#define CAVE       0xC072E060u
+#define CAVE_SIZE  0xF54u
+static uint8_t sites[3][4], cave[CAVE_SIZE];
+
 static uint8_t *at(uintptr_t a) {
+    for (uint32_t i = 0; i < 3; ++i)
+        if (a >= SITE_AT[i] && a < SITE_AT[i] + 4) return &sites[i][a - SITE_AT[i]];
+    if (a >= CAVE && a < CAVE + CAVE_SIZE) return &cave[a - CAVE];
     if (a >= NBU && a < NBU + NBU_SIZE) return &nbu[a - NBU];
     if (a >= GUIW && a < GUIW + 4) return (uint8_t *)&guiw + (a - GUIW);
     if (a >= HEAP && a < HEAP + HEAP_SIZE) return &heap[a - HEAP];
@@ -130,8 +141,8 @@ static uintptr_t uis_alloc(uint32_t n) {
     uis_next += (n + 0xFFFu) & ~0xFFFu;
     return a;
 }
-const struct uis_natives uis_test_natives = { rd, wr, rd8, wr8, uis_alloc, publish };
 static void ic(void) { }
+const struct uis_natives uis_test_natives = { rd, wr, rd8, wr8, uis_alloc, publish, ic };
 const struct uia_natives uia_test_natives = { rd, wr, rd8, wr8, uis_alloc, publish, ic };
 const struct fpl_menu_natives fpl_menu_test_natives = {
     rd, wr, rd8, wr8, f_ctor, f_open, f_read, f_close, f_dtor, lookup, reg, publish
@@ -146,6 +157,9 @@ void fpl_fixture_reset(const uint8_t *image, uint32_t n) {
     if (!nbu) nbu = malloc(NBU_SIZE);
     if (!heap) heap = malloc(HEAP_SIZE);
     memset(nbu, 0, NBU_SIZE); memset(heap, 0, HEAP_SIZE); memset(&menu, 0, sizeof menu);
+    for (uint32_t i = 0; i < 3; ++i) memcpy(sites[i], &SITE_STOCK[i], 4);
+    memset(cave, 0, sizeof cave);
+    { uint32_t bump = CAVE + 4; memcpy(cave, &bump, 4); }     /* stage2 resets it every boot */
     memcpy(nbu, image, n < NBU_SIZE ? n : NBU_SIZE);
     nbu_writes = 0;
     memset(file, 0, sizeof file); memset(path_seen, 0, sizeof path_seen);

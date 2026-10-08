@@ -1,0 +1,48 @@
+{
+  "allocated_section_bytes": {
+    ".text": 5076,
+    ".ARM.exidx": 80
+  },
+  "exported_symbols": [
+    "fg_confirm",
+    "fg_default_config",
+    "fg_init",
+    "fg_invalidate",
+    "fg_update"
+  ],
+  "undefined_symbols": [],
+  "offline_only": true,
+  "artifact_type": "relocatable_object",
+  "deployment_ready": false,
+  "native_adapter_complete": false,
+  "optical_focus_verified": false,
+  "hardware_motion_verified": false,
+  "motion_authorized": false,
+  "compiler_flags": [
+    "-target",
+    "armv7-none-eabi",
+    "-mcpu=cortex-a9",
+    "-marm",
+    "-mfloat-abi=soft",
+    "-O2",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-vectorize",
+    "-fno-slp-vectorize",
+    "-std=c11",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wvla"
+  ],
+  "compiler_version": "Apple clang version 21.0.0 (clang-2100.3.27.1)",
+  "object_sha256": "5453b0f28c36cb481bf7b550dbc5b8693ad66c1bbad66fade712e7e85382b3b9",
+  "source_sha256": {
+    "geometry.c": "8f38d0bb10b93ab186519b3e759ddb9f9415769f55d07d8474adf0d0da352c83",
+    "geometry.h": "5cbfdbe8ba276a200f01a02646d1a25e93007677a058af2f7d38428be06c3abf",
+    "build.py": "4631013c9d471ddb8ae5b4f8ff91560678bf9e18f3347219704bf76e6a07f36c"
+  }
+}

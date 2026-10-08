@@ -24,8 +24,8 @@ the few function addresses the code stores PC-relative, -fno-jump-tables keeps
 switch tables out of .rodata. The source files are not edited: the build
 rewrites copies.
 
-WHAT THE LAUNCHER DOES is card.S: allocate its own 64 KiB USER block, copy,
-publish, init, then arm four hook sites all-or-nothing, with veneers taken
+WHAT THE LAUNCHER DOES is card.S: allocate its own USER block, copy,
+publish, init, then arm its declared hook sites all-or-nothing, with veneers taken
 from the cave's bump allocator. Each site is also declared here as a 4-byte
 section holding the firmware's own word, so stage2 journals it and the
 loader's power-off callback writes it back (SUP_BUILD_RULES §4).
@@ -82,7 +82,18 @@ SITES = {                           # site: (stock word, what it is)
     0xC05BDDAC: (0xE58430A0, 'player clip size: str r3, [r4, #0xa0]'),
     0xC05C2E90: (0xE92D4070, 'player pool free: push {r4, r5, r6, lr}'),
     0xC05C2D10: (0xE92D44F0, 'player pool make: push {r4, r5, r6, r7, sl, lr}'),
+    0xC038BD08: (0xE594300C, 'CinemaDNG event observation: ldr r3, [r4, #0xc]'),
+    0xC037DEF8: (0xEB000042, 'native FIFO discard observation: bl C037E008'),
+    # the row's private strings hang on these (uishare/NESTED_HOOKS.md);
+    # other sups declare the same stock words, and identical sections fold
+    0xC05E5B58: (0x3FFFF1B1, 'string resolve (nested string layers)'),
+    0xC05E61C8: (0x428A6942, 'string owns (nested string layers)'),
+    0xC05E61E0: (0x69406902, 'string remain (nested string layers)'),
+    # data, not a hook: the CinemaDNG file layer's bulk size, set per take by
+    # card.c (EARLY_STOP_94.md); journaled so a power-off puts 64 MB back
+    0xC0B9E5D8: (0x04000000, 'bulk size: {64 MB, 0, 256 KiB, C03A55D0} +0'),
 }
+SHARED_SITES = {0xC05E5B58, 0xC05E61C8, 0xC05E61E0}   # declared by others too
 # The fields a host reads after a test take, by their path in struct fpl_card.
 # Their offsets are taken from the ARM compile itself, never computed on the
 # host, whose pointers are a different size.
@@ -102,26 +113,38 @@ FIELDS = ['magic', 'hold_live', 'rec_events', 'rec_admitted', 'rec_raw',
           'hold_b.refused', 'hold_b.no_benefit', 'hold_b.faults', 'hold_b.swapped',
           'hold_b.dma_failed',
           'flush.applied', 'flush.trailer_failed', 'flush.length_mismatch',
-          'hold.stalls', 'hold_b.stalls', 'hold.job.stall_regs', 'hold_b.job.stall_regs',
+          'hold.stalls', 'hold_b.stalls', 'hold.job_last_us', 'hold.job_max_us',
+          'hold.stall_limit_us', 'hold_b.job_last_us', 'hold_b.job_max_us', 'hold.job_sum_us', 'hold.job_count', 'hold_b.job_sum_us', 'hold_b.job_count', 'hold.submit_sum_us', 'hold.finish_sum_us', 'hold.poll_sum', 'hold.gap_sum_us', 'hold.cycle_sum_us', 'hold.cycle_count', 'hold_b.submit_sum_us', 'hold_b.finish_sum_us', 'hold_b.poll_sum', 'hold_b.gap_sum_us', 'hold_b.cycle_sum_us', 'hold_b.cycle_count', 'tile_force', 'hold.job.tile_width', 'hold.job.tile_height', 'hold.job.tiles', 'hold.job.stall_regs', 'hold_b.job.stall_regs',
           'play.seen', 'play.stock', 'play.decoded', 'play.refused_by', 'play.last_us',
           'play.max_us', 'play.last_buf', 'play.last_cap', 'play.last_got',
           'play.clips', 'play.clips_ours', 'play.clip_size_was', 'play.clip_size_set',
           'play.clip_failed', 'play.scratch_bytes', 'play.scratch_failed',
           'play.scratch_freed', 'play.scratch_want', 'play.clips_first_stock', 'take_frames']
+FIELDS += ['settings_on', 'settings_ok', 'saves', 'save_failed', 'save_last', 'bulk', 'bulk_writer_open', 'trace_n', 'trace', 'elog_n', 'elog']          # card.c FPL_TRACE: per-arrival records
+FIELDS += ['record_diag.' + name for name in (
+    'event_calls', 'raw_errors', 'capture_limits', 'completion_errors', 'lookup_missing',
+    'last_event', 'last_result', 'last_slot', 'last_generation', 'last_state',
+    'last_handle', 'last_missing', 'discard_calls', 'discard_count', 'discard_missing',
+    'discard_raw', 'discard_completion', 'discard_teardown', 'discard_other',
+    'drop_next', 'drop_used', 'drop_overwritten', 'drops',
+    'writer_calls', 'writer_zero', 'writer_nonzero', 'writer_low', 'writer_high')]
 UNITS = ['control.c', 'frame_pipeline.c', 'native/workspace_layout.c', 'uishare/ui_pool.c',
          'uishare/ui_apply.c',
          'native/menu_page.c',
          'native/raw_workspace.c', 'native/rec_workspace.c', 'native/producer_facts.c',
          'native/rec_hook.c', 'native/codec_job.c', 'native/trailer.c',
          'native/frame_hold.c', 'native/flush_site.c', 'native/play_decode.c',
+         'native/record_diag.c',
          'native/card.c']
 ENTRIES = {'OFF_INIT': 'fpl_card_init', 'OFF_REC': 'fpl_card_rec',
            'OFF_ARRIVE': 'fpl_card_arrive', 'OFF_STOP': 'fpl_card_stop',
            'OFF_FLUSH': 'fpl_card_flush', 'OFF_TASK': 'fpl_card_task',
            'OFF_PLAY': 'fpl_card_play', 'OFF_CLIP': 'fpl_card_clip',
-           'OFF_END': 'fpl_card_play_end', 'OFF_POOL': 'fpl_card_play_pool'}
+           'OFF_END': 'fpl_card_play_end', 'OFF_POOL': 'fpl_card_play_pool',
+           'OFF_WRITTEN': 'fpl_card_written', 'OFF_EVENT': 'fpl_card_event',
+           'OFF_DISCARD': 'fpl_card_discard'}
 CFLAGS = ['--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb', '-mfloat-abi=soft',
-          '-mfpu=none', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-jump-tables',
+          '-mfpu=none', '-mstackrealign', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-jump-tables',
           '-fropi', '-fno-addrsig', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
           '-Wno-unused-function']
 PUBLIC = re.compile(r'^(?!typedef\b|static\b|extern\b|#|enum\b|union\b|struct\s+\w+\s*\{)'
@@ -257,7 +280,9 @@ def og_sections(tmp, target='og3k'):
     args, off = [], 16 + 8 * count
     for i in range(count):
         dst, ln = struct.unpack_from('<II', blob, 16 + 8 * i)
-        if dst:
+        if dst in SHARED_SITES and blob[off:off + ln] == struct.pack('<I', SITES[dst][0]):
+            pass                                        # this card declares it already
+        elif dst:
             if dst < 0x40000000:
                 raise BuildError('OpenGate carries a pool-offset section; not supported here')
             f = tmp / f'{target}_{i:03d}_{dst:08x}.bin'

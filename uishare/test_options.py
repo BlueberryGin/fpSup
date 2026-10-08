@@ -177,7 +177,8 @@ class OptionsApplyTests(unittest.TestCase):
             if name in {n for b in blocks for n in names_in(b)}:
                 self.assertEqual(got, bytes(pages[name].data), name)
         self.assertEqual(self.cam.table(), files.table)
-        self.assertEqual(self.cam.pool()[176152:], bytes(pool.data[176152:]))
+        self.assertEqual(self.cam.layers(), pool.layers)
+        self.assertTrue(self.cam.pool_untouched(), 'the stock pool was replaced')
         self.assertEqual(self.cam.get(TA.NBU_WRITES), 0, 'the firmware image was written')
         self.assertEqual(self.cam.get(TA.DIRTY), 0, 'switched in before published')
 
@@ -204,8 +205,10 @@ class OptionsApplyTests(unittest.TestCase):
         hw1 = 0xF000 | s << 10 | (off >> 12) & 0x3FF
         hw2 = 0x9000 | ((1 ^ i1) ^ s) << 13 | ((1 ^ i2) ^ s) << 11 | (off >> 1) & 0x7FF
         self.assertEqual(self.lib.fx_peek(O.FV_SITE), hw1 | hw2 << 16)
-        self.cam.apply(self.res)                       # the second finds it: no new veneer
-        self.assertEqual(self.lib.fx_peek(O.CAVE_BUMP), bump)
+        site = self.lib.fx_peek(O.FV_SITE)
+        self.cam.apply(self.res)                       # the second finds it: no new FV veneer,
+        self.assertEqual(self.lib.fx_peek(O.FV_SITE), site)
+        self.assertEqual(self.lib.fx_peek(O.CAVE_BUMP), bump + 24)    # only its string layer's three
 
     def test_a_site_holding_something_else_is_left_alone(self):
         self.lib.fx_poke(O.FV_SITE, 0xBA86F148)       # an older raw-view's own hook

@@ -1,0 +1,2 @@
+en: Flip the rear screen 180°, mirror it, or both — set separately for each custom display mode, applied when you switch into that mode. Test build, not yet tested on the camera.
+zh: 背螢幕翻轉 180°、鏡像或兩者 —— 每個自訂顯示模式各自設定,切換進那個模式時才套用。測試版,尚未上機測試。

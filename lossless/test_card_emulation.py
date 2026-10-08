@@ -29,30 +29,37 @@ import test_loader_hook as T                     # noqa: E402
 
 from unicorn.arm_const import (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2,  # noqa: E402
                                UC_ARM_REG_R3, UC_ARM_REG_SP, UC_ARM_REG_LR,
-                               UC_ARM_REG_R4, UC_ARM_REG_R11)
+                               UC_ARM_REG_R4, UC_ARM_REG_R6, UC_ARM_REG_R11,
+                               UC_ARM_REG_CPSR)
 
 SITES = {'rec': (0xC03A33C8, 0xEBFFFC1A), 'arrive': (0xC038BFF0, 0xE12FFF33),
          'stop': (0xC0398D88, 0xE92D49F0), 'flush': (0xC03A5490, 0xEB0BD652),
          'play': (0xC05C0EA4, 0xE595201C), 'clip': (0xC05BDDAC, 0xE58430A0),
-         'end': (0xC05C2E90, 0xE92D4070), 'pool': (0xC05C2D10, 0xE92D44F0)}
+         'end': (0xC05C2E90, 0xE92D4070), 'pool': (0xC05C2D10, 0xE92D44F0),
+         'event': (0xC038BD08, 0xE594300C), 'discard': (0xC037DEF8, 0xEB000042)}
 VENEER_AT = {'rec': 0, 'arrive': 8, 'stop': 16, 'flush': 24,      # the record at +32
-             'play': 48, 'clip': 56, 'end': 64, 'pool': 72}
-CAVE_BYTES = 80
+             'play': 48, 'clip': 56, 'end': 64, 'pool': 72, 'event': 80, 'discard': 88}
+CAVE_BYTES = 96
 CAVE_BUMP, CAVE_ARENA, CAVE_END = 0xC072E060, 0xC072E064, 0xC072EFB4
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_card  # noqa: E402
 CARD_BLOCK = build_card.BLOCK_BYTES     # the launcher's USER block, as built
+CARD_OFFSETS = tuple(build_card.ENTRIES)
 BLOCK = 0x45300000                    # where our allocation lands in emulation:
                                       # clear of the staging buffer the harness
                                       # hands the loader lower in the same heap
 ORIGINAL = {'prepare': 0xC03A2438, 'enqueue': 0xC037DD50, 'flush': 0xC069ADE0,
             'stop_resume': 0xC0398D8C, 'tk_cre_tsk': 0xC0016A58, 'tk_sta_tsk': 0xC0016BC0,
-            'end_resume': 0xC05C2E94, 'pool_resume': 0xC05C2D14}
+            'end_resume': 0xC05C2E94, 'pool_resume': 0xC05C2D14,
+            'event_resume': 0xC038BD0C, 'discard': 0xC037E008,
+            'irq_off': 0xC000EC14, 'irq_restore': 0xC000EC24}
 # A clip's first frame, as fpl_play_clip opens it -- open refused. Installed
 # only after boot: the loader reads fpSup.BIN through the same file API.
 CLIP_FILE = {'clip_volume': 0xC069B930, 'clip_path': 0xC069B9B8, 'f_ctor': 0xC0365E90,
              'f_open': 0xC0365FB0, 'f_dtor': 0xC0365ED0}
 TASK_ID = 0x5A
+BULK = 0xC0B9E5D8                     # the file layer's bulk size (card.c FPL_BULK_CFG)
+BULK_WRITER = 0xC359BE4C              # FUN_c03A4C88(): +0xC set once FUN_c03A5050 ran
 
 
 def build_card():
@@ -64,13 +71,24 @@ def build_card():
     sets = [(int(a, 16), int(v, 16)) for a, v in
             re.findall(r'^mem set (0x[0-9A-Fa-f]+) (0x[0-9A-Fa-f]+)', text, re.M)]
     loader = {a: v for a, v in sets if T.CAVE_LOW <= a < T.CAVE_LOW + 0x200}
-    global LAYOUT
+    global LAYOUT, C_ENTRIES
     import json
     LAYOUT = json.loads((out / 'layout.json').read_text())['fields']
+    facts = json.loads((out / 'build.json').read_text())['blob']
+    C_ENTRIES = {name: BLOCK + facts['c_base'] + (off & ~1)
+                 for name, off in facts['entries'].items()}
     return loader, (out / 'fpSup.BIN').read_bytes(), (out / 'lossless.bin').read_bytes()
 
 
 LAYOUT = {}
+C_ENTRIES = {}
+
+
+def card_symbols():
+    from armasm import symbols
+    return symbols(HERE / 'native' / 'card.S',
+                   ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
+                   [f'{k}=1' for k in CARD_OFFSETS])
 
 
 class CardCamera(T.Camera):
@@ -90,9 +108,26 @@ class CardCamera(T.Camera):
                         'ORIG_clip_volume': 1, 'ORIG_clip_path': 0x45100000,
                         'ORIG_f_ctor': 0, 'ORIG_f_open': 0, 'ORIG_f_dtor': 0}
         self.task_descriptors = []
+        self.flush_result = (0, 0)
+        self.irq_depth = 0
+        self.observers = []
+        self.observer_at = {C_ENTRIES[name]: name for name in (
+            'fpl_card_rec', 'fpl_card_flush', 'fpl_card_written', 'fpl_card_event', 'fpl_card_discard')}
 
     def _hook(self, mu, addr, size, _):
         name = self.by_addr.get(addr)
+        if addr in self.observer_at:
+            assert self.r(UC_ARM_REG_SP) % 8 == 0, 'observer C entry stack is not 8-aligned'
+            self.observers.append(self.observer_at[addr])
+        if name in ('ORIG_irq_off', 'ORIG_irq_restore'):
+            assert self.r(UC_ARM_REG_SP) % 8 == 0, 'observer native call stack is not 8-aligned'
+            if name == 'ORIG_irq_off':
+                assert self.irq_depth == 0, 'unexpected nested diagnostic critical section'
+                self.irq_depth = 1
+                return self._ret(0x13)
+            assert self.irq_depth == 1 and self.r(UC_ARM_REG_R0) == 0x13
+            self.irq_depth = 0
+            return self._ret(0)
         if name == 'H_GET':
             self.h_get.append(tuple(self.r(r) for r in (UC_ARM_REG_R0, UC_ARM_REG_R1,
                                                         UC_ARM_REG_R2, UC_ARM_REG_R3)))
@@ -107,9 +142,18 @@ class CardCamera(T.Camera):
             if name == 'ORIG_tk_cre_tsk':
                 d = self.r(UC_ARM_REG_R0)
                 self.task_descriptors.append(struct.unpack('<8I', bytes(mu.mem_read(d, 32))))
-            if name in ('ORIG_stop_resume', 'ORIG_end_resume', 'ORIG_pool_resume'):
+            if name in ('ORIG_stop_resume', 'ORIG_end_resume', 'ORIG_pool_resume',
+                        'ORIG_event_resume'):
                 mu.emu_stop()                 # mid-function: look, do not run on
                 return
+            if name == 'ORIG_flush':
+                assert self.r(UC_ARM_REG_SP) % 8 == 0, 'native writer stack not aligned'
+                mu.reg_write(UC_ARM_REG_R1, self.flush_result[1])
+                mu.reg_write(UC_ARM_REG_CPSR, (self.r(UC_ARM_REG_CPSR) & 0x0FFFFFFF) |
+                             0x60000000)
+                return self._ret(self.flush_result[0])
+            if name == 'ORIG_discard':
+                return self._ret(0xCAFE)
             return self._ret(self.returns[name])
         return super()._hook(mu, addr, size, _)
 
@@ -167,19 +211,15 @@ class CardEmulationTests(unittest.TestCase):
         cam = self.boot()
         self.assertEqual(self.launch(cam), 0)
         self.assertEqual(cam.h_get[-1][1:3], (0, CARD_BLOCK), 'not its own USER block')
-        # identical but for the six words the launcher fills in the copy
-        from armasm import symbols
-        words = symbols(HERE / 'native' / 'card.S',
-                        ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
-                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
-                                                 'CLIP', 'END', 'POOL')])
+        # identical but for the state/entry words the launcher resolves
+        words = card_symbols()
         lo, hi = words['g_card'], words['stop_resume']
-        self.assertEqual(hi - lo, 40)
+        self.assertEqual(hi - lo, 4 * len(CARD_OFFSETS))
         resident = bytes(cam.mu.mem_read(BLOCK, len(self.blob)))
         self.assertEqual(resident[:lo], self.blob[:lo])
         self.assertEqual(resident[hi:], self.blob[hi:])
-        self.assertEqual(self.blob[lo:hi], b'\0' * 40)
-        filled = struct.unpack('<10I', resident[lo:hi])
+        self.assertEqual(self.blob[lo:hi], b'\0' * (hi - lo))
+        filled = struct.unpack(f'<{len(CARD_OFFSETS)}I', resident[lo:hi])
         self.assertTrue(all(filled), 'a resident word was left empty')
         calls = [c for c in cam.calls if c in ('H_GET', 'H_ADDR', 'DCACHE', 'ICACHE')]
         self.assertEqual(calls, ['H_GET', 'H_ADDR', 'DCACHE', 'ICACHE',
@@ -188,11 +228,7 @@ class CardEmulationTests(unittest.TestCase):
     def test_init_starts_the_codec_task_at_the_resident_task_shim(self):
         cam = self.boot()
         self.assertEqual(self.launch(cam), 0)
-        from armasm import symbols
-        words = symbols(HERE / 'native' / 'card.S',
-                        ['BLOB_LEN=4', 'BLOCK_BYTES=4', 'STATE_OFF=4'] +
-                        [f'OFF_{k}=1' for k in ('INIT', 'REC', 'ARRIVE', 'STOP', 'FLUSH', 'TASK', 'PLAY',
-                                                 'CLIP', 'END', 'POOL')])
+        words = card_symbols()
         self.assertEqual(len(cam.task_descriptors), 1)
         exinf, atr, entry, pri, stksz, n0, n1, tail = cam.task_descriptors[0]
         self.assertEqual((exinf, atr, pri, stksz, tail), (0, 0x41, 12, 0x2000, 0))
@@ -213,7 +249,7 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual(cave, CAVE_ARENA)
         for i, (name, (site, _)) in enumerate(SITES.items()):
             word = cam.word(site)
-            op = 0xEA000000 if name in ('stop', 'end', 'pool') else 0xEB000000
+            op = 0xEA000000 if name in ('stop', 'end', 'pool', 'event') else 0xEB000000
             self.assertEqual(word & 0xFF000000, op, name)
             disp = word & 0xFFFFFF
             disp = disp - 0x1000000 if disp & 0x800000 else disp
@@ -244,7 +280,7 @@ class CardEmulationTests(unittest.TestCase):
             self.assertEqual(cam.word(site), stock, name)
 
     # ---- through the veneers ------------------------------------------
-    def enter(self, cam, name, regs, lr=T.DONE, r4=0x44444444):
+    def enter(self, cam, name, regs, lr=T.DONE, r4=0x44444444, stack_delta=0):
         site = SITES[name][0]
         word = cam.word(site)
         disp = word & 0xFFFFFF
@@ -255,7 +291,7 @@ class CardEmulationTests(unittest.TestCase):
             mu.reg_write(reg, v)
         mu.reg_write(UC_ARM_REG_R4, r4)
         mu.reg_write(UC_ARM_REG_R11, 0xBBBBBBBB)
-        mu.reg_write(UC_ARM_REG_SP, T.STACK - 0x2000)
+        mu.reg_write(UC_ARM_REG_SP, T.STACK - 0x2000 - stack_delta)
         mu.reg_write(UC_ARM_REG_LR, lr)
         cam.originals.clear()
         mu.emu_start(veneer, T.DONE, count=2_000_000)
@@ -266,14 +302,63 @@ class CardEmulationTests(unittest.TestCase):
         self.launch(cam)
         return cam
 
+    def field(self, cam, path):
+        state = cam.word(self.cave_block(cam) + 36)
+        return cam.word(state + LAYOUT[path])
+
+    def mutate_instruction(self, cam, label, expected, replacement):
+        at = BLOCK + card_symbols()[label]
+        self.assertEqual(cam.word(at), expected, f'{label} mutation no longer targets its instruction')
+        cam.mu.mem_write(at, struct.pack('<I', replacement))
+
     def test_rec_passes_any_other_request_to_the_original(self):
+        for delta in (0, 4):
+            with self.subTest(stack_delta=delta):
+                cam = self.armed()
+                request = T.STACK - 0x3000
+                cam.mu.mem_write(request, struct.pack('<I', 1))
+                self.assertEqual(self.enter(cam, 'rec', (0x1234, request), stack_delta=delta), 7)
+                (name, regs, sp, lr), = cam.originals
+                self.assertEqual((name, regs[:2]), ('ORIG_prepare', (0x1234, request)))
+                self.assertEqual(sp % 8, 0)
+                self.assertTrue(BLOCK <= lr < BLOCK + len(self.blob))
+                self.assertEqual(cam.r(UC_ARM_REG_SP), T.STACK - 0x2000 - delta)
+                self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444)
+
+    def test_rec_resets_diagnostics_when_lossless_is_off(self):
         cam = self.armed()
+        state = cam.word(self.cave_block(cam) + 36)
+        for path in ('take_frames', 'record_diag.writer_calls', 'record_diag.discard_count'):
+            cam.mu.mem_write(state + LAYOUT[path], struct.pack('<I', 99))
+        request = T.STACK - 0x3000
+        cam.mu.mem_write(request, struct.pack('<I', 0x23))
+        self.assertEqual(self.enter(cam, 'rec', (0x1234, request), stack_delta=4), 7)
+        for path in ('take_frames', 'record_diag.writer_calls', 'record_diag.discard_count'):
+            self.assertEqual(self.field(cam, path), 0, path)
+        self.assertEqual(self.field(cam, 'rec_menu_off'), 1)
+        self.assertEqual(cam.irq_depth, 0)
+
+    def test_an_off_take_leaves_the_bulk_size_stock(self):
+        """EARLY_STOP_94.md: only an admitted compressed take changes the file
+        layer's bulk size; every other take starts from the stock 64 MB, even
+        when the word was left at another value."""
+        cam = self.armed()
+        cam.mu.mem_write(BULK, struct.pack('<I', 0x00C00000))
+        cam.mu.mem_write(BULK_WRITER + 0xC, b'\0')
+        request = T.STACK - 0x3000
+        cam.mu.mem_write(request, struct.pack('<I', 0x23))
+        self.assertEqual(self.enter(cam, 'rec', (0x1234, request), stack_delta=4), 7)
+        self.assertEqual(cam.word(BULK), 0x04000000)
+        self.assertEqual(self.field(cam, 'bulk'), 0x04000000)
+        self.assertEqual(self.field(cam, 'bulk_writer_open'), 0)
+
+    def test_mutation_omitting_rec_alignment_is_caught(self):
+        cam = self.armed()
+        self.mutate_instruction(cam, 'rec_align', 0xE3CDD007, 0xE1A0D00D)
         request = T.STACK - 0x3000
         cam.mu.mem_write(request, struct.pack('<I', 1))
-        self.assertEqual(self.enter(cam, 'rec', (0x1234, request)), 7)
-        (name, regs, _sp, lr), = cam.originals
-        self.assertEqual((name, regs[:2]), ('ORIG_prepare', (0x1234, request)))
-        self.assertEqual(lr, T.DONE, 'the firmware return address was lost')
+        with self.assertRaisesRegex(AssertionError, 'observer C entry stack is not 8-aligned'):
+            self.enter(cam, 'rec', (0x1234, request), stack_delta=4)
 
     def test_arrive_calls_an_unknown_vtable_target_untouched(self):
         cam = self.armed()
@@ -289,6 +374,7 @@ class CardEmulationTests(unittest.TestCase):
         self.assertEqual(lr, T.DONE)
         self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444, 'r4 not preserved')
         self.assertEqual(cam.r(UC_ARM_REG_R11), 0xBBBBBBBB, 'r11 not preserved')
+        self.assertEqual(self.field(cam, 'take_frames'), 1, 'OFF arrivals were not counted')
 
     def test_flush_keeps_every_argument_for_the_real_flush(self):
         cam = self.armed()
@@ -298,8 +384,115 @@ class CardEmulationTests(unittest.TestCase):
         (name, regs, sp, lr), = cam.originals
         self.assertEqual(name, 'ORIG_flush')
         self.assertEqual(regs, (writer, 0x11, 0x22, 0x33))
-        self.assertEqual((sp, lr), (T.STACK - 0x2000, T.DONE))
+        self.assertEqual(sp % 8, 0)
+        self.assertTrue(BLOCK <= lr < BLOCK + len(self.blob))
+        self.assertEqual(cam.r(UC_ARM_REG_SP), T.STACK - 0x2000)
         self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444)
+
+    def check_event(self, cam, stack_delta=0):
+        message = T.STACK - 0x4000
+        cam.mu.mem_write(message, b'\0' * 0x100)
+        cam.mu.mem_write(message + 0x0C, struct.pack('<I', 5))
+        cam.mu.mem_write(message + 0xE4, struct.pack('<II', 1, 7))
+        cam.mu.reg_write(UC_ARM_REG_R6, 0)
+        cam.mu.reg_write(UC_ARM_REG_CPSR, (cam.r(UC_ARM_REG_CPSR) & 0x0FFFFFFF) | 0xA0000000)
+        self.enter(cam, 'event', (0xA0, 0xA1, 0xA2, 0xA3), r4=message,
+                   stack_delta=stack_delta)
+        (name, regs, sp, lr), = cam.originals
+        self.assertEqual(name, 'ORIG_event_resume')
+        self.assertEqual(regs, (0xA0, 0xA1, 0xA2, 5), 'displaced event load not replayed')
+        self.assertEqual((sp, lr), (T.STACK - 0x2000 - stack_delta, T.DONE))
+        self.assertEqual(cam.r(UC_ARM_REG_CPSR) & 0xF0000000, 0xA0000000)
+        self.assertEqual(self.field(cam, 'record_diag.raw_errors'), 1)
+        self.assertEqual(self.field(cam, 'record_diag.last_slot'), 7)
+        self.assertEqual(self.field(cam, 'record_diag.last_missing'), 1)
+        self.assertEqual(cam.irq_depth, 0)
+        self.assertIn('fpl_card_event', cam.observers)
+
+    def test_event_observation_preserves_displaced_load_flags_and_both_stack_alignments(self):
+        for delta in (0, 4):
+            with self.subTest(stack_delta=delta):
+                self.check_event(self.armed(), delta)
+
+    def check_discard(self, cam, stack_delta=0):
+        frame = 0x45200000
+        data = bytearray(0x1200)
+        name = b'A001_001_000059.DNG\0'
+        data[0x1030:0x1030 + len(name)] = name
+        struct.pack_into('<II', data, 0x10FC, 7, 123)
+        cam.mu.mem_write(frame, bytes(data))
+        original_sp = T.STACK - 0x2000 - stack_delta
+        cam.mu.mem_write(original_sp + 12, struct.pack('<I', 0xC038BF0C))
+        result = self.enter(cam, 'discard', (0xC0DE, frame, 0x22, 0x33),
+                            stack_delta=stack_delta)
+        (called, regs, sp, lr), = cam.originals
+        self.assertEqual((called, regs), ('ORIG_discard', (0xC0DE, frame, 0x22, 0x33)))
+        self.assertEqual((result, sp, lr), (0xCAFE, original_sp, T.DONE))
+        self.assertEqual(cam.r(UC_ARM_REG_SP), original_sp)
+        self.assertEqual(self.field(cam, 'record_diag.discard_count'), 1)
+        self.assertEqual(self.field(cam, 'record_diag.discard_raw'), 1,
+                         'clear caller was read from the wrong stack frame')
+        state = cam.word(self.cave_block(cam) + 36)
+        row = state + LAYOUT['record_diag.drops']
+        self.assertEqual(struct.unpack('<III', cam.mu.mem_read(row, 12)), (7, 123, 0xC038BF0C))
+        self.assertEqual(bytes(cam.mu.mem_read(row + 12, 48)), bytes(data[0x1030:0x1060]))
+        self.assertEqual(bytes(cam.mu.mem_read(frame, len(data))), bytes(data), 'observer changed frame')
+        self.assertEqual(cam.irq_depth, 0)
+
+    def test_discard_records_one_popped_frame_then_calls_original_once(self):
+        for delta in (0, 4):
+            with self.subTest(stack_delta=delta):
+                self.check_discard(self.armed(), delta)
+
+    def check_writer_result(self, cam, result, stack_delta=0):
+        writer = T.STACK - 0x3000
+        cam.mu.mem_write(writer, b'\0' * 0x100)
+        cam.flush_result = result
+        self.enter(cam, 'flush', (writer, 0x11, 0x22, 0x33), stack_delta=stack_delta)
+        (name, regs, _sp, _lr), = cam.originals
+        self.assertEqual((name, regs), ('ORIG_flush', (writer, 0x11, 0x22, 0x33)))
+        self.assertEqual((cam.r(UC_ARM_REG_R0), cam.r(UC_ARM_REG_R1)), result)
+        self.assertEqual(cam.r(UC_ARM_REG_SP), T.STACK - 0x2000 - stack_delta)
+        self.assertEqual(cam.r(UC_ARM_REG_R4), 0x44444444)
+        self.assertEqual(cam.r(UC_ARM_REG_R11), 0xBBBBBBBB)
+        self.assertEqual(cam.r(UC_ARM_REG_CPSR) & 0xF0000000, 0x60000000)
+        self.assertEqual(self.field(cam, 'record_diag.writer_calls'), 1)
+        self.assertEqual(self.field(cam, 'record_diag.writer_low'), result[0])
+        self.assertEqual(self.field(cam, 'record_diag.writer_high'), result[1],
+                         'writer high return word was lost')
+        self.assertEqual(self.field(cam, 'record_diag.writer_nonzero'), int(any(result)))
+        self.assertEqual(self.field(cam, 'record_diag.writer_zero'), int(not any(result)))
+        self.assertEqual(cam.irq_depth, 0)
+
+    def test_writer_observes_full_return_and_restores_both_stack_alignments(self):
+        for delta in (0, 4):
+            for result in ((0, 0), (0, 1), (0x12345678, 0)):
+                with self.subTest(stack_delta=delta, result=result):
+                    self.check_writer_result(self.armed(), result, delta)
+
+    def test_mutation_omitting_event_alignment_is_caught(self):
+        cam = self.armed()
+        self.mutate_instruction(cam, 'event_align', 0xE3CDD007, 0xE1A0D00D)
+        with self.assertRaisesRegex(AssertionError, 'observer C entry stack is not 8-aligned'):
+            self.check_event(cam, 4)
+
+    def test_mutation_omitting_displaced_load_is_caught(self):
+        cam = self.armed()
+        self.mutate_instruction(cam, 'event_replay', 0xE594300C, 0xE1A00000)
+        with self.assertRaisesRegex(AssertionError, 'displaced event load not replayed'):
+            self.check_event(cam)
+
+    def test_mutation_reading_shim_lr_instead_of_clear_caller_is_caught(self):
+        cam = self.armed()
+        self.mutate_instruction(cam, 'discard_caller', 0xE595202C, 0xE595201C)
+        with self.assertRaisesRegex(AssertionError, 'clear caller was read from the wrong stack frame'):
+            self.check_discard(cam)
+
+    def test_mutation_discarding_writer_high_word_is_caught(self):
+        cam = self.armed()
+        self.mutate_instruction(cam, 'written_high', 0xE1A02001, 0xE3A02000)
+        with self.assertRaisesRegex(AssertionError, 'writer high return word was lost'):
+            self.check_writer_result(cam, (0, 1))
 
     def test_play_does_the_displaced_load_and_returns_through_lr(self):
         """The player's slot in r5, a stock frame (root on IFD0) in its
@@ -491,11 +684,18 @@ class MenuEmulationTests(unittest.TestCase):
         self.assertEqual(hdr[0], 0x47505346)
         page = bytes(cam.mu.mem_read(page_at, hdr[3]))
         pages = {'MainB2': self.fpui.PageCopy(self.stock_page, len(self.stock_page), 1)}
-        pool = self.fpui.Pool(self.pool_stock)
+        pool = self.fpui.Strings(self.pool_stock)
         self.fpui.apply(self.block, pages, pool)
         self.assertEqual(page, bytes(pages['MainB2'].data))
-        p, n = cam.word(READER + 0x14), cam.word(READER + 0x10)
-        self.assertEqual(bytes(cam.mu.mem_read(p + 176152, n - 176152)), bytes(pool.data[176152:]))
+        # private strings in the row's own string layer; the pool untouched
+        # (uishare/NESTED_HOOKS.md), and the firmware's resolver finds them
+        from ui import chain
+        self.assertEqual((cam.word(READER + 0x14), cam.word(READER + 0x10)), (0xC18C0474, 176152))
+        self.assertEqual(chain.layers(cam.word), pool.layers)
+        for base, texts in pool.layers:
+            for i, text in enumerate(texts):
+                r0, _ = cam.call(0xC05E5B58 | 1, r0=READER, r1=base + i, sp=T.STACK - 0x1000)
+                self.assertEqual(cam.cstr(r0), text)
         self.assertEqual(set(cam.vars), {'MV_fpLossless', 'SUB_MV_fpLossless', 'EXCL_fpLossless'})
         # the firmware image itself is untouched: MainB2's stock bytes
         self.assertEqual(bytes(cam.mu.mem_read(0xC2030364, len(self.stock_page))), self.stock_page)

@@ -71,11 +71,21 @@ struct fpl_menu {
      * The registry BORROWS each name, so they live here, in state that is
      * never freed, not on a stack. names[0] is the value. */
     uint32_t names[FPL_MENU_VARIABLES][5];
+    uint32_t initial;               /* the value (and its popup staging) registers
+                                       with: 0 OFF, 1 ON -- the saved state */
 };
 
 /* `area` is memory owned for the rest of the boot (never freed), 8-aligned;
  * it receives the file object, the page and the pool. */
 uint32_t fpl_menu_install(struct fpl_menu *, uintptr_t area, uint32_t area_bytes);
+
+/* Loader v3: the same, with the FPUI block already in memory -- it rides in
+ * the sup's own block -- instead of read out of \fpSup.BIN. */
+uint32_t fpl_menu_install_data(struct fpl_menu *, uintptr_t data, uint32_t data_len);
+
+/* The row's value right now (0 OFF, 1 ON), or UINT32_MAX when the row is not
+ * installed or the variable is gone. Counts nothing: for the saved state. */
+uint32_t fpl_menu_now(struct fpl_menu *);
 
 /* 1 if the row reads ON right now; 0 for OFF, not installed, or unknown. */
 uint32_t fpl_menu_on(struct fpl_menu *);

@@ -132,7 +132,10 @@ static uint32_t menu_at(uintptr_t h) {
     return used <= FPL_MENU_AT_MAX ? used : 0;
 }
 
-uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_bytes) {
+/* `data`/`data_len`: the FPUI block already in memory (Loader v3: it rides in
+ * the sup's own block), or 0 to read it out of \fpSup.BIN as before. */
+static uint32_t install(struct fpl_menu *m, uintptr_t area, uint32_t area_bytes,
+                        uintptr_t data, uint32_t data_len) {
     uint32_t screen_words[5], path_words[5];
     const char *SCREEN = (const char *)screen_words, *PATH = (const char *)path_words;
     uintptr_t screens = 0, screen = 0, app, reader, fobj, file, d;
@@ -162,6 +165,12 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
      * ui_apply's to check (uishare: stock, or announced by its header). */
 
     /* ---- the file, into memory owned for the rest of the boot --------- */
+    if (data) {
+        file = data;
+        actual = data_len;
+        m->file_at = 0;
+        goto have_block;
+    }
     if ((area & 7u) || area_bytes < FILE_OBJECT + FPL_MENU_AT_STEP)
         return fail(m, FPL_MENU_ROOM);
     fobj = area;
@@ -195,6 +204,8 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     if (!ok) return fail(m, FPL_MENU_FILE);
     m->file_len = actual;
     if (actual >= room) return fail(m, FPL_MENU_ROOM);    /* may not be all of it */
+have_block:
+    m->file_len = actual;
     if (actual < 0x20u || peek8(file) != 'F' || peek8(file + 1) != 'P' ||
         peek8(file + 2) != 'U' || peek8(file + 3) != 'I')
         return fail(m, FPL_MENU_FORMAT);                  /* padding after: putfile cannot shorten */
@@ -207,7 +218,8 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
             uint32_t def[3];
             def[0] = VARIABLE_INT;
             def[1] = (uint32_t)(uintptr_t)NAME;
-            def[2] = 0u;                               /* OFF */
+            /* the value and its popup staging start at the saved state */
+            def[2] = n < 2u && m->initial == 1u ? 1u : 0u;
             if (reg(app, 1, def) != 0) return fail(m, FPL_MENU_REGISTER);
             m->registered++;
             d = variable(app, NAME);
@@ -227,6 +239,24 @@ uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_byte
     m->pool = peek(reader + READER_POOL); m->pool_len = peek(reader + READER_POOL_LEN);
     m->result = FPL_MENU_INSTALLED;
     return FPL_MENU_INSTALLED;
+}
+
+uint32_t fpl_menu_install(struct fpl_menu *m, uintptr_t area, uint32_t area_bytes) {
+    return install(m, area, area_bytes, 0, 0);
+}
+
+uint32_t fpl_menu_install_data(struct fpl_menu *m, uintptr_t data, uint32_t data_len) {
+    if (!data || !data_len) return m ? fail(m, FPL_MENU_FILE) : FPL_MENU_NO_GUI;
+    return install(m, 0, 0, data, data_len);
+}
+
+uint32_t fpl_menu_now(struct fpl_menu *m) {
+    uintptr_t d;
+    const char *value_name;
+    if (!m || m->result != FPL_MENU_INSTALLED) return UINT32_MAX;
+    value_name = (const char *)m->names[0];
+    d = variable(m->app, value_name);
+    return d ? peek(d + DESC_VALUE) : UINT32_MAX;
 }
 
 uint32_t fpl_menu_on(struct fpl_menu *m) {

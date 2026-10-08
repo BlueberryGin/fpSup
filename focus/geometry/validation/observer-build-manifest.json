@@ -1,0 +1,206 @@
+{
+  "schema": "fp.native-observer.build/v1",
+  "offline_only": true,
+  "artifact_type": "emulator_addressed_raw_stubs",
+  "installable": false,
+  "deployment_ready": false,
+  "hardware_io_performed": false,
+  "ram_ownership_verified": false,
+  "stack_headroom_verified": false,
+  "timing_budget_verified": false,
+  "source_coherence_verified": false,
+  "optical_validity_verified": false,
+  "arm_emulation_verified": false,
+  "confirmation_authorized": false,
+  "motion_authorized": false,
+  "emulation_addresses_only": true,
+  "code_base": 1090519040,
+  "state_bases": {
+    "af": 1107296256,
+    "lens": 1107296512,
+    "face": 1107296768,
+    "aat": 1107297024
+  },
+  "record_bases": {
+    "af": 1108344832,
+    "lens": 1109393408,
+    "face": 1110441984,
+    "aat": 1111490560
+  },
+  "capacity": 2,
+  "state_bytes": 40,
+  "record_bytes": 256,
+  "additional_wrapper_stack_bytes": 64,
+  "timer_reads_enabled": false,
+  "code_bytes": 1020,
+  "code_sha256": "a9e9e41d267e45b8cdca9bb384ecc4a188d02b29a34dfb7aa438ab44747f77f9",
+  "exports": {
+    "native_observer_aat": 260,
+    "native_observer_af": 0,
+    "native_observer_face": 168,
+    "native_observer_lens": 76
+  },
+  "source_sha256": {
+    "native_observer.S": "48c4dfc3d77df1e74e88e5360fea77fbf96d7aa3114d878c2d3a045093cf98b0",
+    "build_observer.py": "a544e8805633f43d0218b59462349798026283c8746812ba205e439d1ea54dc2",
+    "fp_usb_shell/armasm.py": "fb3206b1492f0729e88571c1990969acaa78db45401bd4d06e3d95ece4bb7cb6"
+  },
+  "note": "Addresses exist only in the offline emulator contract. No site patches, veneers, loader sections, entry, USB access or installation are emitted.",
+  "rom_verification": {
+    "schema": "sigma-fp-native-hook-site-verification/v1",
+    "version": 1,
+    "verification_passed": true,
+    "verification_scope": "saved_rom_identity_and_static_instruction_bytes_only",
+    "offline_only": true,
+    "hardware_io_performed": false,
+    "live_verified": false,
+    "deployment_ready": false,
+    "installable": false,
+    "ownership_verified": false,
+    "stack_alignment_verified": false,
+    "stack_highwater_verified": false,
+    "stack_timing_verified": false,
+    "timing_verified": false,
+    "instruction_cache_publication_verified": false,
+    "native_event_semantics_verified": false,
+    "confirmation_authorized": false,
+    "motion_authorized": false,
+    "rom": {
+      "base_address": "0xC0000000",
+      "length_bytes": 49245696,
+      "sha256": "aaa5208a028d9c4aebb9cc8614add723d456e96b2a95914f433079954320e622",
+      "identity_matches_manifest": true
+    },
+    "site_count": 4,
+    "sites": [
+      {
+        "id": "af_terminal_pre_forward",
+        "address": "0xC028E310",
+        "expected_word": "0xEBFE7502",
+        "bytes_verified": true,
+        "branch_target_verified": true,
+        "decoded_target": "0xC022B720",
+        "continuation": "0xC028E314",
+        "continuation_verified": true,
+        "guards": {
+          "context": {
+            "address": "0xC028E2F8",
+            "length_bytes": 48,
+            "bytes_verified": true,
+            "instruction_words_verified": 12
+          },
+          "callee_entry_guard": {
+            "address": "0xC022B720",
+            "length_bytes": 16,
+            "bytes_verified": true,
+            "instruction_words_verified": 4
+          },
+          "callee_return_guard": {
+            "address": "0xC022B79C",
+            "length_bytes": 4,
+            "bytes_verified": true,
+            "instruction_words_verified": 0
+          }
+        }
+      },
+      {
+        "id": "native_l_final_event_set_return",
+        "address": "0xC0340458",
+        "expected_word": "0xEB00B4BE",
+        "bytes_verified": true,
+        "branch_target_verified": true,
+        "decoded_target": "0xC036D758",
+        "continuation": "0xC034045C",
+        "continuation_verified": true,
+        "guards": {
+          "context": {
+            "address": "0xC0340448",
+            "length_bytes": 48,
+            "bytes_verified": true,
+            "instruction_words_verified": 12
+          },
+          "callee_entry_guard": {
+            "address": "0xC036D758",
+            "length_bytes": 16,
+            "bytes_verified": true,
+            "instruction_words_verified": 4
+          },
+          "callee_return_guard": {
+            "address": "0xC036D788",
+            "length_bytes": 4,
+            "bytes_verified": true,
+            "instruction_words_verified": 0
+          }
+        }
+      },
+      {
+        "id": "face_parser_publication_return",
+        "address": "0xC05AB348",
+        "expected_word": "0xEBFFF96C",
+        "bytes_verified": true,
+        "branch_target_verified": true,
+        "decoded_target": "0xC05A9900",
+        "continuation": "0xC05AB34C",
+        "continuation_verified": true,
+        "guards": {
+          "context": {
+            "address": "0xC05AB32C",
+            "length_bytes": 52,
+            "bytes_verified": true,
+            "instruction_words_verified": 13
+          },
+          "callee_entry_guard": {
+            "address": "0xC05A9900",
+            "length_bytes": 16,
+            "bytes_verified": true,
+            "instruction_words_verified": 4
+          },
+          "callee_return_guard": {
+            "address": "0xC05A99C4",
+            "length_bytes": 4,
+            "bytes_verified": true,
+            "instruction_words_verified": 0
+          }
+        }
+      },
+      {
+        "id": "aat_color_run_return",
+        "address": "0xC05AB8C8",
+        "expected_word": "0xEB002D0A",
+        "bytes_verified": true,
+        "branch_target_verified": true,
+        "decoded_target": "0xC05B6CF8",
+        "continuation": "0xC05AB8CC",
+        "continuation_verified": true,
+        "guards": {
+          "context": {
+            "address": "0xC05AB8B8",
+            "length_bytes": 40,
+            "bytes_verified": true,
+            "instruction_words_verified": 10
+          },
+          "callee_entry_guard": {
+            "address": "0xC05B6CF8",
+            "length_bytes": 16,
+            "bytes_verified": true,
+            "instruction_words_verified": 4
+          },
+          "callee_return_guard": {
+            "address": "0xC05B7364",
+            "length_bytes": 4,
+            "bytes_verified": true,
+            "instruction_words_verified": 0
+          }
+        }
+      }
+    ],
+    "limitations": [
+      "The supplied manifest is a local reference, not an authenticated firmware signature.",
+      "Assembly descriptions, calling conventions and stack/timing claims are not proved by byte equality.",
+      "No camera state, live reachability, buffer/code ownership or patch lifecycle is inspected."
+    ],
+    "manifest_path": "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry/native_hook_sites.json",
+    "manifest_sha256": "b4c6ae6e96d6c98985809dbb20f394aad7454a4cdc315133b71c9fc4ac1d857b",
+    "rom_path": "/Users/dido/Developer.localized/SIGMAfp_re/out/seg0_c0000000.bin"
+  }
+}

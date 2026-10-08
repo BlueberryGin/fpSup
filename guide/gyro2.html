@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fpSup-Gyro2 — how to use it | fpSup</title>
+<meta name="description" content="fpSup-Gyro2 writes the SIGMA fp's gyro and level data into every CinemaDNG frame; the Gyroflow (fpSup) plugin stabilises it in DaVinci Resolve, with no sync step.">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ijigen.github.io/fpSup/guide/gyro2.html">
+<meta property="og:title" content="fpSup-Gyro2 — how to use it">
+<meta property="og:description" content="fpSup-Gyro2 writes the SIGMA fp's gyro and level data into every CinemaDNG frame; the Gyroflow (fpSup) plugin stabilises it in DaVinci Resolve, with no sync step.">
+<meta property="og:image" content="https://ijigen.github.io/fpSup/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<div class="langbar">
+  <div class="lang" role="group" aria-label="Language / 語言 / 语言">
+    <button type="button" data-set="en" aria-pressed="true">EN</button>
+    <button type="button" data-set="cn" aria-pressed="false">中</button>
+    <button type="button" data-set="zh" aria-pressed="false">繁</button>
+  </div>
+</div>
+<a class="back" href="../guide.html">&larr; <span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a>
+
+<header class="hero">
+  <h1>fpSup-Gyro2</h1>
+  <p class="lede en">The camera's own gyro and level data go <b>inside every CinemaDNG frame</b>.
+  In DaVinci Resolve, the <b>Gyroflow (fpSup)</b> plugin reads them from the frames and
+  stabilises the clip. No extra files, no sync. Test it before you shoot something important.</p>
+  <p class="lede zh">相機自己的陀螺儀與水平儀資料會寫進<b>每一張 CinemaDNG 畫面裡</b>。
+  在 DaVinci Resolve 用 <b>Gyroflow (fpSup)</b> 外掛,直接從畫面讀取並防震。
+  不用另外的檔案,也不用同步。拍重要的東西之前先測過。</p>
+</header>
+
+<section class="credit" id="credits" aria-labelledby="credits-h">
+  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
+  <h2 id="credits-h" class="credit-h"><span class="en">Thank you, Gyroflow</span><span class="zh">感謝 Gyroflow</span></h2>
+  <p class="credit-doc"><a href="https://gyroflow.xyz/">Gyroflow</a> &middot; AdrianEddy and contributors &middot;
+  <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a> (GPL-3.0)</p>
+  <p class="en">The stabilisation itself is done by <b>Gyroflow</b>. Gyro2 only records the camera's
+  motion; turning that motion into a steady picture &mdash; rolling-shutter correction, lens
+  correction, smoothing &mdash; is Gyroflow's work. The <b>Gyroflow (fpSup)</b> plugin is a fork of
+  Gyroflow's own <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a>
+  (GPL-3.0): it adds only the part that reads the fp's frames and hands them to Gyroflow in its own
+  camera format. Its source is at
+  <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>.
+  Problems with this plugin are ours: please report them to fpSup, not to Gyroflow.</p>
+  <p class="zh">防震本身是 <b>Gyroflow</b> 做的。Gyro2 只負責記錄相機的動作;把動作變成穩定的畫面
+  —— 果凍效應修正、鏡頭修正、平滑 —— 都是 Gyroflow 的功勞。<b>Gyroflow (fpSup)</b> 外掛是
+  Gyroflow 官方 <a href="https://github.com/gyroflow/gyroflow-plugins">gyroflow-plugins</a>
+  的分支(GPL-3.0),只加了讀取 fp 畫面、用 Gyroflow 自己的相機格式交給它的那一段。
+  原始碼在 <a href="https://github.com/ijigen/gyroflow-plugins">github.com/ijigen/gyroflow-plugins</a>。
+  這個外掛的問題是我們的:請回報給 fpSup,不要回報給 Gyroflow。</p>
+</section>
+
+<p class="en">Put Gyro2 on the card from the <a href="../tools/merge-v3/#install">v3 merge page</a>; how to install the card is written there.</p>
+<p class="zh">用 <a href="../tools/merge-v3/#install">v3 合併頁</a>把 Gyro2 做進卡片;卡片怎麼裝寫在那裡。</p>
+
+<!-- 1. INSTALL PLUGIN -->
+<h2 id="plugin"><span class="en">Install the Resolve plugin</span><span class="zh">裝 Resolve 外掛</span></h2>
+<ol class="steps">
+  <li>
+    <h3><span class="en">Download</span><span class="zh">下載</span></h3>
+    <p class="en">From the <a href="https://github.com/ijigen/gyroflow-plugins/releases/latest"><b>latest
+    release</b></a>, take the file for your computer: <code>fpSupGyroflow-OpenFX-macos.dmg</code> (or
+    <code>-macos.zip</code>) for a Mac, <code>fpSupGyroflow-OpenFX-windows.zip</code> for Windows.</p>
+    <p class="zh">到<a href="https://github.com/ijigen/gyroflow-plugins/releases/latest"><b>最新版</b></a>,
+    下載你電腦用的檔案:Mac 用 <code>fpSupGyroflow-OpenFX-macos.dmg</code>(或 <code>-macos.zip</code>),
+    Windows 用 <code>fpSupGyroflow-OpenFX-windows.zip</code>。</p>
+  </li>
+  <li>
+    <h3><span class="en">Put the bundle in the plugin folder</span><span class="zh">把外掛放進外掛資料夾</span></h3>
+    <div class="scroll">
+    <table>
+      <tbody>
+        <tr><td>macOS</td><td><code>/Library/OFX/Plugins/fpSupGyroflow.ofx.bundle</code></td></tr>
+        <tr><td>Windows</td><td><code>C:\Program Files\Common Files\OFX\Plugins\fpSupGyroflow.ofx.bundle</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="en">On macOS the plugin is not notarized by Apple, so a downloaded copy is blocked
+    until you clear the download mark, once, in Terminal:</p>
+    <p class="zh">macOS 上這個外掛沒有經過 Apple 公證,下載來的檔案會被擋,
+    要在「終端機」清掉下載標記一次:</p>
+    <pre><code>sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/fpSupGyroflow.ofx.bundle</code></pre>
+    <p class="note en">It sits beside the official Gyroflow plugin; you can keep both.
+    Tested on Apple-silicon Macs only. Windows and Linux builds exist but are not tested yet.</p>
+    <p class="note zh">它跟官方 Gyroflow 外掛並存,兩個都可以留著。
+    只在 Apple 晶片的 Mac 上實測過;Windows 與 Linux 版有建置,但<strong>還沒測</strong>。</p>
+  </li>
+  <li>
+    <h3><span class="en">Check Resolve sees it</span><span class="zh">確認 Resolve 看得到</span></h3>
+    <p class="en">Restart Resolve. In <b>Preferences &rarr; Video Plugins</b>,
+    <code>fpSupGyroflow.ofx.bundle</code> must be ticked. In <b>Effects &rarr; OpenFX</b> it is in the
+    <b>fpSup</b> group as <b>Gyroflow (fpSup)</b>.</p>
+    <p class="zh">重開 Resolve。在<b>偏好設定 &rarr; Video Plugins</b> 裡
+    <code>fpSupGyroflow.ofx.bundle</code> 要打勾。在<b>特效 &rarr; OpenFX</b> 的 <b>fpSup</b>
+    分組裡,名字是 <b>Gyroflow (fpSup)</b>。</p>
+    <figure class="shot">
+      <img class="actual" src="../assets/guide/10-gyro2-effect.webp" width="420" height="236"
+           alt="Resolve Effects: Gyroflow (fpSup) in the fpSup group, the official Gyroflow under Warp">
+      <figcaption class="en">Gyroflow (fpSup) in its own fpSup group; the official Gyroflow stays under Warp.</figcaption>
+      <figcaption class="zh">Gyroflow (fpSup) 在自己的 fpSup 分組;官方 Gyroflow 還在 Warp 底下。</figcaption>
+    </figure>
+  </li>
+</ol>
+
+<!-- 3. USE -->
+<h2 id="use"><span class="en">Use</span><span class="zh">使用</span></h2>
+<ol class="steps">
+  <li>
+    <h3><span class="en">Record CinemaDNG</span><span class="zh">錄 CinemaDNG</span></h3>
+    <p class="en">Record as usual. Nothing new appears on the card: the data is inside the frames.</p>
+    <p class="zh">照平常錄。卡上<strong>不會多出任何檔案</strong>:資料就在畫面檔裡面。</p>
+  </li>
+  <li>
+    <h3><span class="en">Add the effect in Resolve</span><span class="zh">在 Resolve 加上效果</span></h3>
+    <p class="en">Put the clip on the timeline and add <b>Gyroflow (fpSup)</b>. It finds the gyro
+    data by itself; <b>Status</b> turns <b>OK</b>. Then set <b>Smoothness</b> and <b>Zoom limit</b>
+    under <i>Adjust parameters</i> to taste.</p>
+    <p class="zh">把片子放上時間軸,加上 <b>Gyroflow (fpSup)</b>。它會自己找到陀螺資料,
+    <b>Status</b> 變成 <b>OK</b>。再到 <i>Adjust parameters</i> 依喜好調 <b>Smoothness</b>
+    和 <b>Zoom limit</b>。</p>
+    <figure class="shot">
+      <img class="actual" src="../assets/guide/10-gyro2-inspector.webp" width="410" height="456"
+           alt="The plugin in the Inspector: Status OK, and the fpSup lens group">
+      <figcaption class="en">Status OK means the gyro data was found. The fpSup lens group is for manual lenses.</figcaption>
+      <figcaption class="zh">Status 顯示 OK 就代表找到陀螺資料。fpSup lens 群組是給手動鏡頭用的。</figcaption>
+    </figure>
+    <p class="note en">The rolling-shutter time, the lens (focal length, distortion, focus) and the
+    frame timing all come from the frames. There is nothing to sync and no lens profile to load.</p>
+    <p class="note zh">果凍效應時間、鏡頭(焦距、畸變、對焦)和每格的時間都從畫面裡來。
+    <strong>不用同步,也不用載入鏡頭檔。</strong></p>
+  </li>
+  <li>
+    <h3><span class="en">A manual lens</span><span class="zh">手動鏡頭</span></h3>
+    <p class="en">A lens without electronic contacts gives the camera no lens data. In the
+    <b>fpSup lens</b> group, set <b>Manual lens focal (mm)</b> to its focal length. Leave
+    <b>Typical distortion for focal</b> on; if straight lines near the edges still bend or
+    wobble, turn it off and set <b>Corner distortion (%)</b> by eye (negative = barrel).
+    If you have a Gyroflow lens profile for it, <b>Load preset/lens profile</b> loads it instead.</p>
+    <p class="zh">沒有電子接點的鏡頭,相機拿不到鏡頭資料。在 <b>fpSup lens</b> 群組把
+    <b>Manual lens focal (mm)</b> 填成它的焦距。<b>Typical distortion for focal</b> 維持打勾;
+    如果畫面邊緣的直線還是會彎或晃,取消打勾,改用 <b>Corner distortion (%)</b> 目測調整
+    (負值 = 桶狀)。如果你有這顆鏡頭的 Gyroflow 鏡頭檔,用 <b>Load preset/lens profile</b> 載入即可。</p>
+  </li>
+</ol>
+
+<!-- 3b. WHAT GYROFLOW GETS -->
+<h2 id="data"><span class="en">What the plugin hands to Gyroflow</span><span class="zh">外掛交給 Gyroflow 的資料</span></h2>
+<p class="en">The plugin turns what the camera wrote into Gyroflow's own camera format
+(<a href="https://docs.gyroflow.xyz/">Gyroflow Protobuf</a>), the same one cameras with
+built-in Gyroflow support use. What goes in:</p>
+<p class="zh">外掛把相機寫的資料轉成 Gyroflow 自己的相機格式
+(<a href="https://docs.gyroflow.xyz/">Gyroflow Protobuf</a>),
+就是內建支援 Gyroflow 的相機用的同一種。放進去的有:</p>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">data</span><span class="zh">資料</span></th><th><span class="en">from</span><span class="zh">來源</span></th><th><span class="en">what Gyroflow does with it</span><span class="zh">Gyroflow 拿來做什麼</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">gyroscope, every sample (2499.5 Hz)</span><span class="zh">陀螺儀,每一筆樣本(2499.5 Hz)</span></td>
+        <td><span class="en">the camera's gyro</span><span class="zh">相機的陀螺儀</span></td>
+        <td><span class="en">the camera's motion: what gets undone</span><span class="zh">相機的轉動:要抵銷的就是它</span></td></tr>
+    <tr><td><span class="en">accelerometer</span><span class="zh">加速度計</span></td>
+        <td><span class="en">the camera's level sensor (about 45 a second)</span><span class="zh">相機的水平儀(每秒約 45 次)</span></td>
+        <td><span class="en">which way is down: horizon lock</span><span class="zh">哪邊是下:水平鎖定</span></td></tr>
+    <tr><td><span class="en">each frame's start and end time</span><span class="zh">每一格的開始與結束時間</span></td>
+        <td><span class="en">the sensor's frame clock (Vd)</span><span class="zh">感光元件的幀時鐘(Vd)</span></td>
+        <td><span class="en">lines motion up with the picture &mdash; <b>no sync step</b></span><span class="zh">讓動作跟畫面對齊 —— <b>不用同步</b></span></td></tr>
+    <tr><td><span class="en">readout time and direction</span><span class="zh">讀出時間與方向</span></td>
+        <td><span class="en">the sensor mode (e.g. 12.4 ms in Open Gate 3K)</span><span class="zh">感光元件模式(例如開放片幅 3K 為 12.4 ms)</span></td>
+        <td><span class="en">rolling-shutter (jello) correction</span><span class="zh">果凍效應修正</span></td></tr>
+    <tr><td><span class="en">exposure time, ISO</span><span class="zh">曝光時間、ISO</span></td>
+        <td><span class="en">each DNG</span><span class="zh">每張 DNG</span></td>
+        <td><span class="en">places the motion at the middle of the exposure</span><span class="zh">把動作對到曝光的中間</span></td></tr>
+    <tr><td><span class="en">lens: focal length, focal length in pixels, distortion, aperture, focus distance &mdash; per frame</span><span class="zh">鏡頭:焦距、像素焦距、畸變、光圈、對焦距離 —— 每一格</span></td>
+        <td><span class="en">the camera's own correction data for the mounted lens; a manual lens: your settings</span><span class="zh">相機對掛上鏡頭的校正資料;手動鏡頭:你填的設定</span></td>
+        <td><span class="en">turns rotation into the right amount of picture movement, and follows a focus pull</span><span class="zh">把轉動換算成正確的畫面位移,拉焦時也跟著變</span></td></tr>
+    <tr><td><span class="en">sensor size, pixel pitch, crop, frame size and rate</span><span class="zh">感光元件尺寸、像素間距、裁切、畫面尺寸與幀率</span></td>
+        <td><span class="en">the recording mode</span><span class="zh">錄影模式</span></td>
+        <td><span class="en">the geometry of the frame</span><span class="zh">畫面的幾何</span></td></tr>
+    <tr><td><span class="en">camera and lens names</span><span class="zh">機身與鏡頭名稱</span></td>
+        <td><span class="en">each DNG</span><span class="zh">每張 DNG</span></td>
+        <td><span class="en">shown in Gyroflow</span><span class="zh">在 Gyroflow 裡顯示</span></td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note en">Not included: orientation already worked out by the camera (Gyroflow computes it
+from the gyro), and what the camera's electronic stabiliser or a lens's optical stabiliser did
+&mdash; that is not recorded, so <b>turn both off</b> when you shoot for Gyro2.</p>
+<p class="note zh">沒有放的:相機算好的姿態(Gyroflow 會自己從陀螺儀算),
+以及相機電子防震或鏡頭光學防震做了什麼 —— 這些沒有記錄,
+所以用 Gyro2 拍的時候<b>兩者都要關掉</b>。</p>
+
+<!-- 4. UPDATE -->
+<h2 id="update"><span class="en">Updating the plugin</span><span class="zh">更新外掛</span></h2>
+<p class="en">In the plugin's <b>fpSup plugin</b> group: <b>Check for update</b>, then <b>Install</b>.
+The download runs in the background (about a minute) while Resolve keeps working; press Install
+once. Type a version in <b>Version to install</b> (e.g. <code>0.1.2</code>) to install that one, older
+ones too. <b>Roll back</b> puts the previous installation back without the network. Restart Resolve
+afterwards; the <b>Update status</b> line then shows the result.</p>
+<p class="zh">在外掛的 <b>fpSup plugin</b> 群組:按 <b>Check for update</b>,再按 <b>Install</b>。
+下載在背景進行(約一分鐘),Resolve 可以繼續用;Install <b>按一次就好</b>。
+在 <b>Version to install</b> 填版本(例如 <code>0.1.2</code>)就安裝那一版,舊版也可以。
+<b>Roll back</b> 不用網路就能退回上一個安裝。做完重開 Resolve,<b>Update status</b> 會顯示結果。</p>
+
+<!-- 5. TESTED -->
+<h2 id="tested"><span class="en">What is tested and what is not</span><span class="zh">哪些測過、哪些沒有</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">tested</span><span class="zh">測過</span></th><th><span class="en">not tested yet</span><span class="zh">還沒測</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">Open Gate 3K and 2K, 29.97p, with Lossless on</span><span class="zh">開放片幅 3K 與 2K,29.97p,開 Lossless</span></td>
+        <td><span class="en">FHD, UHD, 59.94p, 120p with this version</span><span class="zh">這一版的 FHD、UHD、59.94p、120p</span></td></tr>
+    <tr><td><span class="en">An electronic lens (LUMIX S 40mm F2) and a manual lens (Nokton 28mm F1.4)</span><span class="zh">電子鏡頭(LUMIX S 40mm F2)與手動鏡頭(Nokton 28mm F1.4)</span></td>
+        <td><span class="en">Takes longer than a few minutes</span><span class="zh">超過幾分鐘的長錄影</span></td></tr>
+    <tr><td><span class="en">The plugin on DaVinci Resolve 21, Apple-silicon Mac</span><span class="zh">外掛在 DaVinci Resolve 21、Apple 晶片 Mac</span></td>
+        <td><span class="en">The plugin on Windows</span><span class="zh">外掛在 Windows</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 6. LIMITS -->
+<h2 id="limits"><span class="en">Known limits</span><span class="zh">已知限制</span></h2>
+<ul>
+  <li class="en"><b>Hand-held close-ups</b> (under about 1 m): the lens also moves sideways, which a
+  gyro cannot see, so some shake stays.</li>
+  <li class="zh"><b>手持拍近物</b>(約 1 公尺內):鏡頭同時在平移,陀螺量不到,會留一點晃。</li>
+  <li class="en"><b>Fast shake at a slow shutter</b> leaves motion blur that no stabilisation can remove.</li>
+  <li class="zh"><b>慢快門下的快速晃動</b>會有動態模糊,防震修不掉。</li>
+  <li class="en"><b>Strong shake with a low Zoom limit:</b> the plugin keeps some motion so the frame
+  edge never shows. Raise Zoom limit for a steadier, tighter picture.</li>
+  <li class="zh"><b>晃很大而 Zoom limit 偏低</b>:外掛會留一些晃動,讓畫面邊緣不露出來。
+  調高 Zoom limit 會更穩、畫面更裁切。</li>
+  <li class="en">If the camera <b>skips frames</b> while recording, Resolve splits the clip; each part
+  stabilises on its own.</li>
+  <li class="zh">錄影時相機若<b>跳幀</b>,Resolve 會把片子分成兩段,各段各自防震。</li>
+</ul>
+
+<!-- 7. REMOVE -->
+<h2 id="remove"><span class="en">Remove</span><span class="zh">移除</span></h2>
+<p class="en">Camera: delete <code>fpSup/20GYR2.BIN</code> from the card (or the whole fpSup card),
+then switch the camera off. There is no menu setting to set back. Plugin: delete
+<code>fpSupGyroflow.ofx.bundle</code> from the plugin folder and restart Resolve.</p>
+<p class="zh">相機:刪除卡上的 <code>fpSup/20GYR2.BIN</code>(或整張 fpSup 卡的內容),再關機。
+<strong>沒有選單設定要改回。</strong>外掛:從外掛資料夾刪掉 <code>fpSupGyroflow.ofx.bundle</code>,重開 Resolve。</p>
+
+<!-- 8. TROUBLE -->
+<h2 id="trouble"><span class="en">If something does not work</span><span class="zh">如果有東西不能用</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">what happens</span><span class="zh">發生什麼</span></th><th><span class="en">what to do</span><span class="zh">怎麼辦</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">No <b>Gyroflow (fpSup)</b> in Effects</span><span class="zh">特效裡沒有 <b>Gyroflow (fpSup)</b></span></td>
+        <td><span class="en">Check the bundle's folder, tick it in Preferences &rarr; Video Plugins, restart Resolve.
+        On macOS, run the <code>xattr</code> line above.</span><span class="zh">確認外掛放的資料夾、在偏好設定 &rarr; Video Plugins 打勾、重開 Resolve。
+        macOS 上執行上面那行 <code>xattr</code>。</span></td></tr>
+    <tr><td><span class="en">Status says the take has no Vd frame sync</span><span class="zh">Status 說這段沒有 Vd 幀同步</span></td>
+        <td><span class="en">The clip was not recorded with Gyro2 loaded (or with an early test build). Check the
+        card has <code>fpSup/20GYR2.BIN</code> and record again.</span><span class="zh">這段錄的時候沒有載入 Gyro2(或是早期測試版錄的)。
+        確認卡上有 <code>fpSup/20GYR2.BIN</code>,重錄。</span></td></tr>
+    <tr><td><span class="en">The picture bends near the edges with a manual lens</span><span class="zh">手動鏡頭時畫面邊緣彎曲</span></td>
+        <td><span class="en">Set Manual lens focal correctly, then adjust Corner distortion &mdash;
+        <a href="#use">Use</a>.</span><span class="zh">把 Manual lens focal 填對,再調 Corner distortion ——
+        見<a href="#use">使用</a>。</span></td></tr>
+    <tr><td><span class="en">Resolve closes when you add the effect</span><span class="zh">加上效果時 Resolve 關掉</span></td>
+        <td><span class="en">Update the plugin, or Roll back. Send the file
+        <code>~/Library/Application Support/Gyroflow/gyroflow-openfx.log</code> to the Discord.</span><span class="zh">更新外掛或 Roll back。把
+        <code>~/Library/Application Support/Gyroflow/gyroflow-openfx.log</code> 傳到 Discord。</span></td></tr>
+    <tr><td><span class="en">The camera does not respond at all</span><span class="zh">相機完全沒反應</span></td>
+        <td><span class="en">Unplug USB and take the battery out. Nothing is flashed.</span><span class="zh">拔掉 USB、把電池拿出來。沒有任何東西被燒錄。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="https://github.com/ijigen/gyroflow-plugins/releases">Gyroflow (fpSup)</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
+</footer>
+
+<script src="../assets/lang.js?v=7c49866d" defer></script>
+</body>
+</html>

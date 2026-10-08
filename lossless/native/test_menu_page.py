@@ -137,10 +137,14 @@ class MenuTests(unittest.TestCase):
 
     def reference(self, blobs):
         pages = {'MainB2': fpui.PageCopy(self.stock_page, len(self.stock_page), 1)}
-        pool = fpui.Pool(self.pool_stock)
+        pool = fpui.Strings(self.pool_stock)
         for b in blobs:
             fpui.apply(b, pages, pool)
-        return bytes(pages['MainB2'].data), bytes(pool.data)
+        return bytes(pages['MainB2'].data), pool
+
+    def layers_now(self):
+        from ui import chain
+        return chain.layers(self.peek)
 
     def assert_untouched(self, result):
         self.assertEqual(self.install(), result)
@@ -152,7 +156,8 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(self.install(), INSTALLED)
         page, pool = self.reference([self.blob])
         self.assertEqual(self.page_now(), page)
-        self.assertEqual(self.pool_now()[STOCK_POOL_LEN:], pool[STOCK_POOL_LEN:])
+        self.assertEqual(self.layers_now(), pool.layers)          # uishare/NESTED_HOOKS.md
+        self.assertEqual(len(self.pool_now()), STOCK_POOL_LEN, 'the stock pool was replaced')
         self.assertEqual((self.get(FIRST_ID), self.get(ROW)), (34494, 243))
         self.assertEqual(self.get(PAGE), (NBU + self.get(MAINB2)) & 0xFFFFFFFF)
         self.assertEqual(self.get(NBU_WRITES), 0, 'the firmware image was written')
@@ -174,12 +179,16 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(self.page_now(), page)
         self.assertEqual((self.get(FIRST_ID), self.get(ROW)), (34494 + 23, 243 + 81))
 
-    def test_a_string_another_sup_already_added_is_shared(self):
+    def test_an_older_sups_pool_copy_is_left_as_it_is(self):
+        # a sup on the old convention copied the pool and appended a string;
+        # this row's strings go to its own layer and the copy is not touched
         same = self.lib.fpl_fixture_other_sup(b'Lossless RAW', 12)
         self.assertNotEqual(same, 0xFFFFFFFF)
-        self.install()
-        pool = self.pool_now()
-        self.assertEqual(pool.count(b'Lossless RAW\0', STOCK_POOL_LEN), 1)
+        before = self.pool_now()
+        self.assertEqual(self.install(), INSTALLED)
+        self.assertEqual(self.pool_now(), before)
+        (_, texts), = self.layers_now()
+        self.assertIn('Lossless RAW', texts)
 
     def test_published_before_the_switch(self):
         self.install()
@@ -313,7 +322,7 @@ class MenuMutationTests(unittest.TestCase):
         'hands the registry a stack name': (
             '            def[1] = (uint32_t)(uintptr_t)NAME;',
             '            def[1] = (uint32_t)(uintptr_t)screen_words;'),
-        'defaults ON': ('            def[2] = 0u;                               /* OFF */',
+        'defaults ON': ('            def[2] = n < 2u && m->initial == 1u ? 1u : 0u;',
                         '            def[2] = 1u;'),
         'leaks the file object': ('    f_dtor(fobj, 2);\n', ''),
         'reads the data right after the header': (

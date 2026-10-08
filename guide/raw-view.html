@@ -69,49 +69,13 @@
   我們套用時若有任何錯誤,責任在我們,不在這份指南。</p>
 </section>
 
-<!-- 1. INSTALL -->
+<!-- 1. INSTALL: the card's install steps live once, on the merge page -->
 <h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
-<ol class="steps">
-  <li>
-    <h3><span class="en">Check the camera</span><span class="zh">確認相機</span></h3>
-    <p class="en">SIGMA fp (not fp L) on firmware <b>Ver.5.02</b> exactly. <a href="../guide.html#firmware">How to check</a>.</p>
-    <p class="zh">SIGMA fp(不是 fp L),韌體必須剛好是 <b>Ver.5.02</b>。<a href="../guide.html#firmware">怎麼確認</a>。</p>
-  </li>
-  <li>
-    <h3><span class="en">Build the card in fpSup-Merge</span><span class="zh">在 fpSup-Merge 做卡</span></h3>
-    <p class="en"><a href="../tools/card-composer/?pick=raw-view"><b>Open fpSup-Merge with fpSup-RAW-View ticked</b></a>.
-    It can go on the same card as the shell, the gyro and open gate (OG3K or OG2K). Tick what
-    else you want, then download the zip.</p>
-    <p class="zh"><a href="../tools/card-composer/?pick=raw-view"><b>打開已勾好 fpSup-RAW-View 的 fpSup-Merge</b></a>。
-    它可以和 shell、陀螺儀、open gate(OG3K 或 OG2K)放在同一張卡上。勾好其他想要的,然後下載 zip。</p>
-    <p class="note en">Fast Start 3 is an optional setting on that page. See
-    <a href="../guide.html">How to use fpSup</a>.</p>
-    <p class="note zh">Fast Start 3 是那個頁面上的選項。見
-    <a href="../guide.html">fpSup 怎麼用</a>。</p>
-  </li>
-  <li>
-    <h3><span class="en">Copy to the card and start the camera</span><span class="zh">複製到卡上並開機</span></h3>
-    <p class="en">Unzip. Copy <code>AutoRun.txt</code>, <code>fpSup.BIN</code> and the
-    <code>FPSUPUI</code> folder to the <b>top level</b> of the SD card the camera boots from.
-    <a href="../guide.html#copy">Details</a>.</p>
-    <p class="zh">解壓縮。把 <code>AutoRun.txt</code>、<code>fpSup.BIN</code> 和
-    <code>FPSUPUI</code> 資料夾複製到相機開機用的 SD 卡<b>最上層</b>。
-    <a href="../guide.html#copy">詳細說明</a>。</p>
-    <p class="en">Start the camera with the <b>USB cable unplugged</b>. The fpSup logo appears
-    in the top left and four boxes fill one by one. All four white means it loaded; the
-    camera's own screen comes back about two seconds later. If the boxes stop filling, the
-    load stopped there.</p>
-    <p class="zh"><b>不插 USB 線</b>開機。左上角出現 fpSup 標誌,四個格子一格一格填滿。
-    四格全白就是載入完成,約兩秒後回到相機原本的畫面。格子停在中途不再填,
-    就是載入停在那裡。</p>
-  </li>
-  <li>
-    <h3><span class="en">Set the recording format</span><span class="zh">設定錄影格式</span></h3>
-    <p class="en">Recording format <b>CinemaDNG, 12-bit</b>. Then press <b>COLOR</b> and pick
-    row 17, <b>RAW</b>.</p>
-    <p class="zh">錄影格式選 <b>CinemaDNG 12-bit</b>。然後按 <b>COLOR</b>,選第 17 列 <b>RAW</b>。</p>
-  </li>
-</ol>
+<p class="en">Tick <b>fpSup-RAW-View</b> in <a href="../tools/merge-v3/#install"><b>fpSup-Merge</b></a>,
+download, and follow the install steps on that page. Then set the recording format to
+<b>CinemaDNG 12-bit</b>.</p>
+<p class="zh">在 <a href="../tools/merge-v3/#install"><b>fpSup-Merge</b></a> 勾選 <b>fpSup-RAW-View</b> 下載,
+照該頁的安裝說明放進卡。然後把錄影格式設為 <b>CinemaDNG 12-bit</b>。</p>
 
 <!-- 2. Requirements -->
 <h2 id="needs"><span class="en">What it needs</span><span class="zh">需要什麼</span></h2>

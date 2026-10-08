@@ -1,0 +1,2 @@
+en: Open Gate formats in one: OG2K, OG3K, OG3.5K, OG4K and S16 as extra movie resolutions in Settings and Quick Set, each a small data file in fpSup\RESCUS; the camera's own tables are not changed. Test.
+zh: Open Gate 各格式合一:OG2K、OG3K、OG3.5K、OG4K、S16 成為 Settings 與 QS 的錄影解析度新選項,每個格式是 fpSup\RESCUS 裡的一個小資料檔;不改相機原廠的任何表。測試版。

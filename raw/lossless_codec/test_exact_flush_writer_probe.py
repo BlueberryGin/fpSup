@@ -71,6 +71,13 @@ def success_shape_fixture():
     return values
 
 
+
+def arena_bounds():
+    """The arena, from the file that declares it -- never named here."""
+    import probe_placement
+    cave = probe_placement.load_cave()
+    return cave.CAVE_ARENA, cave.CAVE_ARENA_END
+
 class FakeShell:
     """A strict memory-only model of the three regions an install may touch."""
 
@@ -303,6 +310,129 @@ class FlushWriterProbeTests(unittest.TestCase):
         self.assertEqual(shell.state[probe.S_COUNT], 1)
         self.assertEqual(shell.state[probe.S_DONE], probe.DONE_MAGIC)
         self.assertEqual(shell.state[probe.S_RESTORED], probe.HOOK_ORIG)
+
+
+class PlacementTests(unittest.TestCase):
+    """ROADMAP G1: no undeclared fixed scratch or code ownership."""
+
+    def fake_claim(self):
+        state = {"bump": arena_bounds()[0], "handed": {}}
+        def claim(name, size):
+            if name not in state["handed"]:
+                state["handed"][name] = state["bump"]
+                state["bump"] += (size + 7) & ~7
+            return state["handed"][name]
+        return claim
+
+    def test_claimed_build_moves_off_the_fixed_addresses(self):
+        import exact_dng_writer_probe as base_mod
+        default = probe.build_probe(base_mod.DEFAULT_FPSUP)
+        code, placed = probe.place_probe(base_mod.DEFAULT_FPSUP,
+                                         claim=self.fake_claim())
+        self.assertEqual(len(code), len(default))
+        self.assertNotEqual(code, default)
+        for at in placed.values():
+            self.assertLess(at, arena_bounds()[1], "outside the cave arena")
+            self.assertGreaterEqual(at, arena_bounds()[0])
+        self.assertNotIn(0xC0730000, placed.values())
+        self.assertNotIn(0xC0730600, placed.values())
+
+    def test_armed_word_tracks_the_claimed_code(self):
+        import exact_dng_writer_probe as base_mod
+        import probe_placement as placement
+        original = probe.HOOK_ARMED
+        try:
+            _, placed = probe.place_probe(base_mod.DEFAULT_FPSUP,
+                                          claim=self.fake_claim())
+            self.assertEqual(
+                probe.HOOK_ARMED,
+                placement.armed_word(probe.HOOK_SITE,
+                                     placed["lossless.flush.code"]))
+            self.assertNotEqual(probe.HOOK_ARMED, original)
+            self.assertEqual(
+                placement.decode_bl(probe.HOOK_SITE, probe.HOOK_ARMED),
+                placed["lossless.flush.code"])
+        finally:
+            probe.HOOK_ARMED = original
+
+    def test_publication_lands_between_the_writes_and_the_hook(self):
+        """Publishing before the code is written proves nothing about it.
+
+        The first live arm on 2026-09-23 did exactly that: caches were
+        published against a still-empty region, then the image was written,
+        then the hook was armed with nothing published after the write.
+        """
+        import exact_dng_writer_probe as base_mod
+        order = []
+
+        class OrderingShell(FakeShell):
+            def write_words_verified(self, address, values, attempts=8):
+                order.append(("write", address))
+                super().write_words_verified(address, values, attempts)
+
+            def set_word(self, address, value):
+                order.append(("hook", address))
+                super().set_word(address, value)
+
+        shell = OrderingShell()
+        code = probe.build_probe(base_mod.DEFAULT_FPSUP)
+        with contextlib.redirect_stdout(io.StringIO()):
+            probe.arm_probe(shell, code,
+                            publish=lambda sh: order.append(("publish", None)))
+        steps = [step for step, _ in order]
+        self.assertIn("publish", steps)
+        self.assertLess(steps.index("write"), steps.index("publish"),
+                        "published before the image was written")
+        self.assertLess(steps.index("publish"), steps.index("hook"),
+                        "armed before publishing")
+
+    def test_both_probes_fit_the_arena_together(self):
+        import exact_dng_writer_probe as base_mod
+        import single_frame_codec_probe as codec
+        claim = self.fake_claim()
+        probe.place_probe(base_mod.DEFAULT_FPSUP, claim=claim)
+        codec.place_and_build("encode-sustained", base_mod.DEFAULT_FPSUP,
+                              claim=claim)
+        used = claim("probe", 0) - arena_bounds()[0]
+        self.assertLess(used, arena_bounds()[1] - arena_bounds()[0],
+                        "the two probes do not both fit in one boot")
+
+
+    def test_the_frame_survey_only_loads(self):
+        """Copy-back will WRITE the buffer this frame owns, so the survey that
+        decides whether that is safe must not itself write anything. Every
+        instruction between the survey label and call_real must be a load, a
+        store into our own state, or arithmetic."""
+        source = probe.SOURCE.read_text()
+        start = source.index("    /* Frame reference survey.")
+        block = source[start:source.index("call_real:", start)]
+        self.assertIn("ldr     r5, [r4, #S_ARG1]", block)
+        for line in block.splitlines():
+            op = line.strip().split()
+            if not op or op[0].startswith(("/*", "*", "#")):
+                continue
+            if op[0].startswith(("str", "stm")):
+                self.assertIn("[r4, #S_", line,
+                              f"the survey may only write our state: {line!r}")
+
+    def test_the_frame_survey_reads_the_reference_fields(self):
+        """These are the offsets the clone path uses: FUN_c0373dd0 copies
+        0x68..0x128 field for field, FUN_c0374ee8 makes frame[0x1C0] clones
+        and bumps frame[0x1114]."""
+        source = probe.SOURCE.read_text()
+        for offset in ("0x68", "0x128", "0x10FC", "0x1110", "0x1114", "0x1118", "0x1C0"):
+            self.assertIn(f"LDA     r0, {offset}\n", source,
+                          f"the survey must read frame+{offset}")
+        for name in ("frame_buffer", "frame_refcount", "frame_clones_made",
+                     "frame_clones_requested", "frame_buffer_is_seg0"):
+            self.assertIn(name, probe.STATE_FIELDS.values())
+
+    def test_the_survey_is_guarded_against_a_null_frame(self):
+        source = probe.SOURCE.read_text()
+        start = source.index("    /* Frame reference survey.")
+        block = source[start:source.index("call_real:", start)]
+        self.assertIn("cmp     r5, #0", block)
+        self.assertIn("beq     call_real", block)
 
 
 if __name__ == "__main__":

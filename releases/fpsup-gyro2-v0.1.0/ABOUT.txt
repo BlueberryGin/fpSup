@@ -1,0 +1,2 @@
+en: Writes the fp's gyro and level data into every CinemaDNG frame; the Gyroflow (fpSup) plugin for DaVinci Resolve reads it from the frames and stabilises the clip, with no sync step. Works with Lossless.
+zh: 把 fp 的陀螺儀與水平儀資料寫進每一格 CinemaDNG;DaVinci Resolve 的 Gyroflow (fpSup) 外掛直接從畫面檔讀取並防震，不用手動同步。可與 Lossless 同卡。

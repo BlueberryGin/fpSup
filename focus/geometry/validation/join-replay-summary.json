@@ -1,0 +1,76 @@
+{
+  "schema": "fp.confirmation.replay/v1",
+  "offline_only": true,
+  "deployment_ready": false,
+  "native_adapter_complete": false,
+  "hardware_motion_verified": false,
+  "input_assertions_independently_verified": false,
+  "confirmation_authorized": false,
+  "motion_authorized": false,
+  "input_metadata": {
+    "type": "metadata",
+    "schema": "fp.confirmation.events/v1",
+    "provenance": "synthetic",
+    "clock": "common_epoch_ms",
+    "scale_semantics": "normalized_linear_size",
+    "simulate_confirmation": true,
+    "note": "All validity, identity and optical-settle assertions are synthetic assumptions."
+  },
+  "events": 80,
+  "candidate_event_indices": [
+    6,
+    43
+  ],
+  "candidates": 2,
+  "simulated_confirmation_attempts": 2,
+  "simulated_confirmations_accepted": 2,
+  "simulated_confirmations_rejected": 0,
+  "join_state_bytes": 116,
+  "geometry_state_bytes": 396,
+  "join_config": {
+    "max_episode_ms": 5000,
+    "max_event_age_ms": 100,
+    "max_pair_gap_ms": 500,
+    "max_sample_age_ms": 100,
+    "max_position_age_ms": 500
+  },
+  "geometry_config": {
+    "window_ms": 300,
+    "min_span_ms": 120,
+    "min_samples": 5,
+    "max_gap_ms": 150,
+    "max_age_ms": 100,
+    "max_anchor_age_ms": 5000,
+    "min_rate_q16": 1311,
+    "max_residual_q16": 1311,
+    "max_scale_step_q16": 16384
+  },
+  "reasons": {
+    "waiting": 16,
+    "intermediate_end": 1,
+    "ok": 2,
+    "already_consumed": 50,
+    "cancelled": 1,
+    "needs_begin": 6,
+    "context_changed": 1,
+    "noop_unsupported": 1,
+    "lost_event": 1,
+    "result_failed": 1
+  },
+  "directions": {
+    "unknown": 29,
+    "approach": 27,
+    "recede": 17
+  },
+  "warning": "Synthetic acceptance assumes optical validity; this replay establishes no camera accuracy, live ordering, settlement or native source identity.",
+  "input_sha256": "8046c6ded62999fa09b625ca81468e9e081c3e35acfef99c3fd452afcb4c062e",
+  "source_sha256": {
+    "confirm_join.c": "2b78c400548076d3b385858e870971802f3ea20bdce5b4e91f518b5bd9679c09",
+    "confirm_join.h": "d0c978a6e83b3cd78381e3d5ba59aaeede346a06ed9e65f51e5d42f77c9152be",
+    "join.py": "3dd82125d58f2ab0ffea513ae37771777bed47df827c746b7d5311583a26fc36",
+    "join_replay.py": "2ec90234d2cbd237d0c6126edd4248c97d06bd6023596e6cb4e11fb34a5b175f",
+    "geometry.c": "8f38d0bb10b93ab186519b3e759ddb9f9415769f55d07d8474adf0d0da352c83",
+    "geometry.h": "5cbfdbe8ba276a200f01a02646d1a25e93007677a058af2f7d38428be06c3abf",
+    "geometry.py": "f823f1f085ad887aaa9146257b5f12f73c06295737193b797dce2d967413d5ed"
+  }
+}

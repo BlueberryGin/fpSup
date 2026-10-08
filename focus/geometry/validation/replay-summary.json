@@ -1,0 +1,68 @@
+{
+  "schema": "fp.geometry.replay",
+  "version": 1,
+  "offline_only": true,
+  "deployment_ready": false,
+  "camera_adapter_verified": false,
+  "hardware_motion_verified": false,
+  "motion_authorized": false,
+  "input_assertions_independently_verified": false,
+  "input_metadata": {
+    "type": "metadata",
+    "schema": "fp.geometry.events",
+    "version": 1,
+    "provenance": "synthetic",
+    "clock": "common_epoch_ms",
+    "scale_semantics": "normalized_linear_size",
+    "note": "Generated reciprocal-size motion and explicit assumed optical confirmations; no camera data."
+  },
+  "events": 78,
+  "state_bytes": 396,
+  "config": {
+    "window_ms": 300,
+    "min_span_ms": 120,
+    "min_samples": 5,
+    "max_gap_ms": 150,
+    "max_age_ms": 100,
+    "max_anchor_age_ms": 5000,
+    "min_rate_q16": 1311,
+    "max_residual_q16": 1311,
+    "max_scale_step_q16": 16384
+  },
+  "reasons": {
+    "needs_focus": 8,
+    "too_few": 12,
+    "ok": 55,
+    "lens_moving": 1,
+    "context_changed": 1,
+    "explicit_reset": 1
+  },
+  "directions": {
+    "unknown": 23,
+    "stationary": 16,
+    "approach": 22,
+    "recede": 17
+  },
+  "supplied_label_counts": {
+    "total": 71,
+    "classified": 55,
+    "correct": 51,
+    "wrong": 4,
+    "unknown": 16,
+    "expected_unknown": 4,
+    "false_classified_unknown": 0
+  },
+  "label_count_semantics": {
+    "known_labels": "total/classified/correct/wrong/unknown count only sample events labeled approach, recede, or stationary; unknown means the core abstained on one of these known labels.",
+    "expected_unknown": "Sample events labeled unknown; non-sample events and unlabeled samples are excluded.",
+    "false_classified_unknown": "Expected-unknown samples where the core output approach, recede, or stationary."
+  },
+  "label_warning": "Caller-supplied labels; synthetic/replay results are not optical or camera accuracy.",
+  "input_sha256": "e53ebf4115fbccc1f830138ae127f9e122231056371a3999663b7d1c9f918617",
+  "source_sha256": {
+    "geometry.c": "8f38d0bb10b93ab186519b3e759ddb9f9415769f55d07d8474adf0d0da352c83",
+    "geometry.h": "5cbfdbe8ba276a200f01a02646d1a25e93007677a058af2f7d38428be06c3abf",
+    "geometry.py": "f823f1f085ad887aaa9146257b5f12f73c06295737193b797dce2d967413d5ed",
+    "replay.py": "8caa01b882a7bff1813bb25b4f1768ecc67974bdc59264b3aa6eb3e73ef3728c"
+  }
+}

@@ -66,6 +66,7 @@ ABI = {
     'pool_desc': 0xC072F6D8,   # the loader's allocator descriptor, 16 bytes
     'load_start_us': 0xC072F6F4,
     'load_done_us':  LOAD_DONE_US,
+    'loader_svc': 0xC072F6FC,  # Loader v3: &svc while it runs entries, else 0 (sloader.h SL_SVC_AT)
     'park_stub': 0xC072EFB4,
     # Scratch inside the worker's block, in the gap above code_ptr (+0x58) and
     # below abort (+0x80).  console/fpstate.py's peek routine reaches these as

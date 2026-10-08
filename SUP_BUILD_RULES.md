@@ -31,7 +31,7 @@ OG 還原／錄影／QS 的證據見 [OG 共用穩定性紀錄](../projects/open
 - 已有固定位址初始化函式：用 `--vshl-entry ADDRESS`。
 - **沒有 entry 就省略參數**，不要把 `--vshl-entry 0` 當作有效入口加入：0 是 header 的無入口值，也是多入口表的結束值。
 - 封裝層必須保留上游的非零 entry，不能只重包區段卻丟掉入口；也不能假設所有純產品 entry 都是 0。
-- 沿用 [entries.S](fp_usb_shell/templates/entries.S) 串接入口，不讓某個 sup 自己呼叫下一個 sup。
+- 沿用 [entries.S](fp_usb_shell/asm/entries.S) 串接入口，不讓某個 sup 自己呼叫下一個 sup。
   通用 builder 的順序是 worker → 各 boot-bin（參數順序）→ vshl-entry；現行 OG＋gyro 即 worker → gyro → restore。
   新 sup 有初始化相依性時，在組裝處明確安排並驗證，不更動入口 ABI 或私下互相接力。
 
@@ -151,8 +151,8 @@ Fast 會使用具持久化能力的設定區，不能描述成「完全不寫任
 
 ## 7. 查程式，不背過期數字
 
-- [loader.S](fp_usb_shell/templates/loader.S)、[stage2.S](fp_usb_shell/templates/stage2.S)、
-  [store_boot.S](fp_usb_shell/templates/store_boot.S)、[entries.S](fp_usb_shell/templates/entries.S)：執行契約。
+- [loader.S](fp_usb_shell/asm/loader.S)、[stage2.S](fp_usb_shell/asm/stage2.S)、
+  [store_boot.S](fp_usb_shell/asm/store_boot.S)、[entries.S](fp_usb_shell/asm/entries.S)：執行契約。
 - [build_autorun.py](fp_usb_shell/build_autorun.py)：容器、入口表、容量與封裝選項。
 - [test_boot_chain.py](fp_usb_shell/test_boot_chain.py)：共用鏈回歸。
 - [test_loader_hook.py](fp_usb_shell/test_loader_hook.py)：loader hook 與關機寫回的模擬執行。

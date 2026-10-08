@@ -4,6 +4,7 @@
   fpsh ping
   fpsh <firmware shell command...>       e.g.  fpsh mem save \\X.BIN 0xC072F000,,0x40
   fpsh --status
+  fpsh --upload-status                 query UP01 support on the current worker
 """
 import socket, sys, os
 
@@ -29,6 +30,8 @@ def main() -> int:
         print(__doc__.strip()); return 2
     if args[0] == "--status":
         req = "STATUS"
+    elif args[0] == "--upload-status" and len(args) == 1:
+        req = "UCAPS"
     elif args[0] == "ping" and len(args) == 1:
         req = "PING"
     else:
@@ -36,6 +39,9 @@ def main() -> int:
     r = call(req)
     if r.startswith("OK "):
         print(r[3:].replace("\\n", "\n").replace("\\\\", "\\"))
+        return 0
+    if r.startswith("OKUC "):
+        print(r)
         return 0
     if r.startswith("OKX "):
         # A raw block. The daemon hex-encodes any reply over 128 bytes -- which

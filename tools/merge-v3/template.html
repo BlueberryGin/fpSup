@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fpSup-Merge v3</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#f2f1ed; --panel:#fbfaf8; --ink:#171b1f; --dim:#5d6570; --line:#d6d4cd;
+  --sig:#c25a12; --sig-soft:#f6e4d6; --ok:#2b6b51; --bad:#a83a29;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0f1317; --panel:#171c21; --ink:#e4e6e4; --dim:#8b949f; --line:#2b333b;
+  --sig:#f08a3c; --sig-soft:#3a2415; --ok:#63c295; --bad:#e8705c;
+}}
+:root[data-theme="dark"]{
+  --paper:#0f1317; --panel:#171c21; --ink:#e4e6e4; --dim:#8b949f; --line:#2b333b;
+  --sig:#f08a3c; --sig-soft:#3a2415; --ok:#63c295; --bad:#e8705c;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;
+  margin:0 auto;max-width:1040px;padding:28px 16px 56px;-webkit-font-smoothing:antialiased}
+h1{font-size:1.5rem;font-weight:600;margin:0;letter-spacing:-.01em}
+h1 small{font-family:var(--mono);font-size:.8rem;color:var(--sig);font-weight:500;margin-left:.5em}
+h2{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.11em;color:var(--dim);
+  margin:0 0 10px;font-family:var(--mono)}
+code,.m{font-family:var(--mono);font-variant-numeric:tabular-nums}
+header{border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:22px;
+  display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+header p{color:var(--dim);font-size:.92rem;max-width:60ch;margin:.45em 0 0}
+.lang{display:flex;gap:4px}
+button{font:inherit;cursor:pointer}
+.lang button,.cats button{font-family:var(--mono);font-size:.78rem;background:transparent;color:var(--dim);
+  border:1px solid var(--line);border-radius:4px;padding:3px 9px}
+.lang button[aria-pressed="true"],.cats button[aria-pressed="true"]{color:var(--ink);border-color:var(--ink)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--sig);outline-offset:2px}
+.cols{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:26px;align-items:start}
+@media(max-width:760px){.cols{grid-template-columns:1fr}}
+section{margin-bottom:22px}
+section h2{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+section h2 span{text-transform:none;letter-spacing:0;font-weight:400}
+section>p.sub{color:var(--dim);font-size:.84rem;margin:-6px 0 10px}
+details.dev>summary{cursor:pointer;list-style:none;font-family:var(--mono);font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.11em;color:var(--dim);font-weight:600;margin-bottom:10px}
+details.dev>summary::before{content:"▸ "}
+details.dev[open]>summary::before{content:"▾ "}
+.tile{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:10px}
+.tile.on{border-color:var(--sig);box-shadow:inset 3px 0 0 var(--sig)}
+.tile.parked{border-color:var(--line);box-shadow:inset 3px 0 0 var(--dim)}
+.tile input{margin:4px 0 0;accent-color:var(--sig);width:16px;height:16px;cursor:pointer}
+.tile label{cursor:pointer}
+.tile .name{font-weight:600}
+.tile .name .m{font-weight:400;color:var(--dim);font-size:.8rem;margin-left:.4em}
+.tile .desc{grid-column:2;color:var(--dim);font-size:.88rem}
+.tile .by{grid-column:2;font-size:.8rem;color:var(--dim);border-top:1px dashed var(--line);padding-top:5px;margin-top:3px}
+.tile .by b{color:var(--ink);font-weight:500}
+.tile .warn{grid-column:2;font-size:.82rem;color:var(--sig);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tile .warn button{font-family:var(--mono);font-size:.76rem;background:transparent;color:var(--sig);
+  border:1px solid var(--sig);border-radius:4px;padding:1px 8px}
+.tile .data{grid-column:2;display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px}
+.tile .data label{font-family:var(--mono);font-size:.76rem;border:1px solid var(--line);border-radius:4px;
+  padding:1px 8px 1px 5px;display:inline-flex;gap:5px;align-items:center;cursor:pointer}
+.tile .data label.on{border-color:var(--sig);color:var(--ink)}
+.tile .data input{width:13px;height:13px;margin:0}
+.tile .guide{grid-column:2;font-family:var(--mono);font-size:.78rem;color:var(--sig);text-decoration:none;
+  justify-self:start}
+.tile .guide:hover{text-decoration:underline}
+.tile.pending{opacity:.6;border-style:dashed}
+.tile.pending .soon{font-family:var(--mono);font-size:.72rem;border:1px solid var(--dim);color:var(--dim);
+  border-radius:3px;padding:0 6px;margin-left:.5em;font-weight:400}
+.tile .hint{grid-column:2;font-size:.8rem;color:var(--dim);font-family:var(--mono)}
+aside{position:sticky;top:16px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px}
+@media(max-width:760px){aside{position:static}}
+.tree{font-family:var(--mono);font-size:.8rem;margin:0 0 12px;padding:10px;background:var(--paper);
+  border-radius:4px;overflow-x:auto;white-space:pre;line-height:1.5}
+.tree .new{color:var(--sig)} .tree .off{color:var(--dim)}
+.dl{width:100%;background:var(--sig);color:#fff;border:0;border-radius:5px;padding:10px;font-weight:600}
+.dl:disabled{background:var(--line);color:var(--dim);cursor:not-allowed}
+.status{font-family:var(--mono);font-size:.8rem;margin:10px 0 0}
+.status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+.note{color:var(--dim);font-size:.84rem;margin:12px 0 0}
+.install{margin:18px 0 0;padding-top:14px;border-top:1px solid var(--line)}
+.install ol{margin:0;padding-left:1.3em;font-size:.86rem}
+.install li{margin:0 0 7px}
+.install li::marker{font-family:var(--mono);color:var(--sig)}
+.install .thanks{margin:12px 0 0;padding:9px 11px;font-size:.84rem;background:var(--sig-soft);
+  border-left:3px solid var(--sig);border-radius:4px}
+.install code{font-size:.8rem;background:var(--paper);padding:0 3px;border-radius:3px}
+details{margin-top:12px;font-size:.82rem}
+details summary{cursor:pointer;color:var(--dim);font-family:var(--mono)}
+details table{border-collapse:collapse;width:100%;margin-top:6px}
+details td{font-family:var(--mono);font-size:.74rem;padding:2px 4px;border-bottom:1px solid var(--line);
+  word-break:break-all;vertical-align:top}
+/* header: logo, language, community links (support/wechat rules copied from
+   assets/site.css so the page keeps working on its own) */
+header{display:block;position:relative}
+header .lang{position:absolute;top:0;right:0}
+.brand{display:flex;align-items:center;gap:22px;padding-right:130px}
+.brand .mark{width:120px;height:auto;flex:none;display:block}
+.brand>div{min-width:0}
+@media(max-width:620px){.brand{flex-direction:column;align-items:flex-start;gap:12px;padding-right:0}
+  .brand .mark{width:88px}header .lang{position:static;margin-bottom:12px;justify-content:flex-end;display:flex}}
+.lang{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.lang button{border:0;border-radius:0}
+.lang button + button{border-left:1px solid var(--line)}
+[data-lang="en"] .zh-only{display:none!important}
+/* ---- support buttons ---------------------------------------------------- */
+.support{display:flex; gap:9px; flex-wrap:wrap; align-items:center; margin:14px 0 0}
+.support a{display:inline-flex; align-items:center; gap:7px; font-size:.86rem;
+  font-weight:500; text-decoration:none; padding:9px 15px; border-radius:4px;
+  border:1px solid var(--line); color:var(--ink); background:var(--panel);
+  transition:border-color .12s, background .12s}
+.support svg{width:16px; height:16px; flex:none; display:block}
+.support .kofi svg{fill:#FF5E5B}
+.support .discord svg{fill:#5865F2}
+.support .youtube svg{fill:#FF0000}
+.support .youtube:hover{border-color:#FF0000; background:#FF000014}
+.support .kofi:hover{border-color:#FF5E5B; background:#FF5E5B14}
+.support .discord:hover{border-color:#5865F2; background:#5865F214}
+.support a:focus-visible{outline:2px solid currentColor; outline-offset:2px}
+/* WeChat is a button, not a link: the group QR opens in a popover. */
+.support button.wechat{display:inline-flex; align-items:center; gap:7px; font:inherit;
+  font-size:.86rem; font-weight:500; padding:9px 15px; border-radius:4px; cursor:pointer;
+  border:1px solid var(--line); color:var(--ink); background:var(--panel);
+  transition:border-color .12s, background .12s}
+.support .wechat svg{fill:#07C160}
+.support .wechat:hover{border-color:#07C160; background:#07C16014}
+.support .wechat:focus-visible{outline:2px solid #07C160; outline-offset:2px}
+.support.compact button.wechat{font-size:.79rem; padding:6px 11px; gap:6px}
+.wechat-pop{border:1px solid var(--line); border-top:3px solid #07C160; border-radius:8px;
+  background:var(--panel); color:var(--ink); padding:26px 28px 22px; text-align:center;
+  box-shadow:0 18px 50px #0004; max-width:calc(100vw - 32px)}
+.wechat-pop::backdrop{background:#0008; backdrop-filter:blur(3px)}
+.wechat-pop .qr{background:#1f1f1f; padding:14px; border-radius:6px; margin:0 auto 14px;
+  width:max-content; max-width:100%; box-sizing:border-box}
+.wechat-pop .qr img{display:block; width:240px; max-width:100%; height:auto}
+.wechat-pop b{display:block; font-size:1rem}
+.wechat-pop small{display:block; color:var(--dim); margin-top:4px}
+.wechat-pop .x{position:absolute; top:6px; right:8px; border:0; background:none;
+  font-size:1.4rem; line-height:1; color:var(--dim); cursor:pointer; padding:4px 8px}
+.wechat-pop .x:hover{color:var(--ink)}
+/* In the hero: smaller, so the two buttons read as a shortcut rather than as the
+   point of the page. Some people arrive only wanting the Discord invite or the
+   Ko-fi link, and they should not have to scroll past the whole funnel to find it. */
+</style>
+</head>
+<body>
+<header>
+  <div class="lang" role="group" aria-label="Language / 語言 / 语言">
+    <button type="button" data-lang="en">EN</button>
+    <button type="button" data-lang="cn">中</button>
+    <button type="button" data-lang="zh">繁</button>
+  </div>
+  <div class="brand">
+    <picture>
+      <source srcset="../../assets/fpsup-logo.webp" type="image/webp">
+      <img class="mark" src="../../assets/fpsup-logo.png" width="463" height="500" alt="fpSup">
+    </picture>
+    <div>
+      <h1>fpSup-Merge <small>Loader v3</small></h1>
+      <p data-t="intro"></p>
+      <div class="support">
+
+      <a class="discord" href="https://discord.gg/WVTCcpGUYC" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+        Discord</a>
+      <button type="button" class="wechat zh-only" popovertarget="wechat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3C4.6 3 1 6 1 9.7c0 2.1 1.2 4 3 5.2l-.7 2.6 2.9-1.5c.9.3 1.8.4 2.8.4h.4a5.6 5.6 0 0 1-.2-1.5c0-3.6 3.4-6.4 7.6-6.4h.5C16.5 5.4 13.1 3 9 3z"/><path d="M23 14.9c0-3.1-3-5.6-6.6-5.6s-6.6 2.5-6.6 5.6 3 5.6 6.6 5.6c.8 0 1.5-.1 2.2-.3l2.4 1.3-.6-2.1c1.6-1 2.6-2.6 2.6-4.5z"/></svg>微信群</button>
+      <a class="youtube" href="https://www.youtube.com/@fp-sup" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>YouTube</a>
+      <a class="kofi" href="https://ko-fi.com/fpsup" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311zm6.173.478c-.928.116-1.682.028-1.682.028V7.284h1.77s1.971.551 1.971 2.638c0 1.913-.985 2.667-2.059 3.015z"/></svg>
+        <span data-t="kofi"></span></a>
+      </div>
+    </div>
+  </div>
+</header>
+<div id="wechat" class="wechat-pop" popover>
+  <button type="button" class="x" popovertarget="wechat" popovertargetaction="hide" aria-label="關閉">&times;</button>
+  <div class="qr"><img src="../../assets/wechat-qr.png" width="240" height="240" alt="fpSup 微信群 QR Code"></div>
+  <b>fpSup 微信群</b>
+  <small>打開微信「掃一掃」加入</small>
+</div>
+
+<div class="cols">
+  <main>
+    <div id="tiles"></div>
+  </main>
+  <aside>
+    <h2 data-t="card"></h2>
+    <div class="tree" id="tree"></div>
+    <button type="button" class="dl" id="dl"></button>
+    <p class="status" id="status" role="status"></p>
+    <section class="install" id="install">
+      <h2 data-t="install"></h2>
+      <ol id="steps"></ol>
+      <p class="thanks" id="thanks"></p>
+    </section>
+    <details>
+      <summary data-t="hashes"></summary>
+      <table id="hashtbl"></table>
+    </details>
+  </aside>
+</div>
+
+<script id="cat" type="application/json">@@CATALOGUE@@</script>
+
+<script id="compose">
+/* Pure part: no DOM.  test_merge_v3.js runs this block under node. */
+const CAT = JSON.parse(document.getElementById('cat').textContent);
+
+function b64(s){
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+function sha256hex(bytes){
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const n = bytes.length, len = ((n + 9 + 63) >> 6) << 6, m = new Uint8Array(len);
+  m.set(bytes); m[n] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(len - 8, Math.floor(n / 0x20000000)); dv.setUint32(len - 4, (n << 3) >>> 0);
+  const W = new Uint32Array(64), r = (x, k) => (x >>> k) | (x << (32 - k));
+  for (let o = 0; o < len; o += 64){
+    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(o + 4 * i);
+    for (let i = 16; i < 64; i++){
+      const a = W[i-15], b = W[i-2];
+      W[i] = (W[i-16] + (r(a,7) ^ r(a,18) ^ (a >>> 3)) + W[i-7] + (r(b,17) ^ r(b,19) ^ (b >>> 10))) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++){
+      const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + W[i]) >>> 0;
+      const t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    H[0]=(H[0]+a)>>>0; H[1]=(H[1]+b)>>>0; H[2]=(H[2]+c)>>>0; H[3]=(H[3]+d)>>>0;
+    H[4]=(H[4]+e)>>>0; H[5]=(H[5]+f)>>>0; H[6]=(H[6]+g)>>>0; H[7]=(H[7]+h)>>>0;
+  }
+  return H.map(x => x.toString(16).padStart(8, '0')).join('');
+}
+
+const CRC32 = (() => { const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++){ let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0; }
+  return u => { let c = 0xFFFFFFFF;
+    for (let i = 0; i < u.length; i++) c = t[(c ^ u[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0; }; })();
+
+/* Stored (uncompressed) zip with a fixed date, so the same selection always
+   gives the same bytes. */
+function zipStore(files){
+  const enc = s => typeof s === 'string' ? new TextEncoder().encode(s) : s;
+  const TIME = 0, DATE = (2026 - 1980) << 9 | 1 << 5 | 1;
+  const parts = [], central = [];
+  let off = 0;
+  for (const f of files){
+    const name = enc(f.name), data = enc(f.data), crc = CRC32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034B50, true); h.setUint16(4, 20, true);
+    h.setUint16(10, TIME, true); h.setUint16(12, DATE, true);
+    h.setUint32(14, crc, true); h.setUint32(18, data.length, true);
+    h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014B50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true);
+    c.setUint16(12, TIME, true); c.setUint16(14, DATE, true);
+    c.setUint32(16, crc, true); c.setUint32(20, data.length, true);
+    c.setUint32(24, data.length, true); c.setUint16(28, name.length, true);
+    c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const cdLen = central.reduce((s, p) => s + p.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054B50, true);
+  e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, cdLen, true); e.setUint32(16, off, true);
+  const all = parts.concat(central, [new Uint8Array(e.buffer)]);
+  const out = new Uint8Array(all.reduce((s, p) => s + p.length, 0));
+  let at = 0; for (const p of all){ out.set(p, at); at += p.length; }
+  return out;
+}
+
+const byId = id => CAT.products.find(p => p.id === id);
+const clashes = (a, b) => a !== b && (byId(a).excl.includes(b) || byId(b).excl.includes(a));
+
+/* Conflicts are reported, not refused (user 2026-10-07): every ticked sup goes
+   on the card.  `picked` is in priority order; walking it, a sup runs unless it
+   clashes with one already running, and the rest go on the card as
+   fpSup/NAME.OFF: the loader lists only *.BIN, and renaming .OFF <-> .BIN in
+   the same folder switches which one runs (user 2026-10-07; the camera's
+   All Sups menu lists both kinds from the one folder). */
+function plan(picked){
+  const on = [], off = [];
+  for (const id of picked){
+    const by = on.filter(q => clashes(id, q));
+    (by.length ? off : on).push(id);
+  }
+  return {on, off, conflict: id => picked.filter(q => clashes(id, q))};
+}
+
+/* Which of a product's data files go on the card.  DATA_OFF[id] holds the
+   ones the user unticked; everything else is in (default: all). */
+const DATA_OFF = {};
+const offName = f => f.replace(/\.BIN$/i, '.OFF');
+const dataChosen = p => (p.data_files || []).filter(d => !(DATA_OFF[p.id] || []).includes(d.path));
+
+/* The card for a selection: [{name, data, sha256}] in zip order, sups in the
+   loader's name order. */
+function compose(picked){
+  const {on, off} = plan(picked);
+  const files = CAT.shared.map(s => ({name: s.path, data: b64(s.data), sha256: s.sha256}));
+  for (const p of CAT.products){                                   // CAT is in file order
+    if (on.includes(p.id)) files.push({name: 'fpSup/' + p.file, data: b64(p.data), sha256: p.sha256, p});
+  }
+  for (const p of CAT.products){
+    if (off.includes(p.id)) files.push({name: 'fpSup/' + offName(p.file), data: b64(p.data), sha256: p.sha256, p, off: true});
+  }
+  /* A sup's data files (res-custom's fpSup/RESCUS/*.RCD) stay in their own
+     folder even when the sup is parked: the loader never reads subfolders, so
+     switching sups is still moving one .BIN. */
+  for (const p of CAT.products){
+    if (!picked.includes(p.id)) continue;
+    for (const d of dataChosen(p))
+      files.push({name: d.path, data: b64(d.data), sha256: d.sha256, dataOf: p});
+  }
+  return {on, off, files};
+}
+
+/* Every check the download depends on.  Returns [{ok, what}].  A clash is not
+   a failure; two sups that would both run and clash would be. */
+function checks(picked){
+  const out = [], {on, files} = compose(picked);
+  out.push({ok: on.length > 0, what: 'at least one sup runs'});
+  for (const id of picked){
+    const p = byId(id);
+    if ((p.data_files || []).length)
+      out.push({ok: dataChosen(p).length > 0, what: `${p.name}: at least one data file`});
+  }
+  for (const a of on) for (const b of on)
+    if (a < b && clashes(a, b)) out.push({ok: false, what: `${byId(a).name} and ${byId(b).name} both run`});
+  for (const f of files){
+    const got = sha256hex(f.data);
+    out.push({ok: got === f.sha256, what: `${f.name} sha256 ${got.slice(0, 12)}`});
+  }
+  const names = files.map(f => f.name.toUpperCase());
+  out.push({ok: new Set(names).size === names.length, what: 'no two files share a path'});
+  const run = files.filter(f => /^fpSup\/[^/]+$/.test(f.name) && f.p).map(f => f.p.file.toUpperCase());
+  out.push({ok: new Set(run).size === run.length, what: 'no two running sups share a file name'});
+  for (const f of files.filter(f => f.p)){
+    const d = f.data;
+    const magic = String.fromCharCode(d[0], d[1], d[2], d[3]);
+    const flen = (d[8] | d[9] << 8 | d[10] << 16 | d[11] << 24) >>> 0;
+    out.push({ok: magic === 'FSB1' && flen === d.length, what: `${f.p.file} FSB1 header, file_len ${flen}`});
+  }
+  return out;
+}
+
+function cardName(picked){
+  const ids = CAT.products.filter(p => picked.includes(p.id)).map(p => p.id);
+  if (ids.length === 1) return byId(ids[0]).release;
+  return 'fpsup-v3-' + ids.join('+');
+}
+
+function readme(picked){
+  const {on, off, files} = compose(picked);
+  const L = ['SIGMA fp -- fpSup Loader v3 card (fpSup-Merge v3)',
+    'firmware: SIGMA fp Ver.5.02 only', '',
+    'Copy everything in this folder to the root of the SD card.',
+    'The loader loads fpSup\\NN*.BIN in name order; it skips every folder inside fpSup.',
+    'Diagnostics: \\fpSup\\LOAD.LOG', '', 'RUNS (fpSup\\):'];
+  const who = p => [p.author && 'by ' + p.author, p.credits.length && 'thanks to ' + p.credits.join(', ')]
+    .filter(Boolean).map(x => '  -- ' + x).join('');
+  for (const p of CAT.products.filter(p => on.includes(p.id))){
+    L.push(`  ${p.file.padEnd(12)} ${p.release}${who(p)}`);
+    const ds = dataChosen(p);
+    if (ds.length) L.push(`  ${''.padEnd(12)} data: ${ds.map(d => d.label).join(', ')}`);
+  }
+  if (off.length){
+    L.push('', 'ON THE CARD BUT OFF (fpSup\\*.OFF) -- they clash with a sup that runs:');
+    for (const p of CAT.products.filter(p => off.includes(p.id)))
+      L.push(`  ${p.file.padEnd(12)} ${p.release}  -- clashes with ${plan(picked).conflict(p.id).map(q => byId(q).file).join(', ')}${who(p)}`);
+    L.push('', 'To switch: rename the running one from .BIN to .OFF and this one from .OFF to .BIN,',
+      'then restart the camera.  Never leave two clashing sups as .BIN together:',
+      'the later one in name order would release itself at boot.');
+  }
+  L.push('', 'files:');
+  for (const f of files) L.push(`  ${f.name.padEnd(20)} ${String(f.data.length).padStart(7)} B  sha256=${f.sha256}`);
+  return L.join('\r\n') + '\r\n';
+}
+
+function zipFor(picked){
+  const {files} = compose(picked);
+  const root = cardName(picked);
+  return zipStore([...files.map(f => ({name: f.name, data: f.data})),
+                   {name: 'README.txt', data: readme(picked)}]
+    .map(f => ({name: root + '/' + f.name, data: f.data})));
+}
+</script>
+
+<script id="ui">
+const T = {
+  zh: {
+    intro: '勾選要放進同一張卡的 sup,下載 zip,把裡面資料夾的內容全部複製到 SD 卡根目錄。Loader v3 卡是一個資料夾：每個 sup 一個檔案，合併就是放在一起。只支援 Ver.5.02。',
+    card: '卡片內容', hashes: '檔案雜湊',
+    kofi: '在 Ko-fi 支持我',
+    install: '安裝說明',
+    /* Andy_hal9000's tip (no per-character AutoRun delay) is the first line of
+       every v3 card's AutoRun, so the thanks is always shown -- the old page
+       showed it only with Fast Start 3 ticked. */
+    flash: '⚡ 感謝我們的閃電俠 <b>Andy_hal9000</b>:他的建議讓開機從 11.5 秒縮短到 3 秒，每張卡都用上了。',
+    steps: [
+      '相機必須是 SIGMA fp(不是 fp L),韌體剛好 <b>Ver.5.02</b>。',
+      '勾選要的 sup,下載 zip 並解壓縮。',
+      '把解出來的資料夾<b>裡面的東西</b>(<code>AutoRun.txt</code>、<code>fpSup</code> 資料夾、<code>README.txt</code>)複製到 SD 卡<b>最上層</b>。<b>更新卡時先刪掉卡上整個舊的 <code>fpSup</code> 資料夾</b>(以及舊格式的 <code>fpSup.BIN</code>、<code>FPSUPUI</code>):只覆蓋的話，這次沒勾的 sup 或格式資料檔還留在卡上，仍會被載入。',
+      '開機。左上角四格全白就是載入完成;每個 sup 有沒有載入記在 <code>fpSup\\LOAD.LOG</code>。',
+    ],
+    format: ['錄影格式', '解析度、開放式取景、無損壓縮'],
+    monitor: ['監看與螢幕', '拍攝時螢幕上看到什麼'],
+    focus: ['對焦', '自動對焦'],
+    upcoming: ['開發中', '還不能選，先讓你知道接下來有什麼'],
+    motion: ['陀螺儀與後製', '錄影時記下的資料，給後製用'],
+    development: ['開發用', '一般拍攝不需要'],
+    dl: '下載 zip', pick: '先勾選至少一個 sup',
+    by: '作者', thanks: '致謝', soon: '尚未發行', dev: '開發中', long: '長期開發', updated: '更新', formats: '要放進卡的格式', guide: '更多說明',
+    clash: n => `與 ${n} 衝突：放在卡上但不啟用(.OFF)`,
+    clashOn: n => `與 ${n} 衝突：此項啟用,${n} 存成 .OFF`,
+    swap: '改成啟用這個',
+    ok: n => `${n} 項檢查全部通過`, fail: w => `檢查失敗:${w}`,
+    nOff: n => `${n} 個 sup 存成 .OFF 不啟用。之後要換：衝突的那個改名成 .OFF,想用的改回 .BIN,重開機。`,
+  },
+  en: {
+    intro: 'Tick the sups for one card, download the zip, and copy what is inside its folder to the SD card root. A Loader v3 card is a folder: one file per sup, so merging is putting them together. Ver.5.02 only.',
+    card: 'Card contents', hashes: 'File hashes',
+    kofi: 'supMe on Ko-fi',
+    install: 'Install',
+    flash: '⚡ Thanks to our Flash, <b>Andy_hal9000</b>, whose tip cut start-up from 11.5 s to 3 s, on every card.',
+    steps: [
+      'The camera must be a SIGMA fp (not fp L) on firmware <b>Ver.5.02</b> exactly.',
+      'Tick the sups you want, download the zip and unzip it.',
+      'Copy <b>what is inside</b> the unzipped folder (<code>AutoRun.txt</code>, the <code>fpSup</code> folder, <code>README.txt</code>) to the <b>top level</b> of the SD card. <b>When updating a card, first delete the whole old <code>fpSup</code> folder</b> (and an old-format <code>fpSup.BIN</code> or <code>FPSUPUI</code>): copying over it leaves sups and format data files you did not tick this time on the card, and they still load.',
+      'Start the camera. Four white boxes top left mean it loaded; <code>fpSup\\LOAD.LOG</code> records whether each sup loaded.',
+    ],
+    format: ['Recording formats', 'Resolution, open gate, lossless compression'],
+    monitor: ['Monitoring & screen', 'What you see on the screen while shooting'],
+    focus: ['Focus', 'Autofocus'],
+    upcoming: ['In development', 'Not selectable yet: what is coming next'],
+    motion: ['Gyro & post', 'Data recorded with the clip, for post'],
+    development: ['Development', 'Not needed for shooting'],
+    dl: 'Download zip', pick: 'Tick at least one sup',
+    by: 'By', thanks: 'Thanks to', soon: 'Not released yet', dev: 'In development', long: 'Long-term development', updated: 'updated', formats: 'Formats to put on the card', guide: 'More',
+    clash: n => `Clashes with ${n}: on the card but off (.OFF)`,
+    clashOn: n => `Clashes with ${n}: this one runs, ${n} is saved as .OFF`,
+    swap: 'Run this one instead',
+    ok: n => `All ${n} checks pass`, fail: w => `Check failed: ${w}`,
+    nOff: n => `${n} sup(s) are saved as .OFF and do not run. To switch later, rename the clashing one to .OFF and the one you want back to .BIN, and restart.`,
+  },
+};
+/* EN / 中 (Simplified) / 繁 (Traditional), the site's three settings under the
+   site's own key, so a choice made anywhere on fpSup carries here.  Simplified
+   is the Traditional strings through CAT.t2s (assets/lang.js's table).  English
+   is the default, as on the rest of the site. */
+const LANG_KEY = 'fpsup-lang';
+let lang = (() => { try { const v = localStorage.getItem(LANG_KEY); return ['en', 'cn', 'zh'].includes(v) ? v : 'en'; } catch (e) { return 'en'; } })();
+const toCn = s => s.replace(/[\u3400-\u9fff]/g, c => CAT.t2s[c] || c);
+const cnOf = v => typeof v === 'string' ? toCn(v)
+  : Array.isArray(v) ? v.map(cnOf)
+  : typeof v === 'function' ? (...a) => toCn(v(...a)) : v;
+T.cn = Object.fromEntries(Object.entries(T.zh).map(([k, v]) => [k, cnOf(v)]));
+const about = p => lang === 'en' ? p.about.en : lang === 'cn' ? toCn(p.about.zh) : p.about.zh;
+let picked = [];                     // priority order: earlier wins a clash
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const more = (p, t) => p.guide
+  ? `<a class="guide" href="${esc(p.guide)}" target="_blank" rel="noopener">${esc(t.guide)} ↗</a>` : '';
+
+/* Authors other than the site's own, and credits.  The site's own sups carry
+   no author (user 2026-10-07: it is me, no need to say so), so most tiles
+   have no line at all. */
+function byline(p, t){
+  const parts = [];
+  if (p.author) parts.push(`${esc(t.by)} <b>${esc(p.author)}</b>`);
+  if (p.credits.length) parts.push(`${esc(t.thanks)} ${p.credits.map(c => `<b>${esc(c)}</b>`).join(', ')}`);
+  return parts.length ? `<span class="by">${parts.join(' · ')}</span>` : '';
+}
+
+function dataChips(p, t){
+  if (!(p.data_files || []).length || !picked.includes(p.id)) return '';
+  const offs = DATA_OFF[p.id] || [];
+  return `<div class="data" role="group" aria-label="${esc(t.formats)}">${p.data_files.map(d => {
+    const on = !offs.includes(d.path);
+    return `<label class="${on ? 'on' : ''}"><input type="checkbox" data-file="${esc(d.path)}" data-of="${p.id}" ${on ? 'checked' : ''}>${esc(d.label)}</label>`;
+  }).join('')}</div>`;
+}
+
+function tile(p, t, pl){
+  const ticked = picked.includes(p.id), parked = pl.off.includes(p.id);
+  const others = picked.filter(q => clashes(p.id, q)).map(q => byId(q).name).join(', ');
+  const potential = !ticked && CAT.products.some(q => clashes(p.id, q.id))
+    ? CAT.products.filter(q => clashes(p.id, q.id)).map(q => q.name).join(', ') : '';
+  let warn = '';
+  if (ticked && others)
+    warn = parked
+      ? `<span class="warn">${esc(t.clash(others))}<button type="button" data-swap="${p.id}">${esc(t.swap)}</button></span>`
+      : `<span class="warn">${esc(t.clashOn(others))}</span>`;
+  else if (potential) warn = `<span class="hint">⚠ ${esc(t.clash(potential).split(':')[0])}</span>`;
+  return `<div class="tile${ticked ? (parked ? ' parked' : ' on') : ''}">
+    <input type="checkbox" id="c-${p.id}" data-id="${p.id}" ${ticked ? 'checked' : ''}>
+    <label class="name" for="c-${p.id}">${esc(p.name)}<span class="m">v${esc(p.version)} · ${esc(t.updated)} ${esc(p.date)}</span></label>
+    <span class="desc">${esc(about(p) || p.about.en || '')}</span>
+    ${dataChips(p, t)}
+    ${warn}
+    ${more(p, t)}
+    ${byline(p, t)}
+  </div>`;
+}
+
+function pendingTile(p, t){
+  return `<div class="tile pending">
+    <input type="checkbox" disabled aria-label="${esc(t.soon)}">
+    <span class="name">${esc(p.name)}<span class="soon">${esc(p.stage === 'dev' ? t.dev : p.stage === 'long' ? t.long : t.soon)}</span></span>
+    <span class="desc">${esc(about(p) || p.about.en || '')}</span>
+    ${more(p, t)}
+    ${byline(p, t)}
+  </div>`;
+}
+
+function render(){
+  const t = T[lang], pl = plan(picked);
+  document.documentElement.lang = lang === 'zh' ? 'zh-Hant' : lang === 'cn' ? 'zh-Hans' : 'en';
+  document.documentElement.dataset.lang = lang;
+  document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t[el.dataset.t]; });
+  $('#steps').innerHTML = t.steps.map(x => `<li>${x}</li>`).join('');   // our own strings, not data
+  $("#thanks").innerHTML = t.flash;
+  document.querySelectorAll('[data-lang]').forEach(b => b.setAttribute('aria-pressed', b.dataset.lang === lang));
+
+  const openDev = !!document.querySelector('details.dev[open]') || picked.some(id => byId(id).category === 'development');
+  /* Released sups by category; everything still in development in one
+     section at the bottom (user 2026-10-08), above the folded development
+     tools.  A sup released but not yet on this page (stage 'unreleased')
+     stays in its category. */
+  const rank = p => (CAT.order || []).indexOf(p.id);
+  const byRank = (a, b) => rank(a) - rank(b);
+  const upcoming = p => p.stage === 'dev' || p.stage === 'long';
+  const section = c => {
+    const ps = CAT.products.filter(p => p.category === c).sort(byRank);
+    const pend = (CAT.pending || []).filter(p => p.category === c && !upcoming(p)).sort(byRank);
+    if (!ps.length && !pend.length) return '';
+    const [title, sub] = t[c] || [c, ''];
+    const n = ps.filter(p => picked.includes(p.id)).length;
+    const body = ps.map(p => tile(p, t, pl)).join('') + pend.map(p => pendingTile(p, t)).join('');
+    if (c === 'development')
+      return `<details class="dev"${openDev ? ' open' : ''}><summary>${esc(title)} — ${esc(sub)}</summary>${body}</details>`;
+    return `<section><h2>${esc(title)}<span>${ps.length ? (n ? n + ' / ' : '') + ps.length : ''}</span></h2><p class="sub">${esc(sub)}</p>${body}</section>`;
+  };
+  const soon = (CAT.pending || []).filter(upcoming).sort(byRank);
+  const [upTitle, upSub] = t.upcoming;
+  $('#tiles').innerHTML = CAT.categories.filter(c => c !== 'development').map(section).join('')
+    + (soon.length ? `<section><h2>${esc(upTitle)}<span>${soon.length}</span></h2><p class="sub">${esc(upSub)}</p>${soon.map(p => pendingTile(p, t)).join('')}</section>` : '')
+    + section('development');
+
+  const {files} = compose(picked);
+  const run = files.filter(f => f.p && !f.off);
+  const off = files.filter(f => f.off);
+  $('#tree').innerHTML = picked.length
+    ? ['AutoRun.txt', 'README.txt', 'fpSup/', '  LOADER.BIN', '  UI/0..4.BIN',
+       ...run.map(f => `<span class="new">  ${esc(f.p.file)}</span>`),
+       ...[...new Set(files.filter(f => f.dataOf).map(f => f.name.split('/')[1]))].flatMap(dir =>
+         [`<span class="new">  ${esc(dir)}/</span>`,
+          ...files.filter(f => f.dataOf && f.name.split('/')[1] === dir)
+                  .map(f => `<span class="new">    ${esc(f.name.split('/').pop())}</span>`)]),
+       ...off.map(f => `<span class="off">  ${esc(offName(f.p.file))}</span>`)].join('\n')
+    : esc(t.pick);
+  $('#hashtbl').innerHTML = files.map(f =>
+    `<tr><td>${esc(f.name)}</td><td>${f.data.length}</td><td>${f.sha256}</td></tr>`).join('');
+
+  const st = $('#status'), dl = $('#dl');
+  dl.textContent = t.dl;
+  if (!picked.length){ dl.disabled = true; st.textContent = ''; st.className = 'status'; return; }
+  const res = checks(picked), bad = res.find(r => !r.ok);
+  dl.disabled = !!bad;
+  st.className = 'status ' + (bad ? 'bad' : 'ok');
+  st.textContent = (bad ? t.fail(bad.what) : t.ok(res.length)) + (pl.off.length && !bad ? '\n' + t.nOff(pl.off.length) : '');
+  st.style.whiteSpace = 'pre-line';
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.lang){ lang = b.dataset.lang; try { localStorage.setItem(LANG_KEY, lang); } catch (e) {} render(); }
+  else if (b.dataset.swap){ picked = [b.dataset.swap, ...picked.filter(x => x !== b.dataset.swap)]; render(); }
+  else if (b.id === 'dl'){
+    if (checks(picked).some(r => !r.ok)) return render();
+    const blob = new Blob([zipFor(picked)], {type: 'application/zip'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = cardName(picked) + '.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+});
+document.addEventListener('change', e => {
+  const f = e.target.dataset && e.target.dataset.file;
+  if (f){
+    const of = e.target.dataset.of, cur = DATA_OFF[of] || [];
+    DATA_OFF[of] = e.target.checked ? cur.filter(x => x !== f) : [...cur, f];
+    return render();
+  }
+  const id = e.target.dataset && e.target.dataset.id;
+  if (!id) return;
+  picked = e.target.checked ? [...picked, id] : picked.filter(x => x !== id);
+  render();
+});
+render();
+</script>
+</body>
+</html>

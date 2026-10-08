@@ -50,6 +50,7 @@
 struct fpl_hold_commit {
     volatile uintptr_t file;            /* the frame's file buffer (seg[0]) */
     uint32_t payload, tiles;            /* padded payload bytes after 0x13400 */
+    uint32_t tile_width, tile_height;   /* the grid it was compressed with */
     uint32_t capacity, stock_bytes;     /* the file buffer's; the stock length */
     uint32_t tile_bytes[FPL_CODEC_TILE_MAX];   /* host order */
 };
@@ -111,9 +112,22 @@ struct fpl_frame_hold {
     uint32_t dma_failed;                /* header DMA refused: CPU copy used */
     uint32_t stalls;                    /* jobs the engine never finished: given
                                            up on, the frame sent as it was */
+    uint32_t job_start_us;              /* the running job's start (tick_us)     */
+    uint32_t job_last_us, job_max_us;   /* finished jobs: the last, the longest  */
+    uint32_t job_sum_us, job_count;     /* and all of them, for the mean         */
+    /* where a job's time goes (sums over finished jobs; 2026-10-07) */
+    uint32_t submit_sum_us;             /* fpl_codec_job_submit: F_INIT .. START   */
+    uint32_t finish_sum_us;             /* the poll that finished: fixups, CLOSE   */
+    uint32_t poll_sum;                  /* polls per job, summed                   */
+    uint32_t gap_sum_us;                /* last busy poll -> the finishing poll    */
+    uint32_t last_poll_us;              /* the running job's last busy poll        */
+    uint32_t cycle_sum_us, cycle_count; /* start to start, this lane              */
+    uint32_t last_start_us;
+    uint32_t stall_limit_us;            /* the running job's give-up time        */
     uint32_t lanes_full;                /* lane 0 only: a frame passed because
                                            every lane was busy */
     struct fpl_codec_input lane_in;
+    uint32_t tile_force;                /* tile_grid.h; set before the take */
 };
 enum fpl_hold_refusal {
     FPL_HOLD_R_DESCRIPTOR = 0, FPL_HOLD_R_RESERVE = 1, FPL_HOLD_R_HANDLE = 2,
@@ -136,6 +150,7 @@ struct fpl_hold_natives {
     void (*irq_restore)(uint32_t);
     void (*sleep_ms)(uint32_t);
     uint32_t (*dma)(uintptr_t to, uintptr_t from, uint32_t bytes);
+    uint32_t (*tick_us)(void);                             /* C002B6E0 */
 };
 extern const struct fpl_hold_natives fpl_hold_test_natives;
 #endif
@@ -183,6 +198,11 @@ uint32_t fpl_hold_abandon(struct fpl_frame_hold *);
 uint32_t fpl_lanes_arrive(struct fpl_frame_hold *const lane[2], uintptr_t creator,
                           uint32_t native_id, uint32_t argument);
 uint32_t fpl_lanes_task(struct fpl_frame_hold *const lane[2]);
+/* The task's pass, waiting up to `ticks` for a running job's engine flag
+ * instead of polling it (2026-10-07: polling with a 1 ms sleep looked every
+ * ~4 ms, finding a finished job 2 ms late on average). Bit 2: a running job
+ * was waited on -- the task need not sleep after this pass. */
+uint32_t fpl_lanes_task_wait(struct fpl_frame_hold *const lane[2], uint32_t ticks);
 uint32_t fpl_lanes_stop(struct fpl_frame_hold *const lane[2]);
 
 /* Writer's task, at the flush: the commit for this file buffer, or NULL.

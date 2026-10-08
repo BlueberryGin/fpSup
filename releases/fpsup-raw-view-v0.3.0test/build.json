@@ -1,0 +1,274 @@
+{
+ "product": "raw-view, Loader v3 sup",
+ "file": "45RAWV.BIN",
+ "sup_id": "RAWV",
+ "version": 1,
+ "card": false,
+ "from_card": null,
+ "sha256": "701532fe8bcb2a7c374b891bff83f80105d36b579b5c1dc95fc4130cfddcf71c",
+ "facts": {
+  "file_len": 38644,
+  "block": 577536,
+  "launch": 4452,
+  "resident": 6408,
+  "tables": 13476,
+  "ui_section": 13440,
+  "claims": 40,
+  "entry": 64,
+  "cfg_off": 32,
+  "blob_off": 4516,
+  "res_syms": {
+   "sv_next": 3352,
+   "pq_next": 1612,
+   "ai_next": 2876,
+   "stub_sv": 2880,
+   "stub_gs": 944
+  },
+  "defines": [
+   "RES_LEN=0x1908",
+   "TDATA_OFF=0x1908",
+   "CMBUF=0x200",
+   "CMTAB=0x290",
+   "UISHARE=1",
+   "V3=1",
+   "SCR_OFF=0x96F4",
+   "CLAIMS_OFF=0x822C",
+   "UI_APPLY=0x4E0B",
+   "UI_BLOCK=0x7B94",
+   "UI_LEN=0x698",
+   "SAT_MAX=1",
+   "NEXT_SV=0xD18",
+   "NEXT_PQ=0x64C",
+   "NEXT_AI=0xB3C",
+   "STUB_GS=0x3B0",
+   "STUB_DG=0x5B4",
+   "STUB_MA=0x658",
+   "STUB_MB=0x6D4",
+   "STUB_MC=0x6F8",
+   "STUB_FV=0xDEC",
+   "STUB_ML=0x7CC",
+   "STUB_EF=0x7E4",
+   "STUB_EN=0x86C",
+   "STUB_SA=0x8A8",
+   "STUB_SN=0x91C",
+   "STUB_MJ=0x650",
+   "STUB_MO=0xDB4",
+   "STUB_MX=0xDD0",
+   "STUB_ZC=0x950",
+   "STUB_ZS=0x9C4",
+   "STUB_ZNC=0xA1C",
+   "STUB_ZNS=0xA50",
+   "STUB_AI=0xA78",
+   "STUB_SV=0xB40",
+   "STUB_PQ=0x5E8"
+  ],
+  "claims_list": [
+   {
+    "address": "0xC0075CF4",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0088C60",
+    "bytes": 4,
+    "kind": "CHAIN"
+   },
+   {
+    "address": "0xC02B8E64",
+    "bytes": 4,
+    "kind": "CHAIN"
+   },
+   {
+    "address": "0xC02C4BE4",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC02C4BE8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC02C4C98",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC02C4C9C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0313244",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC032F728",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0568950",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05689A8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0568A3C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D028",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D3E8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D440",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D498",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D548",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D5A0",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC056D5F8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05818B8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0595734",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05957B0",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC059581C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0595854",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC059588C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0595908",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0595974",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05959AC",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05959E4",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC059DA1C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC05E2200",
+    "bytes": 4,
+    "kind": "CHAIN"
+   },
+   {
+    "address": "0xC05E5BEC",
+    "bytes": 4,
+    "kind": "SHARED_UI"
+   },
+   {
+    "address": "0xC06C07CC",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC06C07D0",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC06C07D8",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0D119FC",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC0D11A00",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC1D6ED48",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC2F1A06C",
+    "bytes": 4,
+    "kind": "EXCL"
+   },
+   {
+    "address": "0xC2F1A0D4",
+    "bytes": 4,
+    "kind": "EXCL"
+   }
+  ]
+ },
+ "sources": {
+  "projects/rawview/build/build_v3_rawview.py": "9fc781d0f0e3d91d79bda68861af9bb9dc109fdd9345b0534c7b65d204a25988",
+  "projects/rawview/build/build_rawview.py": "569746f57962845c40f7175974143cfd7dc3e5c0e347ecc5da3f83b31ba872c4",
+  "projects/rawview/build/rv_launch.S": "b315624a474d0d469f94881de2d79be0d7e6f77024899bb26d124e3a28b7a9ba",
+  "projects/rawview/build/rv_resident.S": "da60db1146dee06c96716410c4fdd4ceee6246f37098d8abc308cc1648e27ee6"
+ }
+}

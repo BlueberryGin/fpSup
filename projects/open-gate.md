@@ -432,7 +432,8 @@ Hook 的條件寫在 record 自己的內容上(`base == 1936×1090`),不是寫�
 ---
 
 **Notes / 相關筆記:** `FRAME_RATE_IS_VMAX`, `CANVAS_IS_NOT_THE_SETTINGS_BLOCK`,
-`CANVAS_MOVED_AT_C043A19C`
+`CANVAS_MOVED_AT_C043A19C`,
+[HSW / FastSpeed 當前開發狀態](../opengate/HSW_DEVELOPMENT_STATUS.md)
 
 ---
 

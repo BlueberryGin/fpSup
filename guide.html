@@ -27,7 +27,7 @@
   This page holds only what is the same for every product: install, start-up,
   removal, and the problems any card can have.  What each product does, what it
   needs and how to take it off again lives in guide/<id>.html -- one page per
-  product, linked from the table in step 2 and from each tile in fpSup-Merge.
+  product, linked from the table at the top and from each tile in fpSup-Merge.
   Media: assets/guide/, see that folder's README.
 -->
 
@@ -53,27 +53,33 @@
 <table>
   <thead><tr><th><span class="en">product</span><span class="zh">產品</span></th><th><span class="en">what it does</span><span class="zh">做什麼</span></th></tr></thead>
   <tbody>
-    <tr><td><a href="guide/og3k.html">fpSup-OG3K</a></td>
-        <td><span class="en">Open gate 3K: the full 3:2 sensor at 3024×2010 CinemaDNG. Needs an external SSD.</span><span class="zh">Open gate 3K:完整 3:2 感光元件,3024×2010 CinemaDNG。需要外接 SSD。</span></td></tr>
-    <tr><td><a href="guide/og2k.html">fpSup-OG2K</a></td>
-        <td><span class="en">Open gate 2K: the same 3:2 view at 2016×1344, at about the camera's own FHD data rate.</span><span class="zh">Open gate 2K:同樣的 3:2 視野,2016×1344,資料量約等於相機自己的 FHD。</span></td></tr>
-    <tr><td><a href="guide/lossless.html">fpSup-Lossless</a></td>
-        <td><span class="en">Lossless-compressed CinemaDNG by the camera's own hardware codec: a 3K 12-bit frame drops from 9.1 MB to about 3.2 MB. Test build.</span><span class="zh">用相機自己的硬體編碼器錄無損壓縮 CinemaDNG:3K 12-bit 一格從 9.1 MB 降到約 3.2 MB。測試版。</span></td></tr>
-    <tr><td><a href="guide/gyro.html">fpSup-Gyro</a></td>
-        <td><span class="en">Gyroflow motion files (<code>.gcsv</code> + <code>.json</code>) written next to each CinemaDNG clip.</span><span class="zh">在每段 CinemaDNG 片子旁邊寫出 Gyroflow 運動檔(<code>.gcsv</code> + <code>.json</code>)。</span></td></tr>
-    <tr><td><a href="guide/gyro-base.html">fpSup-Gyro-Base</a></td>
-        <td><span class="en">The gyro as one raw <code>.GYR</code> per take, converted afterwards in your browser.</span><span class="zh">每段拍攝寫一個原始 <code>.GYR</code>,之後在瀏覽器裡轉換。</span></td></tr>
-    <tr><td><a href="guide/raw-view.html">fpSup-RAW-View</a></td>
-        <td><span class="en">An LCD view that shows what the 12-bit CinemaDNG will record. Test build.</span><span class="zh">讓 LCD 顯示 12-bit CinemaDNG 實際會錄到的範圍。測試版。</span></td></tr>
+<!-- same products, names and one-liners as fpSup-Merge (tools/merge-v3, PRODUCTS) -->
+    <tr><td><a href="guide/res-custom.html">Res-Custom</a></td>
+        <td><span class="en">Custom recording resolutions in one sup: open gate OG2K, OG3K, OG3.5K, OG4K and S16.</span><span class="zh">多種自訂錄影解析度合一:Open Gate OG2K、OG3K、OG3.5K、OG4K 與 S16。</span></td></tr>
+    <tr><td><a href="guide/lossless.html">Lossless</a></td>
+        <td><span class="en">Lossless-compressed CinemaDNG, by the camera's own hardware codec.</span><span class="zh">用相機內建的硬體編碼器錄無損壓縮 CinemaDNG。</span></td></tr>
+    <tr><td><a href="guide/gyro2.html">Gyro2</a></td>
+        <td><span class="en">Gyro data inside every CinemaDNG frame; stabilise in DaVinci Resolve with the Gyroflow plugin (fpSup build).</span><span class="zh">把陀螺儀資料寫進每一格 CinemaDNG,用 Gyroflow 的 DaVinci Resolve 插件(fpSup 版)防震。</span></td></tr>
+    <tr><td><a href="guide/raw-view.html">RAW-View</a></td>
+        <td><span class="en">The screen shows the RAW about to be recorded: what clips on screen clips in the DNG.</span><span class="zh">螢幕顯示即將錄下的 RAW:畫面上過曝的地方，錄下來就是過曝。</span></td></tr>
+    <tr><td><a href="guide/screenflip.html">ScreenFlip</a></td>
+        <td><span class="en">Flip the rear screen 180°, mirror it, or both.</span><span class="zh">背螢幕翻轉 180°、左右鏡像，或兩者。</span></td></tr>
   </tbody>
 </table>
 </div>
+<p class="note en">Older-format cards &mdash; <a href="guide/og3k.html">OG3K</a>,
+<a href="guide/og2k.html">OG2K</a>, <a href="guide/gyro.html">Gyro</a>,
+<a href="guide/gyro-base.html">Gyro-Base</a> &mdash; are still made on
+<a href="tools/card-composer/">the previous fpSup-Merge</a>.</p>
+<p class="note zh">舊格式的卡 —— <a href="guide/og3k.html">OG3K</a>、<a href="guide/og2k.html">OG2K</a>、
+<a href="guide/gyro.html">Gyro</a>、<a href="guide/gyro-base.html">Gyro-Base</a> —— 仍在
+<a href="tools/card-composer/">舊版 fpSup-Merge</a> 製作。</p>
 
 <div class="warn">
-  <span class="en"><b>Steps 3 and 4 need a computer.</b> You have to copy files onto an SD card.
+  <span class="en"><b>Step 2 needs a computer.</b> You have to copy files onto an SD card.
   A phone cannot do this. If you are reading on a phone, read to the end now, then
   come back when you have a computer and a card reader.</span>
-  <span class="zh"><b>第 3、4 步需要電腦。</b>你得把檔案複製到記憶卡上,
+  <span class="zh"><b>第 2 步需要電腦。</b>你得把檔案複製到記憶卡上,
   <strong>手機做不到</strong>。如果你現在用手機看,先把整篇讀完,
   等你有電腦和讀卡機時再回來。</span>
 </div>
@@ -119,131 +125,50 @@
 </li>
 
 <li id="choose">
-  <h3><span class="en">Choose what goes on the card</span><span class="zh">選擇卡片上要放什麼</span></h3>
-  <p class="en">Open <a href="tools/card-composer/"><b>fpSup-Merge</b></a> and tick what you
-  want. It all runs in your browser. Nothing is uploaded and you install nothing.
-  Each product in the list links to its own page; so does the table at the top of
-  this one.</p>
-  <p class="zh">打開 <a href="tools/card-composer/"><b>fpSup-Merge</b></a>,勾選你要的東西。
-  全部在你的瀏覽器裡執行,<strong>不會上傳任何東西,你也不用安裝任何東西</strong>。
-  清單上每個產品都連到它自己的說明頁,這一頁最上面的表也是。</p>
-  <p class="en">Everything you tick goes on <b>one</b> card and works together. This is
-  the only place that can combine them. <b>Do not</b> combine two cards by copying
-  both sets of files yourself. That card will not start.</p>
-  <p class="zh">你勾的所有東西會放進<b>同一張</b>卡,而且可以一起運作。
-  這是<strong>唯一</strong>能把它們合併起來的地方。
-  <b>不要</b>自己把兩張卡的檔案都複製過去想手動合併 —— 那張卡<strong>開不起來</strong>。</p>
-  <div class="note en"><b>Two pairs cannot share a card.</b> OG3K and OG2K both need
-  the camera's third resolution slot. Gyro and Gyro-Base hook the same places in the
-  camera. The page will not let you tick both of a pair.</div>
-  <div class="note zh"><b>有兩組不能放在同一張卡上。</b>OG3K 和 OG2K 都需要相機的第三個解析度欄位;
-  Gyro 和 Gyro-Base 改的是相機裡同樣的地方。那個頁面<strong>不會讓你同一組兩個都勾</strong>。</div>
-  <p class="note en"><b>You will also see <code>shell</code> in the Development list. Leave it
-  off.</b> It lets a computer talk to the camera over USB and adds nothing you can use
-  on the camera itself. The setup is in
-  <a href="https://github.com/ijigen/fpSup/tree/main/fp_usb_shell">the fp_usb_shell
-  README</a>.</p>
-  <p class="note zh"><b>在 Development 清單裡你還會看到 <code>shell</code>,不要勾它。</b>
-  它讓電腦透過 USB 跟相機對話,在相機本身上<strong>用不到任何東西</strong>。
-  設定方式在 <a href="https://github.com/ijigen/fpSup/tree/main/fp_usb_shell">fp_usb_shell 的 README</a>。</p>
-
-  <h4 id="fast"><span class="en">Fast Start 3 (optional)</span><span class="zh">Fast Start 3(可選)</span></h4>
-  <p class="en">Under <b>Start-up</b> there is one switch, off by default. With it on, the
-  first start stores the loader in the camera's settings block. After that a
-  power-switch restart loads in about 1.4 seconds without the start-up script, and a
-  cold start runs a short script instead of the full one.</p>
-  <p class="zh"><b>Start-up</b> 底下有一個開關,預設是關的。打開的話,第一次開機會把載入程式存進
-  相機的設定區。之後撥電源開關重開,大約 1.4 秒就載入完成、不跑開機腳本;
-  冷開機則跑一段短腳本,不跑完整的那一份。</p>
-  <p class="warn en"><b>It is the one thing that is kept in the camera.</b> The settings
-  block survives a battery pull and stays when you delete <code>AutoRun.txt</code>.
-  Leave it off unless you want that. Power off with the USB cable unplugged: with it
-  attached, the next start is always a cold one.</p>
-  <p class="warn zh"><b>這是唯一會留在相機裡的東西。</b>設定區拔電池也還在,
-  刪掉 <code>AutoRun.txt</code> 也還在。除非你要這個效果,否則讓它關著。
-  關機時要拔掉 USB 線:插著線關機,下次一定是冷開機。</p>
-</li>
-
-<li id="download">
-  <h3><span class="en">Download the card</span><span class="zh">下載卡片</span></h3>
-  <p class="en">You get <b>one zip file</b>. Unzip it. Inside are:</p>
-  <p class="zh">你會拿到<b>一個 zip 檔</b>。把它解壓縮,裡面有:</p>
-  <div class="scroll">
-  <table>
-    <tbody>
-      <tr><td><code>AutoRun.txt</code></td><td><span class="en">the start-up script the camera runs</span><span class="zh">相機開機時執行的腳本</span></td></tr>
-      <tr><td><code>fpSup.BIN</code></td><td><span class="en">everything you ticked</span><span class="zh">你勾的所有東西</span></td></tr>
-      <tr><td><code>FPSUPUI</code></td><td><span class="en">a folder: the loading screen</span><span class="zh">一個資料夾:載入畫面</span></td></tr>
-      <tr><td><code>README.txt</code></td><td><span class="en">what is on the card, and its checksums. It does not go on the card.</span><span class="zh">卡片內容與檢查碼。不用放到卡上。</span></td></tr>
-    </tbody>
-  </table>
-  </div>
-  <p class="en">This is the same no matter how many things you ticked. Nothing else is
-  installed.</p>
-  <p class="zh">不管你勾了幾項都一樣。沒有別的東西要安裝。</p>
-  <p class="note en">A card downloaded before 2026-09-26 has only <code>AutoRun.txt</code> and a
-  second file (<code>fpSup.BIN</code>, or <code>VSHL.BIN</code> before 2026-09-19), and shows a
-  text banner instead of the boxes. Those files always travel together; use the set you
-  have, or download a new one.</p>
-  <p class="note zh">2026-09-26 以前下載的卡只有 <code>AutoRun.txt</code> 和第二個檔案
-  (<code>fpSup.BIN</code>,2026-09-19 以前叫 <code>VSHL.BIN</code>),開機時顯示文字橫幅而不是方格。
-  這些檔案永遠是一組的,用你手上那一組,或重新下載。</p>
-</li>
-
-<li id="copy">
-  <h3><span class="en">Copy the files to the card</span><span class="zh">把檔案複製到卡上</span></h3>
-  <p class="en">Turn the camera off. Take the card out and put it in a card reader.</p>
-  <p class="zh">關機。把卡拿出來,插進讀卡機。</p>
-  <p class="en">Copy <code>AutoRun.txt</code>, <code>fpSup.BIN</code> and the whole
-  <code>FPSUPUI</code> folder to the <b>top level</b> of the card the camera starts from:</p>
-  <p class="zh">把 <code>AutoRun.txt</code>、<code>fpSup.BIN</code> 和整個
-  <code>FPSUPUI</code> 資料夾,複製到相機開機用的那張卡的<b>最上層</b>:</p>
-  <div class="scroll">
-  <table>
-    <thead><tr><th><span class="en">correct</span><span class="zh">正確</span></th><th><span class="en">will not work</span><span class="zh">不會動</span></th></tr></thead>
-    <tbody>
-      <tr><td><code>/AutoRun.txt</code><br><code>/fpSup.BIN</code><br><code>/FPSUPUI/0.BIN</code> &hellip; <code>4.BIN</code></td>
-          <td><code>/fpSup/AutoRun.txt</code><br><code>/DCIM/AutoRun.txt</code><br><code>/0.BIN</code> <span class="en">(outside the folder)</span><span class="zh">(不在資料夾裡)</span></td></tr>
-    </tbody>
-  </table>
-  </div>
-  <figure class="shot">
-    <img class="actual" src="assets/guide/05-card-root.webp" width="268" height="180"
-         alt="An SD card opened on a computer: the start-up files at the top level,
-              beside the CINEMA and DCIM folders">
-    <figcaption class="en">The files sit at the top level, beside <code>CINEMA</code> and
-      <code>DCIM</code>. This picture is of an older card; a new one also has the
-      <code>FPSUPUI</code> folder there.</figcaption>
-    <figcaption class="zh">檔案放在最上層,跟 <code>CINEMA</code> 和 <code>DCIM</code> 並排。
-      這張圖是舊的卡;新的卡那裡還會多一個 <code>FPSUPUI</code> 資料夾。</figcaption>
-  </figure>
-  <p class="en">Do not rename anything. Do not convert anything. Check that the small lock
-  switch on the side of the card is <b>not</b> locked. A locked card is the most common
-  reason nothing happens in step 5.</p>
-  <p class="zh">不要改名字。不要轉換任何格式。檢查卡片側邊那個小鎖扣,確認它<b>沒有</b>鎖上。
-  卡片被鎖住,是第 5 步什麼都沒發生最常見的原因。</p>
+  <span id="download"></span><span id="copy"></span>
+  <h3><span class="en">Make the card in fpSup-Merge</span><span class="zh">在 fpSup-Merge 做卡</span></h3>
+  <p class="en">Open <a href="tools/merge-v3/"><b>fpSup-Merge</b></a>, tick what you want and
+  download the zip. It all runs in your browser: nothing is uploaded and you install
+  nothing. <b>How to put it on the card is written once, on that page,</b> under
+  <a href="tools/merge-v3/#install">Install</a>.</p>
+  <p class="zh">打開 <a href="tools/merge-v3/"><b>fpSup-Merge</b></a>,勾你要的，下載 zip。
+  全部在你的瀏覽器裡執行,<strong>不會上傳任何東西，你也不用安裝任何東西</strong>。
+  <b>怎麼放進卡，只寫在那一頁</b>的<a href="tools/merge-v3/#install">安裝說明</a>。</p>
+  <p class="en">A card is a folder: <code>AutoRun.txt</code> and a <code>fpSup</code> folder
+  with one file per product, at the <b>top level</b> of the SD card. Everything you tick
+  works together. Products that cannot run together both go on the card, and the page
+  says which one is switched off.</p>
+  <p class="zh">一張卡就是一個資料夾:<code>AutoRun.txt</code> 加上 <code>fpSup</code> 資料夾，
+  每個產品一個檔案，放在 SD 卡<b>最上層</b>。你勾的東西會一起運作;
+  不能同時運作的兩個也都會放進卡，頁面會告訴你哪一個是關著的。</p>
+  <p class="en">Check that the small lock switch on the side of the card is <b>not</b>
+  locked. A locked card is the most common reason nothing happens at start-up.</p>
+  <p class="zh">檢查卡片側邊那個小鎖扣，確認它<b>沒有</b>鎖上。
+  卡片被鎖住，是開機時什麼都沒發生最常見的原因。</p>
+  <p class="note en">OG3K, OG2K, Gyro and Gyro-Base are older-format cards, still made on
+  <a href="tools/card-composer/">the previous fpSup-Merge</a>. A card holds one format
+  or the other, not both.</p>
+  <p class="note zh">OG3K、OG2K、Gyro、Gyro-Base 是舊格式的卡，仍在
+  <a href="tools/card-composer/">舊版 fpSup-Merge</a> 製作。一張卡只能是其中一種格式，不能混用。</p>
 </li>
 
 <li id="boot">
-  <h3><span class="en">Put the card in and turn the camera on</span><span class="zh">把卡插進去,開機</span></h3>
-  <p class="en">Start with the <b>USB cable unplugged</b>. The fpSup logo appears in the top
-  left and <b>four boxes fill one by one</b>. All four white means it is loaded. The
-  camera's own screen comes back two seconds later.</p>
-  <p class="zh">開機時<b>不要插 USB 線</b>。左上角會出現 fpSup 標誌,
-  <b>四個方格一個一個填滿</b>。四個都變白就表示載入完成,
-  兩秒後相機自己的畫面會回來。</p>
+  <h3><span class="en">Put the card in and turn the camera on</span><span class="zh">把卡插進去，開機</span></h3>
+  <p class="en">The fpSup logo appears in the top left and <b>four boxes fill one by
+  one</b>. All four white means it is loaded. The camera's own screen comes back two
+  seconds later. <code>fpSup\LOAD.LOG</code> on the card records whether each product
+  loaded.</p>
+  <p class="zh">左上角會出現 fpSup 標誌,<b>四個方格一個一個填滿</b>。四個都變白就表示載入完成，
+  兩秒後相機自己的畫面會回來。卡上的 <code>fpSup\LOAD.LOG</code> 會記錄每個產品有沒有載入。</p>
   <p class="en"><b>Boxes that stop filling</b> mean the load stopped there. Go to
   <a href="#trouble">the problems list</a> instead of trying again.</p>
   <p class="zh"><b>方格停在一半</b>,表示載入停在那裡。
   <strong>不要再試一次</strong>,去看<a href="#trouble">問題清單</a>。</p>
   <p class="note en">This happens every time you turn the camera on, as long as the files
   are on the card. The camera reads the card and builds it all again in memory each
-  time. With <a href="#fast">Fast Start 3</a> on, a power-switch restart shows the four
-  boxes already full at about three seconds, with no filling.</p>
+  time.</p>
   <p class="note zh">只要檔案還在卡上,<strong>每次開機都會這樣</strong>。
-  相機每次都重新讀卡、在記憶體裡把整套東西再建一次。
-  開了 <a href="#fast">Fast Start 3</a> 的話,撥電源開關重開時,大約三秒會直接出現
-  四個已經填滿的方格,不會一格一格填。</p>
+  相機每次都重新讀卡、在記憶體裡把整套東西再建一次。</p>
 </li>
 
 </ol>
@@ -284,10 +209,10 @@ something that is no longer there. <b>Each product's page says what to set back.
 <p class="en"><b>Then:</b> delete the files from the card, or take the card out, and
 switch the camera off. As it powers off, the card writes back every part of the camera's
 memory it changed, so the camera is back to normal. Nothing was written to the camera's
-flash, unless you turned on <a href="#fast">Fast Start 3</a>.</p>
+flash, unless an older-format card had Fast Start 3 on.</p>
 <p class="zh"><b>然後:</b>把卡上的檔案刪掉,或是把卡拿出來,然後關機。
 相機關機時,卡片會把它改過的每一處記憶體寫回原狀,所以相機就恢復正常了。
-除非你開了 <a href="#fast">Fast Start 3</a>,否則相機的 flash 裡沒有被寫入任何東西。</p>
+除非舊格式的卡開了 Fast Start 3,否則相機的 flash 裡沒有被寫入任何東西。</p>
 <div class="note en"><b>Did you already do it in the wrong order?</b> Nothing is
 broken. Put the card back with its files, turn the camera on so the setting exists
 again, set it back to a normal one, and then remove the files. The setting is only a
@@ -312,17 +237,19 @@ no motion files, a strange picture — are in the table on that product's page.<
         <code>AutoRun.txt</code>、而且在卡的<strong>最上層</strong>。
         另外確認卡片上的鎖扣是關的。</span></td></tr>
     <tr><td><span class="en">The logo appears but no boxes</span><span class="zh">出現標誌,但沒有方格</span></td>
-        <td><span class="en">The <code>FPSUPUI</code> folder is missing or not at the top level.
-        Copy the whole folder from the zip.</span><span class="zh"><code>FPSUPUI</code>
-        資料夾不見了,或不在最上層。從 zip 裡把整個資料夾複製過去。</span></td></tr>
+        <td><span class="en">The <code>fpSup</code> folder (with <code>UI</code> inside it) is
+        missing or not at the top level. Copy the whole folder from the zip.</span><span class="zh"><code>fpSup</code>
+        資料夾(裡面有 <code>UI</code>)不見了，或不在最上層。從 zip 裡把整個資料夾複製過去。</span></td></tr>
     <tr><td><span class="en">The boxes stop filling</span><span class="zh">方格停在一半</span></td>
         <td><span class="en">The load stopped there. Download the card again instead of
         reusing it. Tell us on Discord how many boxes filled.</span><span class="zh">載入停在那裡。
         <strong>重新下載一張卡</strong>,不要沿用原本那張。到 Discord 告訴我們填到第幾格。</span></td></tr>
-    <tr><td><span class="en">It loaded but nothing changed</span><span class="zh">載入了,但什麼都沒變</span></td>
+    <tr><td><span class="en">It loaded but nothing changed</span><span class="zh">載入了，但什麼都沒變</span></td>
         <td><span class="en">Check where you are looking: each product changes a different
-        place. Its page says where.</span><span class="zh">先確認你在看哪裡:
-        每個產品改的地方不一樣,它的頁面有寫在哪裡。</span></td></tr>
+        place. Its page says where. <code>fpSup\LOAD.LOG</code> says whether the product
+        loaded; a file ending <code>.OFF</code> is switched off.</span><span class="zh">先確認你在看哪裡:
+        每個產品改的地方不一樣，它的頁面有寫在哪裡。<code>fpSup\LOAD.LOG</code> 會寫產品有沒有載入;
+        副檔名是 <code>.OFF</code> 的是關著的。</span></td></tr>
     <tr><td><span class="en">Recording stops after a few seconds</span><span class="zh">錄影幾秒後就停了</span></td>
         <td><span class="en">The card is too slow. <a href="#card">See above</a>, and the
         speed on the product's page.</span><span class="zh">卡太慢。見<a href="#card">上面</a>,

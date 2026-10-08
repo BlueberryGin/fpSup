@@ -357,7 +357,7 @@ def main():
            # A soft power cycle can leave a previous session's diagnostic patch
            # in the F_WRITE prologue.  Every ordinary image puts it back.
            '--also', f'0x{F_WRITE_AT:08X}:{HERE / "phase_fwrite_restore.S"}',
-           '--also', f'0x{PARK_AT:08X}:{SHELL / "templates" / "park.S"}',
+           '--also', f'0x{PARK_AT:08X}:{SHELL / "asm" / "park.S"}',
            '--out', str(out / 'AutoRun.txt')]
     for at, blob, why in secs:
         f = tmp / f'{at:08x}.bin'

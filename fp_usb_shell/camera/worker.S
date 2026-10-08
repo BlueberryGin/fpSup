@@ -42,9 +42,11 @@
  *     +14 payload, 44 bytes
  *
  *   A reply may span several frames: flags bit 0 means another frame follows.
- *   A command may be longer than the payload field — the worker reads it as a
- *   NUL-terminated string, and the OUT TRB is 1 KiB, so the text may run past
- *   byte 64 of the same transfer.  The CRC still covers only the first 64.
+ *   A shell command may be longer than the payload field — it is read as a
+ *   NUL-terminated string. The 16 KiB OUT TRB also accepts a binary upload:
+ *   CMD 4 carries destination, length and data CRC in the first frame, then
+ *   up to 16320 bytes from offset 64. CMD 5 reports capability and the last
+ *   accepted tuple. The frame CRC still covers only the first 64 bytes.
  *
  * COMMANDS.  One: `shl <line>`, which hands <line> to the firmware's own shell
  * dispatcher and returns whatever it printed.  That already includes `mem set`
@@ -64,7 +66,8 @@
  *     pool +0x0000             FPSH frame buffer, 4 KiB
  *     pool +0x2000             shell capture buffer, 16 KiB (derived from the
  *                              pool pointer, never hard-coded)
- *     pool +0x6000             free, for the logger's own buffers
+ *     pool +0x6900             upload last-accepted tuple (16 bytes)
+ *     pool +0x10000            file-staging region eligible for binary upload
  *
  * STATE.  Sixteen words at 0xC072F000, readable with
  *     shl mem save \WSTATE.BIN 0xC072F000,,0x40
@@ -72,7 +75,7 @@
  *     +00 'VSHL'      +04 task id      +08 last round faulted   +0C rounds
  *     +10 OUT arm     +14 OUT wait     +18 IN arm        +1C IN wait
  *     +20 served      +24 faults       +28 gate holds    +2C last USB_STATE
- *     +30 last DALEPENA  +34 first fault: which call  +38 what it returned
+ *     +30 last DALEPENA  +34 phase of this command (FAULT_LOG)  +38 unused
  *     +3C first gate reason (0x80000000 | DALEPENA<<8 | state)
  * ========================================================================== */
 
@@ -153,8 +156,54 @@
  * after seven of seventy sensor modes.  The pool has room to spare and the CPU
  * copies out of it, so no coherency handling is needed. */
 .equ POOL_FAULTS, 0x6800        /* ten fault counters, past the buffers */
+/* Every fault, as it happened: pool+FAULT_LOG holds a running count, then a
+ * ring of 16 x 32 bytes at +0x10 -- {rounds, phase, command, sequence,
+ * arm_out, wait_out, arm_in, wait_in}.  The four results are this command's
+ * own (cleared when it arrives); phase says how far it got (1 arrived, 2 MEMW
+ * data armed, 3 READY out, 4 data in, 5 MEMR block armed).  Read it with
+ * `mem get` after a failure instead of guessing which call it was. */
+.equ FAULT_LOG,   0x6C00
 .equ CAP_OFF,     0x2000          /* capture buffer sits this far past the frame */
 .equ CAP_MAX,     0x4000          /* 16 KiB                                   */
+.equ UP_OUT_MAX,  0x4000          /* one OUT TRB: frame plus binary data       */
+.equ UP_DATA_MAX, 0x3FC0          /* 16 KiB less the 64-byte FPSH frame       */
+.equ UP_STATE,    0x6900          /* worker pool: last accepted upload tuple  */
+.equ UP_MIN_OFF,  0x10000         /* only the worker's file-staging region    */
+
+/* --- MEM1: memory to and from the host with no copy, both directions -------
+ * Each transfer is one TRB pointed at the caller's bytes, up to XFER_MAX, so
+ * the CPU never touches the data: the same thing that took reads from 73 to
+ * 355 MB/s.  What protects the camera is the window table, not the host:
+ *   - every byte of a transfer must lie inside ONE window carrying the
+ *     permission (the implicit one is this worker's own pool: read all of it,
+ *     write only the staging region past UP_MIN_OFF);
+ *   - the host grants windows, but a window must sit in the DMA-reachable
+ *     cached alias [DMA_LO, DMA_HI); a writable one must also start at or past
+ *     WRITE_LO and may not overlap the pool header (frames, capture buffer,
+ *     this table) or this worker's own code;
+ *   - a write arms the WHOLE rounded-up length inside the window, so a host
+ *     that sends more than it announced still cannot leave it;
+ *   - a write whose data never arrives is ended (EndTransfer) before the
+ *     worker does anything else, so late bytes cannot land after a failure.
+ * DMA_LO..DMA_HI is where the allocator's blocks have been seen (0x45xxxxxx,
+ * 0x5F9xxxxx); the image at 0xC0000000 is mapped some other way and is not
+ * reachable this way.  WRITE_LO keeps writes off 0x40000000..0x44000000, which
+ * is suspected (not shown) to alias the image and its data. */
+.equ CMD_MEMW,    6
+.equ CMD_MEMR,    7
+.equ CMD_WIN,     8
+.equ CMD_MEMCAPS, 9
+.equ WIN_OFF,     0x6A00          /* worker pool: 8 x {base, len, perm}       */
+.equ WIN_SLOTS,   8
+.equ PERM_R,      1
+.equ PERM_W,      2
+.equ OPT_SYNC,    1               /* whole D-cache clean+invalidate around DMA */
+.equ OPT_CRC,     2               /* MEMW: the camera CRCs what landed         */
+.equ XFER_MAX,    0xFFFC00        /* 24-bit TRB length, rounded to 1 KiB       */
+.equ DMA_LO,      0x40000000
+.equ DMA_HI,      0x80000000
+.equ WRITE_LO,    0x44000000
+.equ MEM_TMO,     500             /* ms, plus one per 32 KiB of the transfer  */
 
 /* --- bootstrap ------------------------------------------------------------ */
 .equ HOOK_SITE,   0xC00D0794      /* gyro callback, borrowed once             */
@@ -437,6 +486,24 @@ capture_done:
 serve:
     push    {r4, r5, r6, r7, r8, r9, r10, lr}   @ 8 words keeps sp 8-byte aligned
     LDA     r4, STATE
+    /* A new worker, including a live swap, must not report a previous pool
+     * user's bytes as a completed upload.  The tuple is private to this task
+     * and lives clear of the command/capture and staging regions. */
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    add     r0, r0, #UP_STATE
+    mov     r1, #0
+    str     r1, [r0]
+    str     r1, [r0, #4]
+    str     r1, [r0, #8]
+    str     r1, [r0, #12]
+    /* Nor inherit a previous worker's windows: a grant is for this worker's
+     * lifetime, and the host asks again after a swap. */
+    add     r0, r0, #(WIN_OFF - UP_STATE)
+    mov     r2, #(WIN_SLOTS * 3)
+1:  str     r1, [r0], #4
+    subs    r2, r2, #1
+    bne     1b
 
 next_round:
     ldr     r0, [r4, #0x0C]
@@ -499,17 +566,39 @@ no_swap:
 
     mov     r0, #LOG_OUT
     movw    r1, #TIMEOUT
-    LDA     r12, FN_WAIT
-    blx     r12
+    bl      wait_done
     str     r0, [r4, #0x14]
     cmp     r0, #0
     bne     fault                       @ idle timeout: just arm again
+got_command:
+    bl      out_owned
+    mov     r0, #1
+    str     r0, [r4, #0x34]             @ phase 1: a command arrived
+    mov     r0, #0
+    str     r0, [r4, #0x10]             @ this command's results, from scratch
+    str     r0, [r4, #0x14]
+    str     r0, [r4, #0x18]
+    str     r0, [r4, #0x1C]
 
     LDA     r0, FRAMEBUF
     ldr     r6, [r0]
     mov     r0, #UNCACHED
     add     r6, r6, r0                  @ r6 = uncached view of the frame
     add     r10, r6, #20                @ payload
+
+    ldrb    r0, [r6, #5]
+    cmp     r0, #4                     @ CMD_UPLOAD: absolute, CRC-checked write
+    beq     receive_upload
+    cmp     r0, #5                     @ CMD_UPLOAD_CAPS: safe old-worker probe
+    beq     reply_upload_caps
+    cmp     r0, #CMD_MEMW              @ MEM1: TRB straight at the destination
+    beq     mem_write
+    cmp     r0, #CMD_MEMR              @ MEM1: TRB straight at the source
+    beq     mem_read
+    cmp     r0, #CMD_WIN               @ MEM1: grant or revoke a window
+    beq     win_set
+    cmp     r0, #CMD_MEMCAPS           @ MEM1: capability and window table
+    beq     mem_caps
 
     ldr     r0, [r10]
     LDA     r1, 0x206C6873              @ "shl "
@@ -574,6 +663,554 @@ reply_nothing:
     LDA     r0, FRAMEBUF
     ldr     r8, [r0]
     add     r8, r8, #CAP_OFF
+    b       reply_entry
+
+/* --- upload protocol: one 16 KiB OUT, then one FPSH acknowledgment ---------
+ * The source is the uncached view of the worker-owned frame buffer. Only
+ * pool+0x10000..pool+1 MiB is writable, and the host still checks its file
+ * object reservation and reads back the entire staging region before file I/O.
+ * The last accepted tuple is published before the acknowledgment; a lost
+ * reply can be resolved with CMD_UPLOAD_CAPS rather than blindly appending. */
+reply_upload_caps:
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    add     r0, r0, #UP_STATE
+    LDA     r1, 0x31305055              @ "UP01" in little-endian
+    str     r1, [r6, #20]
+    ldr     r1, [r0]
+    str     r1, [r6, #24]
+    ldr     r1, [r0, #4]
+    str     r1, [r6, #28]
+    ldr     r1, [r0, #8]
+    str     r1, [r6, #32]
+    ldr     r1, [r0, #12]
+    str     r1, [r6, #36]
+    mov     r0, #0
+    strh    r0, [r6, #6]                @ never inherit the request's raw flag
+    add     r8, r6, #20
+    mov     r9, #20
+    b       reply_entry
+
+receive_upload:
+    ldr     r0, [r6]
+    LDA     r1, 0x48535046              @ "FPSH"
+    cmp     r0, r1
+    bne     upload_bad_frame
+    ldrb    r0, [r6, #4]
+    cmp     r0, #1
+    bne     upload_bad_frame
+    ldrh    r0, [r6, #6]
+    cmp     r0, #0
+    bne     upload_bad_frame
+    ldrh    r0, [r6, #12]
+    cmp     r0, #12                    @ dest, length, data CRC
+    bne     upload_bad_frame
+    ldrh    r0, [r6, #14]
+    cmp     r0, #0
+    bne     upload_bad_frame
+    ldr     r7, [r6, #16]
+    mov     r0, #0
+    str     r0, [r6, #16]
+    mov     r0, r6
+    mov     r1, #FRAME
+    bl      crc_block
+    str     r7, [r6, #16]
+    cmp     r3, r7
+    bne     upload_bad_frame
+
+    ldr     r8, [r6, #20]               @ absolute destination
+    ldr     r9, [r6, #24]               @ actual data length
+    ldr     r7, [r6, #28]               @ expected data CRC
+    cmp     r9, #0
+    beq     upload_bad_bounds
+    movw    r0, #UP_DATA_MAX
+    cmp     r9, r0
+    bhi     upload_bad_bounds
+    orr     r0, r8, r9
+    tst     r0, #3                     @ the file staging path is word-aligned
+    bne     upload_bad_bounds
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    add     r1, r0, #UP_MIN_OFF
+    cmp     r8, r1
+    blo     upload_bad_bounds
+    add     r0, r0, #WPOOL_BYTES
+    adds    r1, r8, r9
+    bcs     upload_bad_bounds
+    cmp     r1, r0
+    bhi     upload_bad_bounds
+
+    add     r0, r6, #FRAME
+    mov     r1, r9
+    bl      crc_block
+    cmp     r3, r7
+    bne     upload_bad_crc
+
+    add     r0, r6, #FRAME
+    mov     r1, r8
+    mov     r2, r9
+upload_copy:
+    ldr     r3, [r0], #4
+    str     r3, [r1], #4
+    subs    r2, r2, #4
+    bne     upload_copy
+
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    add     r0, r0, #UP_STATE
+    ldr     r1, [r6, #8]               @ accepted sequence
+    str     r1, [r0]
+    str     r8, [r0, #4]
+    str     r9, [r0, #8]
+    str     r7, [r0, #12]
+
+    mov     r0, #0                     @ acknowledgment: status, dest, len, CRC
+    str     r0, [r6, #20]
+    str     r8, [r6, #24]
+    str     r9, [r6, #28]
+    str     r7, [r6, #32]
+    mov     r9, #16
+    b       upload_reply
+
+upload_bad_frame:
+    mov     r0, #1
+    b       upload_reject
+upload_bad_bounds:
+    mov     r0, #2
+    b       upload_reject
+upload_bad_crc:
+    mov     r0, #3
+upload_reject:
+    str     r0, [r6, #20]
+    mov     r9, #4
+upload_reply:
+    mov     r0, #0
+    strh    r0, [r6, #6]
+    add     r8, r6, #20
+    b       reply_entry
+
+/* --- MEM1 (see the constants) ----------------------------------------------
+ * Rejection codes, in payload word 0 and in the header's status:
+ *   1 frame (magic, version, flags or CRC)   2 arguments
+ *   4 no window covers it with that permission
+ *   5 StartTransfer refused the data TRB     6 the data never arrived
+ * A reply frame keeps the request's header, so the sequence still matches. */
+
+/* CMD 8: payload {slot, base, length, perm}.  perm 0 revokes. */
+win_set:
+    bl      frame_ok
+    cmp     r0, #0
+    movne   r0, #1
+    bne     win_reply
+    ldr     r0, [r6, #20]               @ slot
+    cmp     r0, #WIN_SLOTS
+    bhs     win_bad
+    LDA     r1, FRAMEBUF
+    ldr     r1, [r1]
+    add     r1, r1, #WIN_OFF
+    add     r0, r0, r0, lsl #1
+    add     r7, r1, r0, lsl #2          @ r7 = this slot, 12 bytes
+    ldr     r8, [r6, #24]               @ base
+    ldr     r9, [r6, #28]               @ length
+    ldr     r5, [r6, #32]               @ perm
+    cmp     r5, #0
+    beq     win_store                   @ revoke: always allowed
+    bics    r0, r5, #(PERM_R | PERM_W)
+    bne     win_bad
+    orr     r0, r8, r9
+    tst     r0, #3
+    bne     win_bad
+    cmp     r9, #0
+    beq     win_bad
+    adds    r1, r8, r9                  @ r1 = end, exclusive
+    bcs     win_bad
+    cmp     r8, #DMA_LO
+    blo     win_bad
+    cmp     r1, #DMA_HI
+    bhi     win_bad
+    tst     r5, #PERM_W
+    beq     win_store
+    cmp     r8, #WRITE_LO
+    blo     win_bad
+    LDA     r2, FRAMEBUF
+    ldr     r3, [r2]                    @ pool header [pool, pool+UP_MIN_OFF)
+    add     r12, r3, #UP_MIN_OFF
+    cmp     r8, r12
+    bhs     1f
+    cmp     r3, r1
+    blo     win_bad
+1:  ldr     r3, [r2, #8]                @ WCODE_PTR: this code, every byte of it
+    ldr     r12, mem_body_len
+    add     r12, r3, r12
+    cmp     r8, r12
+    bhs     win_store
+    cmp     r3, r1
+    blo     win_bad
+win_store:
+    cmp     r5, #0
+    moveq   r8, #0
+    moveq   r9, #0
+    str     r8, [r7]
+    str     r9, [r7, #4]
+    str     r5, [r7, #8]
+    mov     r0, #0
+    b       win_reply
+win_bad:
+    mov     r0, #2
+win_reply:
+    str     r0, [r6, #20]
+    mov     r9, #4
+    b       upload_reply
+
+/* CMD 9: "MEM1", XFER_MAX, pool, pool size, then the 8 windows: 112 bytes,
+ * under BULK_MIN, so it goes out in CPU-copied frames like any short reply. */
+mem_caps:
+    LDA     r0, FRAMEBUF
+    ldr     r1, [r0]
+    add     r8, r1, #CAP_OFF            @ build it in the capture buffer
+    LDA     r2, 0x314D454D              @ "MEM1"
+    str     r2, [r8]
+    LDA     r2, XFER_MAX
+    str     r2, [r8, #4]
+    str     r1, [r8, #8]
+    mov     r2, #WPOOL_BYTES
+    str     r2, [r8, #12]
+    add     r1, r1, #WIN_OFF
+    add     r2, r8, #16
+    mov     r3, #(WIN_SLOTS * 3)
+1:  ldr     r0, [r1], #4
+    str     r0, [r2], #4
+    subs    r3, r3, #1
+    bne     1b
+    mov     r0, #0
+    strh    r0, [r6, #6]
+    mov     r9, #(16 + WIN_SLOTS * 12)
+    b       reply_entry
+
+/* CMD 7: payload {address, length, options}.  The block goes out in ONE
+ * transfer from where it lies, no header: the host asked for exactly this many
+ * bytes.  A refusal is a 64-byte frame instead, which ends the host's read on
+ * a short packet and carries the request's sequence and a non-zero status. */
+mem_read:
+    bl      frame_ok
+    cmp     r0, #0
+    movne   r0, #1
+    bne     mem_refuse
+    ldr     r8, [r6, #20]
+    ldr     r9, [r6, #24]
+    ldr     r7, [r6, #28]
+    LDA     r0, XFER_MAX
+    cmp     r9, r0
+    movhi   r0, #2
+    bhi     mem_refuse
+    mov     r0, r8
+    mov     r1, r9
+    mov     r2, #PERM_R
+    bl      range_ok
+    cmp     r0, #0
+    bne     mem_refuse
+    tst     r7, #OPT_SYNC               @ what the CPU wrote, out to DRAM
+    beq     1f
+    LDA     r12, F_DCACHE
+    blx     r12
+1:  mov     r0, #5
+    str     r0, [r4, #0x34]             @ phase 5: MEMR block
+    bl      arm_in_block
+    str     r0, [r4, #0x18]
+    cmp     r0, #0
+    bne     fault
+    mov     r0, #LOG_IN
+    mov     r1, #MEM_TMO
+    add     r1, r1, r9, lsr #15
+    bl      wait_done
+    str     r0, [r4, #0x1C]
+    cmp     r0, #0
+    bne     fault
+    b       reply_done
+
+/* CMD 6: payload {address, length, options}.  Two phases, so the host never
+ * sends a byte the worker has not agreed to put somewhere:
+ *   1. check, arm the OUT TRB at the destination, answer READY {0, addr, armed}
+ *   2. the host sends exactly `length` bytes; answer DONE {0, received, crc}
+ * The data TRB is armed BEFORE READY goes out, so the host cannot outrun it. */
+mem_write:
+    bl      frame_ok
+    cmp     r0, #0
+    movne   r0, #1
+    bne     mem_refuse
+    ldr     r8, [r6, #20]               @ destination
+    ldr     r9, [r6, #24]               @ announced length
+    ldr     r7, [r6, #28]               @ options
+    cmp     r9, #0
+    moveq   r0, #2
+    beq     mem_refuse
+    LDA     r0, XFER_MAX
+    cmp     r9, r0
+    movhi   r0, #2
+    bhi     mem_refuse
+    add     r5, r9, #0x3FC
+    add     r5, r5, #3
+    bic     r5, r5, #0x3FC
+    bic     r5, r5, #3                  @ r5 = armed: whole 1 KiB packets
+    mov     r0, r8
+    mov     r1, r5                      @ the window must hold all of it
+    mov     r2, #PERM_W
+    bl      range_ok
+    cmp     r0, #0
+    bne     mem_refuse
+    tst     r7, #OPT_SYNC               @ no dirty line may land on top later
+    beq     1f
+    LDA     r12, F_DCACHE
+    blx     r12
+1:  mov     r0, #TO_BUS
+    add     r0, r8, r0
+    LDA     r1, TRB_OUT
+    ldr     r1, [r1]
+    str     r0, [r1]
+    mov     r0, #0
+    str     r0, [r1, #4]
+    str     r5, [r1, #8]
+    movw    r0, #TRB_ARMED
+    str     r0, [r1, #12]
+    dsb
+    mov     r0, #PHYS_OUT
+    LDA     r12, FN_STARTX
+    blx     r12
+    str     r0, [r4, #0x10]
+    cmp     r0, #0
+    beq     2f
+    mov     r0, #1
+    str     r0, [r4, #0x08]             @ next arm_out ends whatever is left
+    mov     r0, #5
+    b       mem_refuse
+
+2:  mov     r0, #2
+    str     r0, [r4, #0x34]             @ phase 2: data TRB armed
+    mov     r0, #0                      @ READY
+    str     r0, [r6, #20]
+    str     r8, [r6, #24]
+    str     r5, [r6, #28]
+    mov     r1, #12
+    bl      send_status
+    cmp     r0, #0
+    bne     mem_write_abort
+    mov     r0, #3
+    str     r0, [r4, #0x34]             @ phase 3: READY reached the host
+
+    mov     r0, #LOG_OUT                @ the host sends the moment READY lands
+    mov     r1, #MEM_TMO
+    add     r1, r1, r5, lsr #15
+    bl      wait_done
+    str     r0, [r4, #0x14]
+    cmp     r0, #0
+    bne     mem_write_lost
+    bl      out_owned
+    mov     r0, #4
+    str     r0, [r4, #0x34]             @ phase 4: the data is in
+
+    LDA     r0, TRB_OUT                 @ received = armed - what is left
+    ldr     r0, [r0]
+    ldr     r0, [r0, #8]
+    bic     r0, r0, #0xFF000000
+    sub     r9, r5, r0
+    tst     r7, #OPT_SYNC               @ drop lines fetched while DMA ran
+    beq     3f
+    LDA     r12, F_DCACHE
+    blx     r12
+3:  mov     r3, #0
+    tst     r7, #OPT_CRC
+    beq     4f
+    mov     r0, r8
+    mov     r1, r9
+    bl      crc_block
+4:  mov     r0, #0                      @ DONE
+    str     r0, [r6, #20]
+    str     r9, [r6, #24]
+    str     r3, [r6, #28]
+    mov     r1, #12
+    bl      send_status
+    cmp     r0, #0
+    bne     fault
+    b       reply_done
+
+mem_write_lost:
+    mov     r0, #LOG_OUT                @ nothing may land after we give up
+    LDA     r12, FN_ENDX
+    blx     r12
+    mov     r0, #6
+    str     r0, [r6, #20]
+    mov     r1, #4
+    bl      send_status                 @ best effort: the host may be gone
+    b       fault
+mem_write_abort:
+    mov     r0, #LOG_OUT                @ READY never reached the host
+    LDA     r12, FN_ENDX
+    blx     r12
+    b       fault
+
+/* Tell the USB driver EP 0x01 OUT is in use, between our transfers too.
+ *
+ * Its own StartTransfer (0xC01E6B80) sets OUT_BUSY when a bulk OUT starts and
+ * its completion handler (0xC01E7780) clears it.  While it is clear, an
+ * XferNotReady on the endpoint -- the host sending before anything is armed --
+ * makes whoever is waiting on "any event" (usbTask, FUN_c0033b80, which runs
+ * whether or not PTP does) call FUN_c01e76b8, which arms OUT on the firmware's
+ * buffer [0xC3025744] and starts it.  The host's next command lands there and
+ * the worker never sees it.  Measured: 1 MEMR in 10 lost this way, the lost
+ * frame found whole in that buffer (camera, 2026-10-06); the 1-in-20..60 PUT
+ * losses and PTP's 0x2003 answers were the same race.
+ * So it is set again the moment a transfer of ours completes.  Clobbers r0, r1. */
+.equ OUT_BUSY,    0xC31E3974
+out_owned:
+    LDA     r0, OUT_BUSY
+    mov     r1, #1
+    str     r1, [r0]
+    bx      lr
+
+/* r0 = logical endpoint, r1 = milliseconds -> r0 = 0 once that endpoint's TRB
+ * is back from the controller (HWO clear), -1 if it is still out at the end.
+ *
+ * Every wait in this worker goes through here, because the firmware's Wait
+ * answers a different question: whether the completion BIT was seen, and the
+ * bit is shared.  usbTask waits on "any event" (FUN_c01e9380(-1)) and the same
+ * dispatcher clears what it handles, so a completion can be consumed before or
+ * instead of ours.  Measured: a MEMW frame sitting whole in our frame buffer
+ * while Wait(OUT) ran out its 50 s; a MEMW data phase "never arriving" after
+ * all four bytes did (camera, 2026-10-06, fault log).  The TRB cannot be
+ * consumed by anybody, so it is what decides; Wait only sleeps between looks,
+ * and a stale bit that wakes it early costs one more look, nothing else. */
+.equ WAIT_SLICE,  20
+wait_done:
+    push    {r4, r5, r6, lr}
+    mov     r4, r0
+    mov     r5, r1
+    LDA     r6, TRB_OUT
+    cmp     r4, #LOG_OUT
+    beq     1f
+    LDA     r6, TRB_IN
+1:  ldr     r0, [r6]
+    ldr     r0, [r0, #12]
+    tst     r0, #1                      @ HWO: still the controller's
+    beq     8f
+    cmp     r5, #0
+    ble     9f
+    mov     r0, r4
+    mov     r1, #WAIT_SLICE
+    LDA     r12, FN_WAIT
+    blx     r12
+    sub     r5, r5, #WAIT_SLICE
+    b       1b
+8:  mov     r0, #0
+    pop     {r4, r5, r6, pc}
+9:  mvn     r0, #0
+    pop     {r4, r5, r6, pc}
+
+/* r0 = refusal code: one frame carrying it, then the next round. */
+mem_refuse:
+    str     r0, [r6, #20]
+    mov     r1, #4
+    bl      send_status
+    cmp     r0, #0
+    bne     fault
+    b       reply_done
+
+/* r0 = status (also the header's), r1 = payload bytes already at r6+20.
+ * -> r0 = arm or wait result, 0 when the host has the frame. */
+send_status:
+    push    {r5, lr}
+    strh    r1, [r6, #12]
+    strh    r0, [r6, #14]
+    mov     r0, #0
+    strh    r0, [r6, #6]
+    str     r0, [r6, #16]
+    mov     r0, r6
+    mov     r1, #FRAME
+    bl      crc_block
+    str     r3, [r6, #16]
+    bl      arm_in
+    str     r0, [r4, #0x18]
+    cmp     r0, #0
+    bne     1f
+    mov     r0, #LOG_IN
+    movw    r1, #TIMEOUT_IN
+    bl      wait_done
+    str     r0, [r4, #0x1C]
+1:  pop     {r5, pc}
+
+/* The request frame at r6: magic, version 1, flags 0, CRC over 64 bytes.
+ * -> r0 = 0 when it is ours.  Clobbers r0-r3, ip. */
+frame_ok:
+    push    {r7, lr}
+    ldr     r0, [r6]
+    LDA     r1, 0x48535046              @ "FPSH"
+    cmp     r0, r1
+    bne     1f
+    ldrb    r0, [r6, #4]
+    cmp     r0, #1
+    bne     1f
+    ldrh    r0, [r6, #6]
+    cmp     r0, #0
+    bne     1f
+    ldr     r7, [r6, #16]
+    mov     r0, #0
+    str     r0, [r6, #16]
+    mov     r0, r6
+    mov     r1, #FRAME
+    bl      crc_block
+    str     r7, [r6, #16]
+    cmp     r3, r7
+    moveq   r0, #0
+    beq     2f
+1:  mov     r0, #1
+2:  pop     {r7, pc}
+
+/* r0 = address, r1 = length, r2 = permission wanted.
+ * -> r0 = 0 when ONE window holds all of [r0, r0+r1) with that permission,
+ *    2 for a zero or wrapping range, 4 for none.  Clobbers r0-r3, ip. */
+range_ok:
+    push    {r4, r5, r6, lr}
+    cmp     r1, #0
+    beq     8f
+    adds    r1, r0, r1                  @ r1 = end, exclusive
+    bcs     8f
+    LDA     r3, FRAMEBUF                @ the worker's pool, implicitly
+    ldr     r3, [r3]
+    tst     r2, #PERM_W
+    addne   r12, r3, #UP_MIN_OFF        @ writable only past the header
+    moveq   r12, r3
+    add     r3, r3, #WPOOL_BYTES
+    cmp     r0, r12
+    blo     2f
+    cmp     r1, r3
+    bls     7f
+2:  LDA     r3, FRAMEBUF
+    ldr     r3, [r3]
+    add     r3, r3, #WIN_OFF
+    mov     r4, #WIN_SLOTS
+3:  ldr     r5, [r3, #8]                @ perm
+    and     r6, r5, r2
+    cmp     r6, r2
+    bne     4f
+    ldr     r5, [r3]                    @ base
+    cmp     r0, r5
+    blo     4f
+    ldr     r6, [r3, #4]
+    add     r5, r5, r6                  @ window end
+    cmp     r1, r5
+    bls     7f
+4:  add     r3, r3, #12
+    subs    r4, r4, #1
+    bne     3b
+    mov     r0, #4
+    pop     {r4, r5, r6, pc}
+7:  mov     r0, #0
+    pop     {r4, r5, r6, pc}
+8:  mov     r0, #2
+    pop     {r4, r5, r6, pc}
+
+/* The body's length, from inside the body: wbody_len sits before `wbody` and
+ * is not copied into the code allocation this runs from. */
+mem_body_len:   .word   wbody_end - wbody
 
 /* ==========================================================================
  * reply — send r9 bytes from r8.
@@ -657,8 +1294,7 @@ fill_header:
     bne     fault
     mov     r0, #LOG_IN
     movw    r1, #TIMEOUT_IN
-    LDA     r12, FN_WAIT
-    blx     r12
+    bl      wait_done
     str     r0, [r4, #0x1C]
     cmp     r0, #0
     bne     fault
@@ -677,6 +1313,37 @@ reply_done:
     b       next_round
 
 fault:
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    add     r0, r0, #FAULT_LOG
+    ldr     r1, [r0]
+    add     r2, r1, #1
+    str     r2, [r0]
+    and     r1, r1, #15
+    add     r1, r0, r1, lsl #5
+    add     r1, r1, #0x10               @ this fault's 32 bytes
+    ldr     r2, [r4, #0x0C]
+    str     r2, [r1]                    @ rounds
+    ldr     r2, [r4, #0x34]
+    str     r2, [r1, #4]                @ phase
+    LDA     r0, FRAMEBUF
+    ldr     r0, [r0]
+    mov     r2, #UNCACHED
+    add     r0, r0, r2                  @ the frame, uncached
+    ldrb    r2, [r0, #5]
+    str     r2, [r1, #8]                @ command
+    ldr     r2, [r0, #8]
+    str     r2, [r1, #12]               @ sequence
+    ldr     r2, [r4, #0x10]
+    str     r2, [r1, #16]
+    ldr     r2, [r4, #0x14]
+    str     r2, [r1, #20]
+    ldr     r2, [r4, #0x18]
+    str     r2, [r1, #24]
+    ldr     r2, [r4, #0x1C]
+    str     r2, [r1, #28]
+    mov     r0, #0
+    str     r0, [r4, #0x34]
     mov     r0, #1
     str     r0, [r4, #0x08]             @ next arm_out has something to clean up
     ldr     r0, [r4, #0x24]
@@ -721,6 +1388,15 @@ arm_out:
 arm_out_go:
     LDA     r0, FRAMEBUF
     ldr     r6, [r0]
+    /* Forget the last command before waiting for the next.  A wake with no new
+     * frame (a completion bit left over from some other transfer) must find
+     * nothing to run, not run the previous command a second time. */
+    mov     r0, #UNCACHED
+    add     r0, r6, r0
+    mov     r1, #0
+    str     r1, [r0]                    @ magic
+    str     r1, [r0, #4]                @ version, command, flags
+    str     r1, [r0, #20]               @ "shl "
     mov     r0, #TO_BUS
     add     r5, r6, r0
     LDA     r0, TRB_OUT
@@ -728,7 +1404,7 @@ arm_out_go:
     str     r5, [r7]
     mov     r0, #0
     str     r0, [r7, #4]
-    mov     r0, #1024
+    movw    r0, #UP_OUT_MAX            @ ordinary commands finish on a short packet
     str     r0, [r7, #8]
     movw    r0, #TRB_ARMED
     str     r0, [r7, #12]
@@ -761,8 +1437,7 @@ reply_raw:
     bne     fault
     mov     r0, #LOG_IN
     movw    r1, #TIMEOUT_IN
-    LDA     r12, FN_WAIT
-    blx     r12
+    bl      wait_done
     str     r0, [r4, #0x1C]
     cmp     r0, #0
     bne     fault
@@ -794,8 +1469,7 @@ reply_bulk:
     bne     fault
     mov     r0, #LOG_IN
     movw    r1, #TIMEOUT_IN
-    LDA     r12, FN_WAIT
-    blx     r12
+    bl      wait_done
     cmp     r0, #0
     bne     fault
 
@@ -804,34 +1478,28 @@ reply_bulk:
     bne     fault
     mov     r0, #LOG_IN
     movw    r1, #TIMEOUT_IN
-    LDA     r12, FN_WAIT
-    blx     r12
+    bl      wait_done
     str     r0, [r4, #0x1C]
     cmp     r0, #0
     bne     fault
     b       reply_done
 
-/* r0 = start, r1 = length -> r3 = CRC-32 */
+/* r0 = start, r1 = length -> r3 = CRC-32 (zlib's: reflected 0xEDB88320,
+ * init and final ~0).  Clobbers r0-r2, ip.
+ *
+ * The firmware's own table-driven crc32(buf, len), 0xC06AE998, table at
+ * 0xC2E3B794 -- a leaf in the image.  This used to be a bitwise loop here, and
+ * that loop, running from the worker's heap block, cost 9 us a byte whether
+ * the data was cached or not: 150 ms of every 16 KiB UP01 chunk, i.e. the
+ * whole of the 0.1 MiB/s upload.  The firmware routine on the same uncached
+ * frame: 0.6 us a byte, same value as zlib.crc32 (camera, 2026-10-06). */
+.equ FW_CRC32,    0xC06AE998
 crc_block:
-    push    {r4, r5, r6, lr}
-    mvn     r3, #0
-    mov     r4, #0
-1:  cmp     r4, r1
-    bhs     3f
-    ldrb    r5, [r0, r4]
-    eor     r3, r3, r5
-    mov     r2, #8
-2:  tst     r3, #1
-    lsr     r3, r3, #1
-    beq     4f
-    LDA     r5, 0xEDB88320
-    eor     r3, r3, r5
-4:  subs    r2, r2, #1
-    bne     2b
-    add     r4, r4, #1
-    b       1b
-3:  mvn     r3, r3
-    pop     {r4, r5, r6, pc}
+    push    {r4, lr}
+    LDA     r12, FW_CRC32
+    blx     r12
+    mov     r3, r0
+    pop     {r4, pc}
 
 /* --- arm EP 0x82 IN with r9 bytes at r8, no copy -------------------------- */
 arm_in_block:

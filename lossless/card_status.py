@@ -8,12 +8,13 @@ THIS READS CAMERA MEMORY (reads only; nothing is ever written). --dry-run
 prints exactly what would be read and reads nothing.
 
 What it reads: the cave arena 0xC072E064..0xC072EFB4 (to find the card's
-48-byte record, whose word +32 is "FLPC"), then one word per field of the card
-state, at offsets the ARM build itself reported in layout.json.
+48-byte record, whose word +32 is "FLPC"), then scalar fields and bounded
+arrays at offsets the ARM build itself reported in layout.json.
 """
 import argparse
 import json
 import pathlib
+import struct
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -21,6 +22,8 @@ sys.path.insert(0, str(HERE.parent / 'fp_usb_shell'))
 
 ARENA, ARENA_END = 0xC072E064, 0xC072EFB4
 MAGIC = 0x43504C46                      # "FLPC"
+ARRAY_WORDS = {'hold.refused_by': 8, 'play.refused_by': 12, 'hold.job.stall_regs': 8,
+               'hold_b.job.stall_regs': 8, 'record_diag.drops': 16 * 15}
 
 
 def find_record(mem_get):
@@ -35,10 +38,42 @@ def find_record(mem_get):
 
 
 
+LANE = {0: 'idle', 1: 'held', 2: 'running', 3: 'finished', 4: 'collecting', 5: 'fault'}
+
+
+def print_trace(at, n, out):
+    """Per arrival: time, arrivals, writer flushes, descriptors free, lanes,
+    then the registry: lock byte, occupied slots, and the oldest occupied
+    frame's state / live children / duplicates / parent. arrivals - flushed =
+    frames the writer has not written yet; REC stops at descriptors free <= 1."""
+    import struct
+    from putfile import read_direct
+    raw = read_direct(at, 32 * n)
+    rows = [struct.unpack_from('<8I', raw, 32 * i) for i in range(n)]
+    t0 = rows[0][0]
+    lines = ['ms,arrivals,flushed,unwritten,desc_free,lane_a,lane_b,reg_lock,occupied,'
+             'oldest_state,oldest_children,oldest_dups,oldest_parent']
+    for t, arr, fl, w, r0, st, ch, par in rows:
+        lines.append(f'{(t - t0) / 1000:.1f},{arr},{fl},{arr - fl},{w & 0xffff},'
+                     f'{LANE.get((w >> 16) & 0xff, (w >> 16) & 0xff)},'
+                     f'{LANE.get(w >> 24, w >> 24)},{r0 & 0xff},{r0 >> 8},'
+                     f'0x{st:X},{ch & 0xffff},{ch >> 16},{par - (1 << 32) if par >> 31 else par}')
+    if out:
+        out.write_text('\n'.join(lines) + '\n')
+    print(f'\ntrace: {n} arrivals' + (f' -> {out}' if out else ''))
+    step = max(1, n // 16)
+    for line in [lines[0]] + lines[1::step] + ([lines[-1]] if (n - 1) % step else []):
+        print('  ' + line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--layout', type=pathlib.Path, required=True)
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--elog', type=pathlib.Path,
+                    help='also write the native event log (card.c FPL_ELOG) here as CSV')
+    ap.add_argument('--trace', type=pathlib.Path,
+                    help='also write the per-arrival trace (card.c FPL_TRACE) here as CSV')
     ap.add_argument('--state', type=lambda s: int(s, 0),
                     help='the card state address, if already known (skips the scan)')
     a = ap.parse_args()
@@ -49,11 +84,11 @@ def main():
         if a.state is None:
             print(f'  0x{ARENA:08X}..0x{ARENA_END:08X}  the cave arena, '
                   f'{(ARENA_END - ARENA) // 4} words, to find the "FLPC" record')
-            print('  then one word at <state> + each offset below')
+            print('  then the stated number of words at <state> + each offset below')
         else:
-            print(f'  one word at 0x{a.state:08X} + each offset below')
+            print(f'  the stated number of words at 0x{a.state:08X} + each offset below')
         for name, off in fields.items():
-            print(f'    +0x{off:04X}  {name}')
+            print(f'    +0x{off:04X}  {name}  ({ARRAY_WORDS.get(name, 1)} words)')
         return 0
 
     from putfile import mem_get
@@ -66,15 +101,28 @@ def main():
         print(f'record at 0x{block:08X}: state 0x{state:08X}, resident base 0x{base:08X}')
     else:
         state = a.state
-    arrays = {'hold.refused_by': 8, 'play.refused_by': 12, 'hold.job.stall_regs': 8,
-              'hold_b.job.stall_regs': 8}
-    v = {name: mem_get(state + off, 1)[0] for name, off in fields.items() if name not in arrays}
+    arrays = ARRAY_WORDS
+    v = {name: mem_get(state + off, 1)[0] for name, off in fields.items()
+         if name not in arrays and name not in ('trace', 'elog')}
     arr = {name: mem_get(state + fields[name], n) for name, n in arrays.items() if name in fields}
     for name, value in v.items():
         print(f'  {name:42s} {value:>12}  0x{value:08X}')
     why = ['descriptor', 'reserve', 'handle', 'raster', 'short', 'output', 'no promise slot', '-']
     turned = {why[i]: n for i, n in enumerate(arr.get('hold.refused_by', [])) if n}
 
+    if 'trace' in fields and v.get('trace_n'):
+        print_trace(state + fields['trace'], min(v['trace_n'], 512), a.trace)
+    if 'elog' in fields and v.get('elog_n') and a.elog:
+        import struct
+        from putfile import read_direct
+        n = min(v['elog_n'], 2048)
+        raw = read_direct(state + fields['elog'], 8 * n)
+        rows = [struct.unpack_from('<2I', raw, 8 * i) for i in range(n)]
+        t0 = rows[0][0]
+        a.elog.write_text('ms,kind,slot,result,state\n' + ''.join(
+            f'{(t - t0) / 1000:.1f},{"W" if (w & 0xff) == 0x57 else w & 0xff},'
+            f'{(w >> 8) & 0xff},{(w >> 16) & 0xff},0x{w >> 24:X}\n' for t, w in rows))
+        print(f'\nevent log: {n} records -> {a.elog}')
     print('\nreading:')
     if v['magic'] != 0x44524143:
         print('  the state is not initialised: the launcher never reached init')
@@ -92,10 +140,10 @@ def main():
     tid = v['task_id'] - (1 << 32) if v['task_id'] & 0x80000000 else v['task_id']
     lanes = ['hold'] + (['hold_b'] if v['hold_b.magic'] else [])
     print(f'  takes admitted {v["rec_admitted"]}, recorded RAW {v["rec_raw"]}; codec task '
-          + (f'id {tid}' if tid > 0 else 'none (one lane)') + '; second lane '
+          + (f'id {tid}' if tid > 0 else 'none (compression unavailable)') + '; second lane '
           + ('ON' if v['hold_b.magic'] else f'off (failed {v["lane_b_failed"]})'))
     held = sum(v[f'{x}.held'] for x in lanes)
-    print(f'  frames {v["hold.arrivals"]}: held {held}, compressed '
+    print(f'  frames reaching the lossless hook {v["take_frames"]}: held {held}, compressed '
           f'{sum(v[f"{x}.compressed"] for x in lanes)}, passed because both lanes busy '
           f'{v["hold.lanes_full"]}, not eligible {v["hold.not_eligible"]}'
           + (f' {turned}' if turned else ''))
@@ -115,6 +163,22 @@ def main():
           f'lanes now {v["hold.lane"]}/{v["hold_b.lane"]}, result {v["lane_stop_result"]}')
     pwhy = ['slot', 'not tiff', 'root', 'format', 'tiles', 'ifd0', 'room', 'order', 'scratch',
             'engine', 'copy', 'take live']
+    if 'hold.job_max_us' in v:
+        print(f'  codec job time: last {v["hold.job_last_us"] / 1000:.1f} ms, longest '
+              f'{v["hold.job_max_us"] / 1000:.1f} ms (lane B {v["hold_b.job_last_us"] / 1000:.1f} / '
+              f'{v["hold_b.job_max_us"] / 1000:.1f}); given up after '
+              f'{v["hold.stall_limit_us"] / 1000:.0f} ms')
+    if 'hold.job_count' in v:
+        n = v['hold.job_count'] + v['hold_b.job_count']
+        mean = (v['hold.job_sum_us'] + v['hold_b.job_sum_us']) / n / 1000 if n else 0
+        print(f'  tile grid {v["hold.job.tile_width"]}x{v["hold.job.tile_height"]} '
+              f'({v["hold.job.tiles"]} tiles; force 0x{v["tile_force"]:08X}); '
+              f'mean codec job {mean:.2f} ms over {n} jobs')
+    if 'bulk' in v:
+        b = v['bulk']
+        print(f'  file-layer bulk this take: {b:,} B ({b / 2**20:.1f} MiB'
+              f'{", stock" if b == 0x4000000 else ""}); writer already open at REC: '
+              f'{v["bulk_writer_open"]} (must be 0, or the value came too late)')
     print(f'  this take {v["take_frames"]} frames (the first left uncompressed); clips opening '
           f'on a stock frame {v["play.clips_first_stock"]}')
     print(f'  clips opened {v["play.clips"]}, ours {v["play.clips_ours"]} (frame size '
@@ -127,9 +191,39 @@ def main():
           f'{v["play.max_us"] / 1000:.1f} ms)' + (f', left alone {prefused}' if prefused else '')
           + f'; last slot buffer 0x{v["play.last_buf"]:08X} capacity {v["play.last_cap"]:,} '
           f'read {v["play.last_got"]:,}')
-    print(f'  flush: trailers applied {v["flush.applied"]}, trailer refused '
+    print(f'  before file write (not a write-success count): trailers applied {v["flush.applied"]}, trailer refused '
           f'{v["flush.trailer_failed"]}, other length {v["flush.length_mismatch"]}; '
           f'promises a previous take left {v["stale_promises"]}')
+    if 'record_diag.writer_calls' in v:
+        d = {k.removeprefix('record_diag.'): val for k, val in v.items()
+             if k.startswith('record_diag.')}
+        print(f'  native events: RAW errors {d["raw_errors"]}, capture limits '
+              f'{d["capture_limits"]}, completion errors {d["completion_errors"]}, '
+              f'missing registry slots {d["lookup_missing"]}')
+        print(f'  last nonzero/missing event: event {d["last_event"]}, result '
+              f'{d["last_result"]}, slot {d["last_slot"]}, generation '
+              f'{d["last_generation"]}, state {d["last_state"]}, handle '
+              f'0x{d["last_handle"]:08X}, missing {d["last_missing"]}')
+        print(f'  native FIFO discarded {d["discard_count"]}: RAW error '
+              f'{d["discard_raw"]}, completion error {d["discard_completion"]}, '
+              f'teardown {d["discard_teardown"]}, other {d["discard_other"]}')
+        result = d['writer_low'] | (d['writer_high'] << 32)
+        print(f'  native writer returns: calls {d["writer_calls"]}, zero '
+              f'{d["writer_zero"]}, nonzero {d["writer_nonzero"]}, last {result} bytes '
+              '(API result, not proof of durable files)')
+        drops = arr.get('record_diag.drops', [])
+        used = min(d['drop_used'], 16)
+        first = d['drop_next'] % 16 if used == 16 else 0
+        print(f'  recent discarded files: {used} retained, {d["drop_overwritten"]} older '
+              'records overwritten; slots are not file numbers')
+        for n in range(used):
+            at = ((first + n) % 16) * 15
+            row = drops[at:at + 15]
+            if len(row) != 15:
+                break
+            name = struct.pack('<12I', *row[3:]).split(b'\0', 1)[0].decode('utf-8', 'replace')
+            print(f'    slot {row[0]}, generation {row[1]}, clear caller '
+                  f'0x{row[2]:08X}, path {name!r}')
     return 0
 
 if __name__ == '__main__':

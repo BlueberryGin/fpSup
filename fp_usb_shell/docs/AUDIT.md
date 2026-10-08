@@ -99,7 +99,7 @@ AutoRun 就變成:修補描述元 → 寫載入器 → 載入器讀檔 → 啟�
 **400 個命令變成 50 個,而且不隨程式碼變大而增加。** 現在加陀螺儀那 3360 位元組要多
 840 個命令;改完之後是 0 個。進度條也可以跟著縮。
 
-`templates/loader.S`(512 bytes),`build_autorun.py --loader`。實測:
+`asm/loader.S`(512 bytes),`build_autorun.py --loader`。實測:
 
 | | 原本 | 現在 |
 |---|---|---|

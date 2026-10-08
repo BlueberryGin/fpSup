@@ -177,7 +177,7 @@ HOW IT DIFFERS FROM OG3K
 ----------------------------------------------------------------
 
                      OG3K              OG2K
-    sensor mode      98 (2x2)          139 (3x3)
+    sensor mode      98 (÷2 readout)   139 (÷3 readout)
     raster           3032x2012         2016x1344
     recorded         3024x2010         2016x1344
     DNG crop         3008x2000         2000x1334

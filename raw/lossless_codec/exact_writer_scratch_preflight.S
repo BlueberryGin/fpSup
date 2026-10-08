@@ -20,7 +20,11 @@
 .equ HOOK_SITE,       0xC0722AFC
 .equ HOOK_ORIG,       0xEBFDE061
 .equ REAL_WRITE,      0xC069AC88
-.equ STATE,           0xC072F700
+/* Claimed at run time; the default is what this file assembles to on its
+ * own. cave.py's rule: the caller passes the real address. */
+#ifndef STATE
+#define STATE 0xC072F700
+#endif
 .equ DONE_MAGIC,      0x454E4F44
 .equ POWER_MAGIC,     0x52575050       /* "PPWR" */
 .equ SCRATCH_MAGIC,   0x434F4C41       /* "ALOC" */
@@ -33,10 +37,16 @@
 .equ CODEC_MODE,      0xC37CF87C
 
 .equ ALLOC_SIZE,      0x00400000
-.equ WORK_CAP,        0x00305000
-.equ TABLE_OFFSET,    0x00306000
-.equ TABLE_TMP_OFF,   0x00306400
+/* Must match single_frame_encode_discard_probe.S exactly: this phase writes
+ * the guards the encode phase later checks, so a layout split between the two
+ * files means the encode looks for guards where none were written. The arena
+ * is sized from the worst-case output bound, not the packed raster; see
+ * projects/lossless-sup/tools/output_bound.py and ROADMAP P0-3. */
+.equ WORK_CAP,        0x003F0000
+.equ TABLE_OFFSET,    0x003F1000
+.equ TABLE_TMP_OFF,   0x003F1400
 
+.equ F_CLOCK,         0xC002B6E0       /* free-running 1 MHz tick */
 .equ F_ALLOC,         0xC001CF78
 .equ F_GET,           0xC001D038
 .equ F_FREE,          0xC001D2B8
@@ -96,6 +106,57 @@
 .equ ERR_RANGE,       15
 .equ ERR_OVERLAP,     16
 .equ ERR_GUARD,       17
+.equ ERR_LIFE,        18               /* the block does not hold our mark */
+
+/* ---- the lifecycle record for the block this phase allocates -----------
+ * Must match single_frame_encode_discard_probe.S, for the same reason the
+ * arena layout above must: the phase that later uses the block reads what is
+ * written here.
+ *
+ * Why the record exists at all. Until now the only evidence that a 4 MiB
+ * block belonged to us was a magic in the STATE block plus three guard words
+ * in the arena - which say "nothing has scribbled over this", not "this is
+ * the block we were given". The distinction started to matter when a second
+ * block was needed: its handle arrived as a command-line argument, and range,
+ * alignment and non-overlap checks prove the SHAPE of a handle, not its
+ * ownership. So acquisition now writes a record, and it writes it HERE,
+ * because this is where the allocator returned the block; nowhere else can
+ * say when it was acquired without being told.
+ */
+.equ LIFE_OFF,        0x003F4000
+.equ L_MAGIC,         0x00
+.equ L_ROLE,          0x04
+.equ L_ALLOC,         0x08
+.equ L_HANDLE,        0x0C
+.equ L_BYTES,         0x10
+.equ L_END,           0x14
+.equ L_TICK,          0x18
+.equ L_SEQ,           0x1C
+.equ L_PURPOSE,       0x20
+.equ L_OWNMARK,       0x24
+.equ L_HELD,          0x28
+.equ L_STATE,         0x2C
+.equ L_BOOT,          0x38             /* LOAD_DONE_US: which boot
+                                        * wrote this record. A short
+                                        * power cycle leaves DRAM
+                                        * intact, so a record from
+                                        * the PREVIOUS boot reads as
+                                        * valid in every other field
+                                        * -- it names itself, carries
+                                        * the mark, has a role and
+                                        * says held. On 2026-09-30
+                                        * one such record let an arm
+                                        * through on a block this
+                                        * boot never owned. */
+.equ LOAD_DONE_US,    0xC072F6F8       /* stage2 stamps it at boot */
+.equ L_FREERET,       0x30
+.equ L_FREETICK,      0x34
+.equ LIFE_MAGIC,      0x4546494C       /* "LIFE" */
+.equ OWN_MAGIC,       0x4E574F42       /* "BOWN" */
+.equ PURPOSE_WORK,    0x4B524F57       /* "WORK" */
+.equ OWN_OFF,         0x003FC000       /* the mark, inside the block itself */
+.equ LIFE_HELD,       1
+.equ UNCACHED,        0x40000000
 
 .macro LDA reg, value
     movw    \reg, #:lower16:\value
@@ -185,8 +246,15 @@ probe_entry:
     LDA     r0, CODEC_MODE
     ldr     r1, [r0]
     str     r1, [r4, #S_CODEC_MODE]
-    cmp     r1, #0
-    bne     codec_busy
+    /* 0xC37CF87C selects which client owns the engine; it is NOT a busy
+       flag.  C06301F8 latches 1 (callback at +0x04) and C06303E4 latches 2
+       (callback at +0x38); the mode-1 starter C0630208 and the mode-2
+       starter C06303F8 each gate on their own value.  0 means CLOSED and is
+       written only by the close routine at C062FF7A, so a non-zero read is
+       the normal state whenever the engine is open.  Refuse only a value no
+       setup path can produce.  [C 2026-09-29] */
+    cmp     r1, #2
+    bhi     codec_busy
     mov     r0, #3
     str     r0, [r4, #S_STAGE]
 
@@ -305,6 +373,63 @@ ranges_disjoint:
     cmpeq   r3, r12
     bne     bad_guard
 
+    /* ---- the lifecycle record ----------------------------------------
+     * Written through the uncached alias, which is the view every other
+     * writer of these records uses; the host reads the cached address, as it
+     * already does for the result words the encode phase leaves at
+     * RESULT_OFF.
+     *
+     * The order matters twice. The mark goes into the block and is read back
+     * BEFORE anything is recorded, because an allocator that handed us
+     * memory we cannot write would otherwise show up later as a bad encode.
+     * The record's magic goes in LAST, so a run interrupted halfway through
+     * leaves a record that fails rather than one that passes.
+     */
+    LDA     r12, F_CLOCK
+    blx     r12
+    mov     r6, r0                     /* tick at acquisition */
+    add     r10, r8, #UNCACHED
+    add     r0, r10, #OWN_OFF
+    LDA     r1, OWN_MAGIC
+    str     r1, [r0]
+    str     r8, [r0, #4]               /* the block names itself */
+    dsb     sy
+    ldr     r2, [r0]
+    ldr     r3, [r0, #4]
+    cmp     r2, r1
+    cmpeq   r3, r8
+    bne     bad_life
+
+    add     r10, r10, #LIFE_OFF
+    mov     r0, #1                     /* L_ROLE: this is block A */
+    ldr     r2, [r4, #S_ALLOCATOR]
+    mov     r3, r8
+    LDA     r5, ALLOC_SIZE
+    ldr     r7, [r4, #S_ALLOC_END]
+    add     r12, r10, #L_ROLE
+    stm     r12, {r0, r2, r3, r5, r7}  /* role, allocator, handle, bytes, end */
+    str     r6, [r10, #L_TICK]
+    ldr     r0, [r4, #S_COUNT]
+    LDA     r2, PURPOSE_WORK
+    mov     r3, r1                     /* L_OWNMARK, still OWN_MAGIC */
+    mov     r5, r6                     /* L_HELD: checked again on each use */
+    mov     r7, #LIFE_HELD
+    add     r12, r10, #L_SEQ
+    stm     r12, {r0, r2, r3, r5, r7}  /* seq, purpose, mark, held, state */
+    mov     r0, #0
+    str     r0, [r10, #L_FREERET]
+    str     r0, [r10, #L_FREETICK]
+    dsb     sy
+    LDA     r0, LIFE_MAGIC
+    /* r12, not r0: r0 already holds the record magic that the very
+     * next store writes, and clobbering it put the boot stamp where
+     * the magic belongs -- the emulator caught it. */
+    LDA     r12, LOAD_DONE_US
+    ldr     r12, [r12]
+    str     r12, [r10, #L_BOOT]
+    str     r0, [r10, #L_MAGIC]
+    dsb     sy
+
     mov     r0, #7
     str     r0, [r4, #S_STAGE]
     LDA     r0, SCRATCH_MAGIC
@@ -345,6 +470,12 @@ bad_overlap:
     b       free_failed_allocation
 bad_guard:
     mov     r0, #ERR_GUARD
+    b       free_failed_allocation
+bad_life:
+    /* The block is ours - the allocator returned it - but it does not hold
+     * our mark, so nothing may later treat it as recorded. Freed here, like
+     * every other post-allocation failure, rather than left orphaned. */
+    mov     r0, #ERR_LIFE
 
 free_failed_allocation:
     str     r0, [r4, #S_ERROR]

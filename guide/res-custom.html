@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fpSup Open Gate formats — how to use it | fpSup</title>
+<meta name="description" content="OG2K, OG3K, OG3.5K, OG4K and S16 as extra CinemaDNG resolutions on the SIGMA fp, from one card: install, choose formats, use, what is tested, removal.">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ijigen.github.io/fpSup/guide/res-custom.html">
+<meta property="og:title" content="fpSup Open Gate formats — how to use it">
+<meta property="og:description" content="OG2K, OG3K, OG3.5K, OG4K and S16 as extra CinemaDNG resolutions on the SIGMA fp, from one card.">
+<meta property="og:image" content="https://ijigen.github.io/fpSup/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<style>
+.credit{background:var(--sig-soft); border:1px solid var(--line); border-left:4px solid var(--sig);
+  border-radius:4px; padding:18px 20px; margin:22px 0 30px}
+.credit-kicker{font-family:var(--mono); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--sig); margin:0 0 4px}
+.credit-h{font-size:1.35rem; line-height:1.3; margin:0 0 6px; color:var(--ink);
+  font-family:var(--sans); text-transform:none; letter-spacing:0}
+.credit p:last-child{margin-bottom:0}
+/* the diagrams: drawn in the page's own ink, so they follow light and dark */
+figure.diagram{margin:22px 0}
+figure.diagram svg{width:100%; height:auto; display:block; max-width:760px}
+figure.diagram .box{fill:none; stroke:var(--ink); stroke-width:1.5}
+figure.diagram .soft{fill:var(--sig-soft); stroke:var(--line)}
+figure.diagram .accent{fill:none; stroke:var(--sig); stroke-width:2}
+figure.diagram .fill-accent{fill:var(--sig)}
+figure.diagram text{fill:var(--ink); font-family:var(--mono); font-size:13px}
+figure.diagram text.small{font-size:11px}
+figure.diagram .arrow{stroke:var(--ink); stroke-width:1.5; fill:none; marker-end:url(#ah)}
+</style>
+</head>
+<body>
+
+<div class="langbar">
+  <div class="lang" role="group" aria-label="Language / 語言 / 语言">
+    <button type="button" data-set="en" aria-pressed="true">EN</button>
+    <button type="button" data-set="cn" aria-pressed="false">中</button>
+    <button type="button" data-set="zh" aria-pressed="false">繁</button>
+  </div>
+</div>
+<a class="back" href="../guide.html">&larr; <span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a>
+
+<header class="hero">
+  <h1><span class="en">Open Gate formats</span><span class="zh">Open Gate 各格式</span></h1>
+  <p class="lede en">Five extra CinemaDNG resolutions &mdash; <b>OG2K, OG3K, OG3.5K, OG4K and S16</b> &mdash;
+  chosen in Settings and Quick Set next to UHD and FHD, all from one card. Version <b>v0.1.2test</b>.
+  This is a <b>test</b> release: treat every take as disposable until you have checked it.</p>
+  <p class="lede zh">五個額外的 CinemaDNG 解析度 —— <b>OG2K、OG3K、OG3.5K、OG4K、S16</b> ——
+  在 Settings 與 Quick Set 裡和 UHD、FHD 並排選,全部在同一張卡上。版本 <b>v0.1.2test</b>。<br>
+  這是<b>測試版</b>:每段錄影在你檢查過之前,都當成可能不能用。</p>
+</header>
+
+<section class="credit" id="credits" aria-labelledby="credits-h">
+  <p class="credit-kicker"><span class="en">Thanks</span><span class="zh">致謝</span></p>
+  <h2 id="credits-h" class="credit-h"><span class="en">Thank you, Vitaly Li and Jose Hurtado</span><span class="zh">感謝 Vitaly Li 與 Jose Hurtado</span></h2>
+  <p class="en"><b>Vitaly Li got open gate out of a SIGMA fp first</b> (FP3K) &mdash; his work showed
+  the fp could do it at all. <b>S16, OG3.5K and OG4K are Jose Hurtado's formats</b> (fpSup-Formats
+  v0.6.1): his timings, readout windows and canvas values are carried here unchanged, as data.</p>
+  <p class="zh"><b>在 SIGMA fp 上第一個做出 open gate 的是 Vitaly Li</b>(FP3K)—— 是他證明了 fp 做得到。
+  <b>S16、OG3.5K、OG4K 是 Jose Hurtado 的格式</b>(fpSup-Formats v0.6.1):
+  他的時序、讀出視窗與畫布數值原封不動,以資料的形式帶過來。</p>
+</section>
+
+<!-- 1. INSTALL -->
+<h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
+<p class="en">Checking the camera, copying the card and starting it: <a href="../tools/merge-v3/#install">see the install steps on fpSup-Merge</a>. What is particular to these formats:</p>
+<p class="zh">確認相機、複製到卡、開機:<a href="../tools/merge-v3/#install">見 fpSup-Merge 的安裝步驟</a>。這幾個格式特有的部分:</p>
+<ol class="steps">
+  <li>
+    <h3><span class="en">Pick the formats in fpSup-Merge</span><span class="zh">在 fpSup-Merge 勾選格式</span></h3>
+    <p class="en"><a href="../tools/merge-v3/?pick=res-custom"><b>Open fpSup-Merge with the Open Gate formats ticked</b></a>.
+    Every format is ticked by default; untick the ones you do not want (at least one must stay).
+    You cannot add the older OG3K or OG2K cards, Jose's Formats card, or res-lab: they use the same
+    parts of the camera. Download the zip.</p>
+    <p class="zh"><a href="../tools/merge-v3/?pick=res-custom"><b>打開已勾好 Open Gate 各格式的 fpSup-Merge</b></a>。
+    每個格式預設都勾著;不要的取消勾選(至少要留一個)。<br>
+    <strong>不能同時加</strong>舊的 OG3K / OG2K 卡、Jose 的 Formats 卡、res-lab:它們用的是相機的同一些地方。下載 zip。</p>
+  </li>
+  <li>
+    <h3><span class="en">Keep the RESCUS folder</span><span class="zh">別漏了 RESCUS 資料夾</span></h3>
+    <p class="en">The formats live in <code>fpSup/RESCUS/</code>, one <code>.RCD</code> file each. Copy the whole
+    <code>fpSup</code> folder with it. When you update the card, follow
+    <a href="../tools/merge-v3/#install">the install steps</a>: an unticked format left on the card still loads.</p>
+    <p class="zh">各格式在 <code>fpSup/RESCUS/</code> 裡，每個格式一個 <code>.RCD</code> 檔。複製整個 <code>fpSup</code>
+    資料夾時要連它一起。更新卡時照<a href="../tools/merge-v3/#install">安裝步驟</a>做：沒勾的格式留在卡上仍會載入。</p>
+  </li>
+</ol>
+
+<figure class="diagram" aria-labelledby="fig-card">
+  <svg viewBox="0 0 760 250" role="img" aria-labelledby="fig-card">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-accent"/></marker></defs>
+    <rect x="10" y="10" width="300" height="230" rx="6" class="soft"/>
+    <text x="24" y="36">SD card /</text>
+    <text x="40" y="62">AutoRun.txt</text>
+    <text x="40" y="88">fpSup/</text>
+    <text x="60" y="112">LOADER.BIN, UI/</text>
+    <text x="60" y="136" style="font-weight:600">32RESCUS.BIN</text>
+    <text x="60" y="160">RESCUS/</text>
+    <text x="80" y="184">OG2K.RCD  OG35K.RCD</text>
+    <text x="80" y="206">OG3K.RCD  OG4K.RCD</text>
+    <text x="80" y="228">S16.RCD</text>
+    <path d="M220 131 L380 70" class="arrow"/>
+    <path d="M250 195 L380 175" class="arrow"/>
+    <rect x="390" y="40" width="360" height="62" rx="6" class="box"/>
+    <text x="404" y="64">32RESCUS.BIN: all the program</text>
+    <text x="404" y="86" class="small">recording, menu, Quick Set, your last choice</text>
+    <rect x="390" y="140" width="360" height="74" rx="6" class="box"/>
+    <text x="404" y="164">*.RCD: one format each, data only</text>
+    <text x="404" y="186" class="small">timings, sizes, menu text, its own icons</text>
+    <text x="404" y="204" class="small">delete one = that format is gone</text>
+  </svg>
+  <figcaption class="en" id="fig-card">What goes on the card. The program is one file; each format is one small data file.
+    Up to six formats are used, in file-name order.</figcaption>
+  <figcaption class="zh">卡上放什麼。程式只有一個檔;每個格式是一個小資料檔。最多用六個,依檔名排序。</figcaption>
+</figure>
+
+<!-- 2. FORMATS -->
+<h2 id="formats"><span class="en">The formats</span><span class="zh">各格式</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">format</span><span class="zh">格式</span></th><th>DNG</th><th><span class="en">aspect</span><span class="zh">比例</span></th><th><span class="en">frame rates</span><span class="zh">格率</span></th><th><span class="en">how</span><span class="zh">做法</span></th><th><span class="en">12-bit 24p</span><span class="zh">12-bit 24p</span></th></tr></thead>
+  <tbody>
+    <tr><td>OG2K</td><td>2000&times;1334</td><td>3:2</td><td>23.98&ndash;100</td><td><span class="en">sensor 3&times;3 binning</span><span class="zh">感光元件 3&times;3 合併</span></td><td>98 MB/s</td></tr>
+    <tr><td>S16</td><td>2096&times;1238</td><td>16:9</td><td>23.98&ndash;100</td><td><span class="en">1:1 window, about 2.9&times; crop</span><span class="zh">1:1 視窗,約 2.9 倍裁切</span></td><td>95 MB/s</td></tr>
+    <tr><td>OG3K</td><td>3008&times;2000</td><td>3:2</td><td>23.98&ndash;100</td><td><span class="en">sensor 2&times;2 binning</span><span class="zh">感光元件 2&times;2 合併</span></td><td>219 MB/s</td></tr>
+    <tr><td>OG3.5K</td><td>3456&times;2304</td><td>3:2</td><td>23.98&ndash;29.97</td><td><span class="en">full 1:1 readout, scaled in the ISP</span><span class="zh">全 1:1 讀出,ISP 縮小</span></td><td>287 MB/s</td></tr>
+    <tr><td>OG4K</td><td>3840&times;2560</td><td>3:2</td><td>23.98&ndash;29.97</td><td><span class="en">full 1:1 readout, scaled in the ISP</span><span class="zh">全 1:1 讀出,ISP 縮小</span></td><td>354 MB/s</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="warn en"><b>Storage speed.</b> The UHS-II SD card we measured writes 94 MB/s; an external SSD 390 MB/s.
+OG3K, OG3.5K and OG4K need the <b>external SSD</b>. OG2K and S16 sit at the edge of an SD card: if it records normal
+FHD cleanly, try it. Too slow storage makes the camera stop recording after a few seconds.</p>
+<p class="warn zh"><b>儲存速度。</b>我們量過的 UHS-II SD 卡寫入 94 MB/s,外接 SSD 390 MB/s。<br>
+OG3K、OG3.5K、OG4K 要用<b>外接 SSD</b>。OG2K 與 S16 剛好在 SD 卡的邊緣:能乾淨錄一般 FHD 的卡可以試。
+儲存太慢,相機會在幾秒後停止錄影。</p>
+
+<!-- 3. USE -->
+<h2 id="use"><span class="en">Use</span><span class="zh">使用</span></h2>
+<p class="en"><b>1. Set the recording format to CinemaDNG.</b></p>
+<p class="zh"><b>1. 錄影格式設成 CinemaDNG。</b></p>
+<p class="en"><b>2. Choose the format</b> in <code>MENU &rarr; recording &rarr; resolution</code> or
+<code>Quick Set &rarr; RES</code>, then the frame rate and bit depth as usual.</p>
+<p class="zh"><b>2. 選格式</b>:<code>MENU &rarr; recording &rarr; resolution</code> 或 <code>Quick Set &rarr; RES</code>,
+格率與位元深度照平常選。</p>
+
+<figure class="diagram" aria-labelledby="fig-row">
+  <svg viewBox="0 0 760 120" role="img" aria-labelledby="fig-row">
+    <g>
+      <rect x="10"  y="20" width="96" height="44" rx="5" class="box"/><text x="38"  y="47">UHD</text>
+      <rect x="114" y="20" width="96" height="44" rx="5" class="box"/><text x="144" y="47">FHD</text>
+      <rect x="218" y="20" width="96" height="44" rx="5" class="soft"/><text x="244" y="47">OG2K</text>
+      <rect x="322" y="20" width="96" height="44" rx="5" class="soft"/><text x="340" y="47">OG3.5K</text>
+      <rect x="426" y="20" width="96" height="44" rx="5" class="soft"/><text x="452" y="47">OG3K</text>
+      <rect x="530" y="20" width="96" height="44" rx="5" class="soft"/><text x="556" y="47">OG4K</text>
+      <rect x="634" y="20" width="96" height="44" rx="5" class="soft"/><text x="662" y="47">S16</text>
+    </g>
+    <text x="10" y="96" class="small">camera's own</text>
+    <text x="218" y="96" class="small">added by the card, in file-name order (OG35K.RCD sorts before OG3K.RCD)</text>
+  </svg>
+  <figcaption class="en" id="fig-row">The resolution row with all five formats: seven states in Settings and Quick Set.</figcaption>
+  <figcaption class="zh">五個格式都裝上時的解析度一列:Settings 與 Quick Set 裡共七格。</figcaption>
+</figure>
+
+<p class="en"><b>Frame rates</b> a format does not have are greyed out while it is chosen; your saved frame
+rate is kept and comes back with another resolution.</p>
+<p class="zh">格式沒有的<b>格率</b>在選著它時會反灰;你存的格率會保留,換回別的解析度時回來。</p>
+<p class="en"><b>Crop Mode:</b> OG3.5K and OG4K follow it &mdash; Crop Mode on records the centre of the sensor
+1:1 at the same DNG size. For OG2K, OG3K and S16 it is greyed out and off while they are chosen.</p>
+<p class="zh"><b>Crop Mode:</b>OG3.5K 與 OG4K 跟著它 —— 開著時錄感光元件中央 1:1,DNG 尺寸相同。
+OG2K、OG3K、S16 被選時它會反灰並關閉。</p>
+
+<figure class="diagram" aria-labelledby="fig-keep">
+  <svg viewBox="0 0 760 150" role="img" aria-labelledby="fig-keep">
+    <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-accent"/></marker></defs>
+    <rect x="10" y="20" width="220" height="60" rx="6" class="soft"/>
+    <text x="24" y="46">you choose OG4K</text>
+    <rect x="270" y="10" width="230" height="44" rx="6" class="box"/>
+    <text x="284" y="37" class="small">camera stores: UHD (its own)</text>
+    <rect x="270" y="66" width="230" height="44" rx="6" class="box"/>
+    <text x="284" y="93" class="small">32RESCUS.BIN stores: OG4K</text>
+    <path d="M230 50 L268 32" style="stroke:var(--ink);stroke-width:1.5;fill:none;marker-end:url(#ah2)"/>
+    <path d="M230 50 L268 88" style="stroke:var(--ink);stroke-width:1.5;fill:none;marker-end:url(#ah2)"/>
+    <text x="520" y="37" class="small">without the card: UHD</text>
+    <text x="520" y="93" class="small">next start: OG4K again</text>
+  </svg>
+  <figcaption class="en" id="fig-keep">How the choice is kept. The camera's settings only ever hold UHD or FHD; the
+    format itself is remembered in the card's own file. Without the card the camera simply records UHD or FHD.</figcaption>
+  <figcaption class="zh">選擇怎麼保存。相機的設定只存 UHD 或 FHD;格式本身記在卡上自己的檔案裡。
+    沒有這張卡時,相機就單純錄 UHD 或 FHD。</figcaption>
+</figure>
+
+<!-- 4. TESTED -->
+<h2 id="tested"><span class="en">What is tested and what is not</span><span class="zh">測過什麼、沒測過什麼</span></h2>
+<p class="en"><b>Tested on a SIGMA fp, Ver.5.02 (earlier builds of this card):</b></p>
+<p class="zh"><b>在 SIGMA fp、Ver.5.02 上測過(這張卡較早的建置):</b></p>
+<ul>
+  <li><span class="en">Loading, the Settings list and Quick Set with all five formats.</span><span class="zh">載入、Settings 清單與 Quick Set:五個格式全裝。</span></li>
+  <li><span class="en">Recording OG3K 12-bit, S16 12-bit (with its standby framing), OG4K and OG3.5K 8-bit: correct DNG sizes, clean pictures.</span><span class="zh">錄 OG3K 12-bit、S16 12-bit(含待機取景框)、OG4K 與 OG3.5K 8-bit:DNG 尺寸正確、畫面乾淨。</span></li>
+  <li><span class="en">MOV with a format chosen records normal MOV.</span><span class="zh">選著格式時錄 MOV,錄出正常的 MOV。</span></li>
+</ul>
+<p class="en"><b>Not yet tested on the camera:</b></p>
+<p class="zh"><b>還沒在相機上測:</b></p>
+<ul>
+  <li><span class="en">Crop Mode with OG3.5K / OG4K; the greyed frame rates and Crop Mode.</span><span class="zh">OG3.5K / OG4K 的 Crop Mode;反灰的格率與 Crop Mode。</span></li>
+  <li><span class="en">OG2K, OG3K and S16 at 100p (needs the SSD).</span><span class="zh">OG2K、OG3K、S16 的 100p(要 SSD)。</span></li>
+  <li><span class="en">OG4K standby framing; a format coming back after a restart.</span><span class="zh">OG4K 待機取景框;重開機後格式自動回來。</span></li>
+</ul>
+
+<!-- 5. REMOVE -->
+<h2 id="remove"><span class="en">Remove &mdash; or drop one format</span><span class="zh">移除 —— 或拿掉一個格式</span></h2>
+<p class="en"><b>Drop one format:</b> delete its <code>.RCD</code> from <code>fpSup/RESCUS</code>. If it was the format
+you had chosen, the camera starts on UHD or FHD.</p>
+<p class="zh"><b>拿掉一個格式:</b>把它的 <code>.RCD</code> 從 <code>fpSup/RESCUS</code> 刪掉。
+若那正是你選著的格式,相機開機後會是 UHD 或 FHD。</p>
+<p class="en"><b>Remove everything:</b> choose UHD or FHD first, then delete <code>32RESCUS.BIN</code> and the
+<code>RESCUS</code> folder. Did it the other way round? Nothing is broken: the camera only ever stored UHD or FHD.</p>
+<p class="zh"><b>全部移除:</b>先選回 UHD 或 FHD,再刪 <code>32RESCUS.BIN</code> 與 <code>RESCUS</code> 資料夾。
+順序反了?<strong>沒有東西壞掉</strong>:相機本來就只存 UHD 或 FHD。</p>
+
+<!-- 6. TROUBLE -->
+<h2 id="trouble"><span class="en">If something does not work</span><span class="zh">如果有東西不能用</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">what happens</span><span class="zh">發生什麼</span></th><th><span class="en">what to do</span><span class="zh">怎麼辦</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">No new formats in the list</span><span class="zh">清單裡沒有新格式</span></td>
+        <td><span class="en">The <code>RESCUS</code> folder is missing or not inside <code>fpSup</code>; or the card was started from an SSD. <code>fpSup/LOAD.LOG</code> says why (line <code>OCD…</code>).</span><span class="zh"><code>RESCUS</code> 資料夾不見了或不在 <code>fpSup</code> 裡;或卡是從 SSD 開機。<code>fpSup/LOAD.LOG</code> 會寫原因(<code>OCD…</code> 那行)。</span></td></tr>
+    <tr><td><span class="en">One format is missing</span><span class="zh">少了一個格式</span></td>
+        <td><span class="en">Its file is damaged, from a newer card, or a seventh one. Copy it again from the zip.</span><span class="zh">它的檔案損壞、來自較新的卡,或是第七個。從 zip 重新複製。</span></td></tr>
+    <tr><td><span class="en">Recording stops after a few seconds</span><span class="zh">錄影幾秒後就停了</span></td>
+        <td><span class="en">The storage is too slow &mdash; see <a href="#formats">the formats</a>.</span><span class="zh">儲存太慢 —— 見<a href="#formats">各格式</a>。</span></td></tr>
+    <tr><td><span class="en">The camera freezes</span><span class="zh">相機凍結</span></td>
+        <td><span class="en">With the USB cable unplugged, take the battery out. Bring what you were doing to the <a href="https://discord.gg/WVTCcpGUYC">Discord</a>.</span><span class="zh">拔掉 USB 線,把電池拿出來。把當時在做什麼帶到 <a href="https://discord.gg/WVTCcpGUYC">Discord</a> 上說。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="../releases/fpsup-res-custom-v0.1.2test/README.txt">README.txt</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
+</footer>
+
+<script src="../assets/lang.js?v=7c49866d" defer></script>
+</body>
+</html>

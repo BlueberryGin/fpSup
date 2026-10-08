@@ -39,10 +39,15 @@
 #define FILE_OFFSET       0x2000u
 #define PIXELS_IN_FILE    (HEADER_RESERVE - FILE_OFFSET)     /* 0x13400 */
 #define TRAILER_BOUND     4096u      /* root IFD copy, bounded; tables extra */
-#define STALL_POLLS        250u      /* a job not done after this many checks
-                                        (each >= 1 tick + the task's 1 ms) is
-                                        given up on; the slowest normal job,
-                                        UHD, is ~50 ms */
+/* A job not done after STALL_TIMES its expected time is given up on (the
+ * engine, ~170 Mpix/s measured: STALL_PIX_PER_US), but never before
+ * STALL_MIN_US. 2026-10-06: a stuck job was waited on for 250 checks
+ * (~0.5-1 s); every frame meanwhile went out RAW, an OG3K take's data rate
+ * passed the card's and the camera stopped itself (A001_042). Expected: FHD
+ * ~14 ms, OG3K ~40 ms, UHD ~55 ms, 6K ~145 ms. */
+#define STALL_PIX_PER_US   150u
+#define STALL_TIMES          3u
+#define STALL_MIN_US     50000u
 #define STOP_POLLS        1000u      /* one tick each; the firmware's own
                                         wait for an FHD frame is 100 ticks */
 
@@ -58,6 +63,7 @@
 #define irq_restore(m) H->irq_restore(m)
 #define sleep_ms(n) H->sleep_ms(n)
 #define header_dma(to, from, n) H->dma(to, from, n)
+#define tick_us() H->tick_us()
 #elif defined(__arm__) && UINTPTR_MAX == UINT32_MAX
 static uintptr_t native_frame(uint32_t id) {
     typedef uintptr_t (*registry)(void);
@@ -96,6 +102,10 @@ static uint32_t header_dma(uintptr_t to, uintptr_t from, uint32_t bytes) {
 static void sleep_ms(uint32_t n) {                /* C03705D8 -> tk_dly_tsk */
     typedef void (*fn)(uint32_t);
     ((fn)0xc03705d8u)(n);
+}
+static uint32_t tick_us(void) {                   /* C002B6E0: the 1 MHz counter */
+    typedef uint32_t (*fn)(void);
+    return ((fn)0xc002b6e0u)();
 }
 #else
 #error "ARM32 native frame ABI required; host tests must explicitly substitute it"
@@ -236,6 +246,8 @@ static uint32_t handoff(void *context, const struct fpl_frame_lease *lease,
             c->tile_bytes[n] = bswap(peek(uncached(h->job.table + 4u * n)));
         c->payload = output->length;
         c->tiles = tiles;
+        c->tile_width = h->job.tile_width;
+        c->tile_height = h->job.tile_height;
         c->capacity = capacity;
         c->stock_bytes = lease->stock_file_bytes;
         barrier();
@@ -434,12 +446,30 @@ static uint32_t admit(struct fpl_frame_hold *h, uintptr_t creator, uint32_t nati
                                            : h->workspace.output_capacity;
     in->table = h->workspace.table;
     in->table_capacity = h->workspace.table_capacity;
+    in->tile_force = h->tile_force;
     return 1;
 }
 
+static void add_us(uint32_t *sum, uint32_t us) {
+    if (*sum + us > *sum) *sum += us;                    /* stops at the top */
+}
+
 static uint32_t submit(struct fpl_frame_hold *h, const struct fpl_codec_input *in) {
+    uint32_t begun = tick_us();
     uint32_t result = fpl_codec_job_submit(&h->job, in);
     fpl_pipeline_submitted(h->pipeline, &h->token, result);
+    if (result == FPL_OK) {
+        uint32_t limit = in->width * in->height / STALL_PIX_PER_US * STALL_TIMES;
+        h->stall_limit_us = limit < STALL_MIN_US ? STALL_MIN_US : limit;
+        h->job_start_us = tick_us();
+        h->last_poll_us = h->job_start_us;
+        add_us(&h->submit_sum_us, h->job_start_us - begun);
+        if (h->last_start_us) {
+            add_us(&h->cycle_sum_us, begun - h->last_start_us);
+            saturate(&h->cycle_count);
+        }
+        h->last_start_us = begun;
+    }
     return result;
 }
 
@@ -481,7 +511,8 @@ uint32_t fpl_hold_arrive(struct fpl_frame_hold *h, uintptr_t creator,
  *   or stop                         with IRQs off; FAULT if unknown)
  *   task      HELD -> RUNNING       (fpl_hold_kick, claimed with IRQs off)
  *             RUNNING -> FINISHED   (fpl_hold_check)
- *   stop      HELD -> IDLE          (fpl_hold_abandon, claimed with IRQs off)
+ *   arrival   HELD -> COLLECTING -> IDLE/FAULT  (fpl_hold_abandon, claimed
+ *   or stop                                     with IRQs off)
  * The frame, the pipeline and the commit ring are touched by the arrival
  * side only, except the pipeline's `submitted` mark, made by the task while
  * the lane is its own. */
@@ -519,25 +550,38 @@ uint32_t fpl_hold_kick(struct fpl_frame_hold *h) {
     return 1;
 }
 
-uint32_t fpl_hold_check(struct fpl_frame_hold *h) {
+static uint32_t check(struct fpl_frame_hold *h, uint32_t ticks) {
     uint32_t result;
     if (!hold_valid(h) || h->lane != FPL_LANE_RUNNING) return 0;
-    result = fpl_codec_job_poll(&h->job);
+    uint32_t took, polled = tick_us(), waited = ticks ? 4u : 0u;
+    result = fpl_codec_job_wait(&h->job, ticks);
+    took = tick_us() - h->job_start_us;
     if (result == FPL_BUSY) {
+        h->last_poll_us = polled;
         /* 2026-10-02: one job in a long take never signalled; the lane waited
          * for it forever and every later frame went out uncompressed. Given
          * up on, the engine is closed (stopped) and the frame goes out as the
          * engine refusing it would: unchanged, and the lane is free again. */
-        if (h->job.polls < STALL_POLLS) return 0;
+        if (took < h->stall_limit_us) return waited;
         result = fpl_codec_job_abort(&h->job) == FPL_OK ? FPL_UNSUPPORTED : FPL_FAULT;
         saturate(&h->stalls);
+    } else {
+        h->job_last_us = took;
+        if (took > h->job_max_us) h->job_max_us = took;
+        saturate(&h->job_count);
+        add_us(&h->job_sum_us, took);
+        add_us(&h->finish_sum_us, tick_us() - polled);
+        add_us(&h->gap_sum_us, polled - h->last_poll_us);
+        add_us(&h->poll_sum, h->job.polls);
     }
     h->lane_result = result;
     barrier();
     h->lane = FPL_LANE_FINISHED;
     barrier();
-    return 1;
+    return 1u | waited;
 }
+
+uint32_t fpl_hold_check(struct fpl_frame_hold *h) { return check(h, 0); }
 
 uint32_t fpl_hold_collect(struct fpl_frame_hold *h) {
     uint32_t result, mask;
@@ -565,17 +609,33 @@ uint32_t fpl_hold_collect(struct fpl_frame_hold *h) {
 }
 
 uint32_t fpl_hold_abandon(struct fpl_frame_hold *h) {
-    uint32_t mask;
+    uint32_t mask, result;
     if (!hold_valid(h)) return FPL_INVALID;
     mask = irq_off();
     if (h->lane == FPL_LANE_HELD) {
-        h->lane = FPL_LANE_IDLE;
+        h->lane = FPL_LANE_COLLECTING;
         irq_restore(mask);
-        /* never started: the frame goes back whole */
-        native_enqueue(h->creator, h->native_id, 1);
+        /* Never started: the same registered, pending kind-1 frame goes back
+         * whole. C037DD50 can return 1 WITHOUT inserting a frame whose first
+         * byte is zero; require that native queueable flag before the call.
+         * With it, return 1 means FIFO insertion or successful message send,
+         * NOT completed media I/O. Refusal/unknown ownership is not retried. */
+        if (!h->frame || native_frame(h->native_id) != h->frame ||
+            !(peek(h->frame) & 0xffu) ||
+            peek(h->frame + FRAME_KIND) != KIND_CINEMADNG ||
+            peek(h->frame + FRAME_STATE) != STATE_PENDING ||
+            native_enqueue(h->creator, h->native_id, 1) != 1) {
+            fpl_pipeline_stop(h->pipeline);
+            h->lane = FPL_LANE_FAULT;
+            saturate(&h->faults);
+            return FPL_FAULT;
+        }
         h->frame = 0;
         h->swapping = 0;
-        fpl_pipeline_reap(h->pipeline, &h->token, 1, 1);
+        result = fpl_pipeline_cancel_held(h->pipeline, &h->token, 1);
+        barrier();
+        h->lane = result == FPL_OK ? FPL_LANE_IDLE : FPL_LANE_FAULT;
+        if (result != FPL_OK) { saturate(&h->faults); return result; }
         saturate(&h->passed);
         return FPL_OK;
     }
@@ -619,6 +679,13 @@ static uint32_t lane_busy(const struct fpl_frame_hold *h) {
                              h->lane == FPL_LANE_FINISHED ||
                              h->lane == FPL_LANE_COLLECTING);
 }
+/* FAILED may still own the shared hardware, even after its lane becomes
+ * FINISHED/FAULT. A software completion is not evidence the engine is idle. */
+static uint32_t engine_failed(struct fpl_frame_hold *const lane[2]) {
+    for (uint32_t n = 0; n < 2; ++n)
+        if (hold_valid(lane[n]) && lane[n]->job.phase == FPL_CODEC_FAILED) return 1;
+    return 0;
+}
 /* The lanes in the order their frames arrived. */
 static void by_age(struct fpl_frame_hold *const lane[2], struct fpl_frame_hold **first,
                    struct fpl_frame_hold **second) {
@@ -636,6 +703,13 @@ uint32_t fpl_lanes_arrive(struct fpl_frame_hold *const lane[2], uintptr_t creato
     /* finished frames go back first, oldest first */
     fpl_hold_collect(first);
     if (second) fpl_hold_collect(second);
+    if (engine_failed(lane)) {
+        /* Native transfers stay on the arrival/stop side, not the worker.
+         * Waiting frames have not touched the failed engine and go RAW. */
+        if (first->lane == FPL_LANE_HELD) fpl_hold_abandon(first);
+        if (second && second->lane == FPL_LANE_HELD) fpl_hold_abandon(second);
+        return native_enqueue(creator, native_id, argument);
+    }
     order = (second && second->order > first->order ? second->order : first->order) + 1u;
     for (uint32_t n = 0; n < 2; ++n) {
         struct fpl_frame_hold *h = lane[n];
@@ -654,12 +728,18 @@ uint32_t fpl_lanes_arrive(struct fpl_frame_hold *const lane[2], uintptr_t creato
 }
 
 uint32_t fpl_lanes_task(struct fpl_frame_hold *const lane[2]) {
+    return fpl_lanes_task_wait(lane, 0);
+}
+
+uint32_t fpl_lanes_task_wait(struct fpl_frame_hold *const lane[2], uint32_t ticks) {
     struct fpl_frame_hold *first, *second, *next = 0;
     uint32_t moved = 0;
     if (!lane || !hold_valid(lane[0])) return 0;
     by_age(lane, &first, &second);
-    moved |= fpl_hold_check(first);
-    if (second) moved |= fpl_hold_check(second);
+    /* one engine: at most one lane runs, and only it is waited on (bit 2) */
+    moved |= check(first, ticks);
+    if (second) moved |= check(second, ticks);
+    if (engine_failed(lane)) return moved;  /* unknown hardware is not idle */
     if (first->lane == FPL_LANE_RUNNING || (second && second->lane == FPL_LANE_RUNNING))
         return moved;                /* one engine */
     if (first->lane == FPL_LANE_HELD) next = first;
@@ -681,6 +761,10 @@ uint32_t fpl_lanes_stop(struct fpl_frame_hold *const lane[2]) {
     for (uint32_t n = 0; n < STOP_POLLS; ++n) {
         if (fpl_hold_collect(first) == FPL_OK) saturate(&first->drained);
         if (second && fpl_hold_collect(second) == FPL_OK) saturate(&second->drained);
+        if (engine_failed(lane)) {
+            if (first->lane == FPL_LANE_HELD) fpl_hold_abandon(first);
+            if (second && second->lane == FPL_LANE_HELD) fpl_hold_abandon(second);
+        }
         if (!lane_busy(first) && !lane_busy(second)) break;
         sleep_ms(1);
     }

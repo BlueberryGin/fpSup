@@ -98,8 +98,11 @@ class FileReader {
     this.onload();
   }
 }
+const store = new Map();   // the page's localStorage
 const ctx = vm.createContext({document, FileReader, TextEncoder, crypto: webcrypto,
-  location: {protocol: 'file:'}, localStorage: {getItem() { return null; }, setItem() {}},
+  location: {protocol: 'file:'}, localStorage: {
+    getItem(k) { return store.has(k) ? store.get(k) : null; },
+    setItem(k, v) { store.set(k, String(v)); }},
   atob: s => Buffer.from(s, 'base64').toString('binary'),
   btoa: s => Buffer.from(s, 'binary').toString('base64'), console});
 for (const hit of html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gi)) {
@@ -110,8 +113,11 @@ vm.runInContext(`globalThis.testUI = {
   selected: () => [...on], category: () => activeCategory, fast: () => fastOn,
   bytes: () => current.vshl.bytes, autorun: () => current.autorun,
   cards: CAT.cards, refresh: render, catalogue: renderCatalogue,
-  uploadBytes: () => composeVshl([CAT.stage2,
-    {a: 0xC1000000, b: btoa('TEST'), k: 'sec', l: 'UI test'}], 0).bytes,
+  // A reload as far as uploads go: forget them in memory, read the browser's copy.
+  reload: () => { for (const c of uploads.splice(0)) on.delete(c.id); restoreUploads(); render(); },
+  uploadBytes: (a = 0xC1000000, text = 'TEST') => composeVshl([CAT.stage2,
+    {a, b: btoa(text), k: 'sec', l: 'UI test'}], 0).bytes,
+  firstPlaced: id => CAT.cards.find(c => c.id === id).records.find(r => r.a >>> 0).a >>> 0,
 };`, ctx);
 const api = ctx.testUI;
 const by = (attr, value) => document.querySelectorAll('[' + attr + ']')
@@ -210,9 +216,56 @@ const uploaded = selection().find(id => id.startsWith('up'));
 assert(uploaded, 'upload was not selected');
 assert(ids('data-category').includes('uploaded'));
 assertCategoryOnly('uploaded', [uploaded]);
-click('data-rm', uploaded);
-assert(!selection().includes(uploaded));
-assert(!ids('data-c').includes(uploaded));
+// Remembered across a reload, unticked; the same bytes twice are one file.
+const remembered = () => JSON.parse(store.get('fpsup-merge-uploads') || '[]');
+assert.equal(remembered().length, 1, 'upload was not remembered');
+input.files = [upload]; input.onchange(event(input));
+assert.equal(remembered().length, 1, 'the same file was remembered twice');
+const before = selection().filter(id => !id.startsWith('up'));
+api.reload();
+choose('shooting');   // the default view: a remembered file must be visible there
+const back = ids('data-c').filter(id => id.startsWith('up'));
+assert.equal(back.length, 1, 'remembered upload did not come back');
+assert(!selection().includes(back[0]), 'a remembered upload must come back unticked');
+assert.deepEqual(selection(), before);
+toggle(back[0], true);
+assert(selection().includes(back[0]));
+const uploadedAgain = back[0];
+// Rename on the tile: shown, remembered, and an empty name keeps the old one.
+const rename = (id, v) => { const n = by('data-rename', id); n.value = v; n.onchange(event(n)); };
+rename(uploadedAgain, '  my sup  ');
+assert.equal(remembered()[0].name, 'my sup');
+assert.equal(by('data-rename', uploadedAgain).getAttribute('value'), 'my sup');
+rename(uploadedAgain, '   ');
+assert.equal(remembered()[0].name, 'my sup', 'an empty name must not replace the old one');
+assert(!ids('data-x').includes(uploadedAgain), 'a compatible upload must not be crossed');
+// A file that writes over a ticked product's section, with other bytes, is crossed.
+const at = api.firstPlaced('gyro');
+input.files = [{name: 'clash.BIN', bytes: Buffer.from(api.uploadBytes(at, 'XXXX'))}];
+input.onchange(event(input));
+const clash = ids('data-c').find(id => id.startsWith('up') && id !== uploadedAgain);
+assert(clash, 'clashing upload missing');
+toggle(clash, false);
+assert(ids('data-x').includes(clash), 'an upload overlapping a ticked product must be crossed');
+click('data-rm', clash);
+assert.equal(remembered().length, 1);
+// A remembered file this page cannot read stays listed, crossed and unselectable.
+store.set('fpsup-merge-uploads', JSON.stringify(remembered().concat([{name: 'bad.BIN', file: btoa('nope')}])));
+api.reload();
+const bad = ids('data-c').find(id => by('data-rename', id)?.getAttribute('value') === 'bad.BIN');
+assert(bad && ids('data-x').includes(bad), 'an unreadable stored file must be crossed');
+assert('disabled' in by('data-c', bad).attrs || by('data-c', bad).disabled, 'an unreadable file must not be selectable');
+click('data-rm', bad);
+const kept = ids('data-c').find(id => id.startsWith('up'));
+assert.equal(remembered().length, 1); toggle(kept, true);
+const uploadedAgain2 = kept;
+click('data-rm', uploadedAgain2);
+assert.equal(remembered().length, 0, 'removing must forget the file');
+api.reload();
+assert(!ids('data-c').some(id => id.startsWith('up')), 'a removed upload came back');
+choose('shooting');
+assert(!selection().includes(uploadedAgain2));
+assert(!ids('data-c').includes(uploadedAgain2));
 assert(!ids('data-category').includes('uploaded'), 'empty uploaded category should disappear');
 assert(ids('data-c').length || document.getElementById('cards').innerHTML.trim(), 'empty category has no explanation');
 // The "+ Add a .BIN" tile is the grid's last card after every re-render, in any
@@ -231,4 +284,4 @@ assert.equal(opened, 2, 'add tile must open the file input on click and on Enter
 assert.deepEqual(selection(), ['gyro', 'og3k']);
 
 console.log('PASS catalogue UI: shooting default, five tiles, add-tile last in the grid, Gyro/Gyro-Base exclusivity, category filters preserve files, cross-category chips, ' +
-  'OG exclusivity, push, Fast on/off and filter persistence, metadata-derived categories, upload and removal.');
+  'OG exclusivity, push, Fast on/off and filter persistence, metadata-derived categories, upload, remembering across reloads, rename, delete, ✗ for clashing or unreadable files.');

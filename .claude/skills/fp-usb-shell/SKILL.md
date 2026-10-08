@@ -1,14 +1,24 @@
 ---
 name: fp-usb-shell
-description: Building and running code on the SIGMA fp with the USB shell — borrowing a call site, the ARM traps that freeze the camera, the host tools, and the AutoRun/VSHL card pipeline. Use when writing or deploying camera-side code. For camera etiquette and reading state, see fp-camera.
+description: Build or review SIGMA fp USB-shell code and verified card updates, including ARM execution context, host transfers and the shared loader. Use for USB-shell payload work; for live camera control, see fp-camera-control.
 ---
+
+> **設定區風險（2026-10-04 更新）**：原廠在 loader 前讀取持久設定；
+> 不支援的值可能使開機或選單失效，拔卡本身不會清除該值。使用者已指出現在有還原手段，
+> 因此不再把這類故障描述成不可恢復。上機前確認會保存的值、可能症狀及適用的還原流程；
+> 未確認還原條件時，優先把自訂狀態留在 RAM。240 fps 與 14-bit 的處理不同，
+> 詳見 `research/SETTINGS_AREA_FIRST_RULE.md`。
+> *(Stock firmware reads persistent settings before the loader. A recovery
+> method now exists; check its applicability before a live trial.)*
 
 # The USB shell as a tool
 
 fpGyroSup is released and in maintenance. Most new work now starts here: the
 shell is how anything gets onto the camera and how you find out what it did.
 
-`fp-camera` covers the live camera — daemon, consent, freezes, what to ask.
+The root `fp-camera-control` skill covers live camera control; the fpSup-local
+`fp-camera` skill records older camera observations. Follow current sources and
+the authorization in this session for live work.
 This file covers building the thing you are about to run.
 
 ## The one rule everything follows from
@@ -16,10 +26,12 @@ This file covers building the thing you are about to run.
 **The shell can write memory. Nothing in it can call.** Code runs by pointing
 an address the firmware already calls at your routine and letting it fire.
 
-Every template in `templates/` starts there. They differ only in *which* site
-they borrow, and that choice decides what your code is allowed to do:
+Paths here are relative to the `fpSup/` checkout unless a command changes
+directory. The maintained ARM sources are in `fp_usb_shell/asm/`. Use the
+[assembly source guide](references/assembly-sources.md) to choose a source and
+check its caller. Execution context depends on the site it borrows:
 
-| borrow | template | your code may |
+| borrow | source | your code may |
 |---|---|---|
 | a shell command handler | `shellcmd.S` | block, take mutexes, do file I/O — it runs in the dispatcher's task |
 | the gyro callback | `oneshot.S` | not block, not take a mutex, not call anything that might — 50-90 Hz, interrupt-ish |
@@ -75,13 +87,29 @@ All five were paid for. Each one looks like a bug in your payload.
    then 0, then 48. Not pacing; no delay makes it safe. Two lost words turned
    `movt ip, #0xC044` into the `blx ip` after it. **Write, read back, rewrite
    the holes, repeat.** Reads are sound.
-5. **Sharing `0xC072F700`.** Templates all use it. `bulkload.S` kept its
-   destination pointer at `+0x14`, which is `getfile.S`'s buffer; loading
-   getfile walked that pointer and the read landed elsewhere.
+5. **Sharing scratch without ownership.** An earlier `bulkload.S` kept its
+   destination pointer at `+0x14` of a shared parameter block; loading
+   `getfile.S` then walked that pointer and the read landed elsewhere. Current
+   host tools claim their own blocks through `cave.py`; inspect the running
+   build before using one.
 
 Move bytes in the command line, not one `mem set` per word: `bulkload.S` does
 ~240 at a time against 4, which took a 14 KB AutoRun from 448 s to under one.
-Verification matters *more* there — a lost chunk is a 240-byte hole.
+`putfile.py` checks the camera-side byte counter after a lost reply and every
+32 chunks. It retries a missing chunk at a known address, or resends a silently
+failed batch at its original address. It never blindly retries the append-style
+`echo`, which could duplicate data. Full memory and file readback remain
+required before considering the update complete. If a two-word cursor reply is
+incomplete, the host reads each missing word separately; if either still cannot
+be confirmed, staging stops before the card file is opened.
+
+**Bulk bytes go through MEM1 now** (worker CMD 6-9, fpshd 3.2.0): host to
+camera memory 398 MB/s, back 382 MB/s, guarded by a window table the camera
+enforces. `putfile.put()` / `read_direct()` use it automatically and fall back
+to the paths above on an old worker. How to use it, upload and download files,
+write fast commands or hook rings, and debug a lost command: skill
+**fp-usb-transfer**. UP01 (CMD 4/5, 16 KiB chunks) is still in the worker for
+old hosts; it measured ~0.1 MiB/s and is superseded.
 
 Freshly written code is data to the caches until `0xC000E91C` runs.
 
@@ -107,28 +135,17 @@ image" mechanism to look for. Read back anyway — trap 4 applies everywhere.
 
 ## A probe that answers with a struct
 
-The recipe behind both of those. `shellcmd.S` gives task context, so the routine
-may call a firmware function that allocates — which is the whole difficulty with
-anything that builds a config object.
+`shellcmd.S` gives task context, so the routine may call a firmware function
+that allocates. Use a reviewed host tool to claim code and result blocks from
+`cave.py`, upload and read back the code, publish its D/I caches, then borrow
+the exact expected `echo` handler. Restore the handler in `finally` and verify
+the readback. `callfn.py` handles a function whose answer fits in `r0`; write a
+probe for a structure or a pointer walk that must be captured in one camera-side
+snapshot. Print a marker through `[r0]` so a run that did nothing is visible.
 
-```
-put(0xC072F800, code)              write, verified
-mem set 0xC0BAC2F8 → 0xC072F800    borrow echo's handler
-fpsh echo                          runs synchronously, in the dispatcher's task
-mem set 0xC0BAC2F8 → 0xC03D99A0    restore, in a `finally`
-mem get 0xC072FA00                 read what it left
-```
-
-Leave results at **`0xC072FA00`**, not `0xC072F700` — the parameter block is
-shared by every template (trap 5), and `0xC072FA00`–`0xC0730000` is free.
-`callfn.py` is the version of this for a function whose answer fits in `r0`;
-write a payload when you want a structure, several calls in one pass, or a
-pointer walk that must not be interrupted.
-
-Print one line back through `[r0]` so a run that did nothing is distinguishable
-from a command that never fired. Restoring the handler belongs in a `finally`:
-a handler left pointing into the cave is a command that jumps into whatever is
-injected there next.
+The old `0xC072F700` parameter block and `0xC072FA00..0xC0730000` result area
+are **not free-space grants**. Check the current allocation map and resident
+users before selecting storage.
 
 
 ## Two bases, and they are not the same
@@ -142,8 +159,8 @@ This one cost two weeks of a red test suite reading like a real overrun:
 | `PARK_AT` | `0xC072EFB4` | the park stub; nothing of ours may reach it |
 | — | `0xC072F000` | the shell's own state starts here |
 
-Template scratch is separate: `0xC072F700` parameters/results (256 B),
-`0xC072F800` the routine, up to `0xC0730000`.
+Older probes used fixed scratch near `0xC072F700`; new tools claim blocks through
+`cave.py`. Existing fixed worker words are not allocatable.
 
 `build_base_card.py` refuses to write a card whose sections reach `PARK_AT`.
 Trust that guard over any arithmetic written down somewhere else.
@@ -226,26 +243,41 @@ cd fpSup/fp_usb_shell
 | `inject.py <src.S>` | assemble and run once |
 | `callfn.py <fn> --r0 .. --r5` | call one firmware function, see what it returned |
 | `load.py <src.S> --entry S --hook ADDR` | place a resident image and arm it |
-| `putfile.py <local> <remote>` | write a file to the card (mode 7 truncates; `0x402` fails if it exists) |
+| `putfile.py <local> <remote>` | low-level file write; mode 7 does **not** truncate an existing longer file |
 | `getfile.py <remote> [local] --size N` | read one back |
+| `deploy.py <card-directory>` / `deploy.py --bin-only <card-directory>` | verified pair update / compatible BIN-only update |
 | `memprobe.py <base> <size> [--check]` | mark a region, then see what survived |
 | `swapworker.py` | replace the resident worker without a battery pull, ~1 s |
 | `build_autorun.py` | build `AutoRun.txt` (+ `fpSup.BIN` with `--loader`; `--bin-name` renames it) |
 
 Run python from `fp_usb_shell/` — imports resolve from there.
 
-⚠️ `swapworker.py` and the deploy scripts **talk to the camera when run with no
-arguments**. Do not run one to read its usage.
+⚠️ `swapworker.py` **talks to the camera with no arguments**. Do not run it to
+read its usage. `deploy.py`, `putfile.py`, and `getfile.py` parse arguments
+before live operations; use `--help` for offline usage text.
 
 ## Hot-updating what is already running
 
-Editing camera-side code used to cost a reboot per edit — the task asking for
-the change is running inside the code being replaced. Eight reboots in one
-evening for eight one-line edits is what produced both mechanisms below. Use
-them; a battery pull per iteration is not the cost of this work any more.
+When a live card update is authorized, use `deploy.py --bin-only
+<card-directory>` for a compatible Sensor Lab payload and wait for its full
+readback verification before rebooting. The command queries and writes the
+camera immediately; offline planning or testing must not invoke it.
+It checks the card's complete AutoRun against the target (allowing only an
+inert comment tail left by an older non-truncating write), handles an existing
+BIN that is longer than the new payload, and compares the complete remote file.
+If the candidate has `FPSUPUI/*.BIN`, the tool requires each candidate sidecar
+to match the card before any root-file write; it does not upload sidecars or
+discover extra remote ones. The tool does not establish payload ABI, settings
+safety or Fast configuration; establish those from the build and its provenance
+before a BIN-only update.
+Mode 7 overwrites bytes without shortening the existing file: a prefix hash is
+not verification. Keep deploy and reboot as separate operations. If a transfer
+has an uncertain outcome, stop and inspect ownership and card state before any
+retry or reboot. The [transfer guide](references/hot-update.md) explains the
+preflight and recovery decisions.
 
-**They are two different mechanisms.** Which one you need depends on whether
-the thing you are replacing can reach the loader by itself.
+RAM code replacement has two mechanisms. Choose by whether the running code can
+reach the loader by itself.
 
 ### The shell worker: hand the task over (`swapworker.py`)
 
@@ -253,7 +285,7 @@ The worker checks two words every round, so the swap is just the boot path
 asked for a second time:
 
 ```
-putfile fpSup.BIN                    the new code, onto the card
+deploy.py --bin-only CARD_DIR        verified compatible BIN update
 mem_set 0xC072F048 <loader `load`>   SWAP_ADDR — address first
 mem_set 0xC072F044 0x50415753        SWAP_MAGIC "SWAP" — magic second
 ```
@@ -333,7 +365,8 @@ which a card never does.
 **21 notes in `notes/` still describe `EP 0x05 OUT / EP 0x84 IN`.** That
 configuration is gone; EP84 is not enabled under the current descriptors and
 `StartTransfer` on it was refused 100/100. Read
-`../projects/usb-shell-sup/notes/USB_SHELL_INDEX.md` before any other shell note — it says which are
+`projects/usb-shell-sup/notes/USB_SHELL_INDEX.md` from the research root before
+any other shell note — it says which are
 current and which were overturned.
 
 ## Cards
@@ -395,9 +428,9 @@ apart:
 | `ERR shl claim iface 0 ... ACCESS` | someone holds interface 0. `pgrep -fl fpshd` **first** — a second daemon is the usual cause. If there is one daemon, check `./lsdesc`: class `06/01/01` means the interface patch is missing and the host PTP stack took it |
 | `ERR shl frame0 ... TIMEOUT moved=0/64` | it enumerated and nothing answers. The worker is not serving — which is not the same as absent. On the first debug card the worker was placed, started, and never scheduled: its task and the loader's were both priority 28, and the loader's ended in `b .`. TK-OS does not preempt between equals. `rounds` at 0 says this in one read |
 
-## Adding a template
+## Adding an assembly source
 
-Two things earn a file a place in `templates/`, and neither is "it worked once":
+Two things earn a reusable source a place in `asm/`, and neither is "it worked once":
 
 - **Every return value is checked.** The media API reports failure by returning
   zero; a write that never happened looks exactly like one that worked.
@@ -407,20 +440,14 @@ Two things earn a file a place in `templates/`, and neither is "it worked once":
 
 ## What this was written against
 
-Firmware Ver.5.02. `FPSHD_VERSION` is **3.0.0** and that is accurate: the daemon
-has not changed one byte since it was set (`git diff fp-usb-shell-v3.0.0 HEAD --
-host/fpshd.c` is empty). There is no 3.x.
+Firmware Ver.5.02. `FPSHD_VERSION` identifies the daemon protocol, not the
+current contents of the camera worker, `build_autorun.py`, or `asm/`. Check the
+selected source and build hash instead of inferring it from that string.
 
-What the number does not cover is the rest of the shell — the camera side and
-the build tooling are ~540 lines and 8 files further on (`build_autorun.py`,
-`loader.S`, and the `stage2.S` / `lensblock.S` / `sleeper.S` templates, all
-added since), with no version of their own. `README.md`'s "v3" means the whole
-package; `FPSHD_VERSION` means only the daemon. Do not read one as the other.
-
-Two remotes: `origin` (GitHub, serves the downloads) and `local`
-(`git@git:bei/sigma_fp_re_usbshell.git`, Forgejo on `git.lan`, SSH). **Every
-test build is committed and pushed to `local` before the card goes in**, so a
-result can be attached to a commit rather than to a working tree.
+Historical test builds were committed and pushed to `local` before camera
+trials for traceability. That record is not standing authorization to publish
+this task's work. Follow the current user's requested scope for commits,
+pushes, card writes and camera trials.
 
 Verified on the camera, shell-only card, 2026-09-09:
 
@@ -439,9 +466,9 @@ Added 2026-09-10, same card:
 - `mem set` into `0xC0B59500` and `0xC0BE5810` holds, and `imager mode_list`
   reports the change
 
-**Not yet verified:** anything on the card path — the sleeper, `HOOK_RESTORE`,
-and whether the logger still records under the `echo` bootstrap. A shell-only
-build's entry never returns, so none of it is on that route.
+These dated results describe the 2026-09-09 shell-only card. For later card
+paths, consult the current build sources, tests and card-specific validation;
+do not reuse this list as the present acceptance status.
 
 ## Keeping this file honest
 

@@ -74,7 +74,7 @@ def main():
     if P.sh('version', retries=3).startswith('ERR'):
         raise SystemExit('the camera is not answering')
 
-    P.put(P.CODE, assemble(SHELL / 'templates' / 'lensblock.S',
+    P.put(P.CODE, assemble(SHELL / 'asm' / 'lensblock.S',
                            [f'P=0x{P.P:08X}']), 'lens  ')
     dst = P.staging_area()
     orig = P.mem_get(P.ECHO_SLOT)

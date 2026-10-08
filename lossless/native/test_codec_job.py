@@ -53,7 +53,7 @@ def build(directory, source=None, name='codec.dylib'):
                    check=True, capture_output=True, text=True, timeout=60)
     lib = ct.CDLL(str(out))
     for fn, count, ret in (('reset', 3, True), ('set', 2, False), ('submit', 0, True),
-                           ('poll', 0, True), ('get', 1, True), ('source_bytes', 3, True),
+                           ('poll', 0, True), ('wait', 1, True), ('get', 1, True), ('source_bytes', 3, True),
                            ('abort', 0, True)):
         f = getattr(lib, 'fpl_fixture_' + fn)
         f.argtypes = [ct.c_uint32] * count
@@ -106,6 +106,40 @@ class CodecJobTests(unittest.TestCase):
             DST, 0x2000, band_table, 160 * 4, 0xC062FCB1])
         self.assertEqual(self.get(BAND_TABLE), band_table)
         self.assertEqual(self.get(TILECOUNT), 12)
+
+    def test_a_forced_grid_reaches_init_and_the_request(self):
+        self.set(17, 480 << 16 | 368)
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+        self.assertEqual([self.get(220 + i) for i in (3, 4)], [480, 368])
+        self.assertEqual(self.request()[3:5], [480, 368])
+        self.assertEqual(self.get(TILECOUNT), 5 * 3)
+        self.assertEqual((self.get(117), self.get(118)), (480, 368))
+
+    def test_a_wait_gives_the_engine_flag_its_ticks_and_finishes_as_a_poll_does(self):
+        self.lib.fpl_fixture_submit()
+        self.assertEqual(self.lib.fpl_fixture_wait(10), OK)    # 0xDEAD unless tmo == 10
+        self.assertEqual(self.get(PHASE), DONE)
+        self.lib.fpl_fixture_reset(*FHD)
+        self.lib.fpl_fixture_submit()
+        self.assertEqual(self.lib.fpl_fixture_wait(0), OK)     # 0: the one-tick poll
+
+    def test_a_new_force_on_the_same_job_gets_a_new_grid(self):
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+        self.assertEqual(self.request()[3:5], [512, 368])
+        self.set(6, 0); self.lib.fpl_fixture_poll()          # finish it
+        self.set(17, 480 << 16 | 368)
+        self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+        self.assertEqual(self.request()[3:5], [480, 368])
+
+    def test_a_grid_the_engine_or_tiff_cannot_take_falls_back(self):
+        # not a multiple of 32 / of 16 / too wide / too many tiles for FHD
+        for force in (500 << 16 | 368, 512 << 16 | 360, 544 << 16 | 368, 64 << 16 | 16):
+            with self.subTest(force=hex(force)):
+                self.lib.fpl_fixture_reset(*FHD)
+                self.set(17, force)
+                self.assertEqual(self.lib.fpl_fixture_submit(), OK)
+                self.assertEqual(self.request()[3:5], [512, 368])
+                self.assertEqual(self.get(TILECOUNT), 12)
 
     def test_an_exact_multiple_height_is_not_sent_as_zero(self):
         """C062F6F8 would send height % (368 * rows) = 0 for 736 rows."""
@@ -372,6 +406,13 @@ class MutationTests(unittest.TestCase):
                                        'ceil_div(in->height, FPL_TILE_HEIGHT));'),
         'gives up without closing': ('    if ((native = native_close()) != 0) return fail(j, native);\n    j->phase = FPL_CODEC_IDLE;\n    return FPL_OK;',
                                      '    (void)native;\n    j->phase = FPL_CODEC_IDLE;\n    return FPL_OK;'),
+        'a wait polls one tick': ('                             ticks ? ticks : WAIT_POLL);',
+                                  '                             ((void)ticks, WAIT_POLL));'),
+        'ignores the forced grid': (
+            '        fpl_tile_grid(in->width, in->height, in->tile_force, &j->grid[0], &j->grid[1]);',
+            '        fpl_tile_grid(in->width, in->height, 0, &j->grid[0], &j->grid[1]);'),
+        'keeps a grid made for another force': ('        j->grid_for[2] != in->tile_force) {', '        0) {'),
+        'tells the engine the default tile': ('    j->request[3] = tw;', '    j->request[3] = FPL_TILE_WIDTH;'),
         'clears the flag on a timeout': (
             '    if (native == E_TMOUT) return FPL_BUSY;          /* still encoding */',
             '    if (native == E_TMOUT) { native_clr_flg(j->flag, 0); return FPL_BUSY; }'),

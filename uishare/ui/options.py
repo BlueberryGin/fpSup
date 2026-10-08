@@ -182,6 +182,18 @@ def resolution(label, summary, expect_state=2):
     return blk
 
 
+def hand_out(blk, pairs):
+    """For each (text, address): the string goes into the block's string layer
+    (unless the stock pool has it -- then pass its stock place in `text` as
+    (text, stock_at)) and, at commit, its offset is written to `address`, the
+    sup's own data (STRBASE). Written in the order given: put the word the
+    sup's code treats as 'ready' last."""
+    for text, address in pairs:
+        text, at = text if isinstance(text, tuple) else (text, fpui.NOT_STOCK)
+        blk.op(fpui.OP_STRBASE, blk.string(text, at), address)
+    return blk
+
+
 # ---- the reference, run against the image ---------------------------------------
 def run(blocks, img=None, pool_stock=None):
     """Apply blocks (encoded) in order with the reference applier against the
@@ -196,6 +208,102 @@ def run(blocks, img=None, pool_stock=None):
             _, _, n = resource_set(s['name'])
             pages[s['name']] = fpui.PageCopy(at(img, a, n), n, 1)
     files = fpui.Files(lambda a, n: at(img, a, n))
-    pool = fpui.Pool(pool_stock)
+    pool = fpui.Strings(pool_stock)
     results = [fpui.apply(b, pages, pool, files) for b in blocks]
     return pages, files, pool, results
+
+
+# ---- movie resolution with a Quick Set state (QS_SHARE.md §9) ---------------------
+# The summary under the collapsed row, per row k (state k): k = 2..4 are stock
+# objects with a text word at +32; k = 5..7 have none, so the text word is set,
+# the object's flag byte (+31) turned on and five zero bytes inserted at +36
+# (Jose Hurtado's Formats v0.6.1, camera). Each only by the sup with that row.
+RES_SUMMARY_K = {2: (0xC1A7246B, False), 3: (0xC1A725AC, False), 4: (0xC1A726ED, False),
+                 5: (0xC1A7282E, True), 6: (0xC1A7296A, True), 7: (0xC1A72AA6, True)}
+RES_POPUP_Y = 0xC1A70827 + 36             # BE float: the popup's offset, 0 stock
+# f(N) of the popup offset: N = 3 (OpenGate) 0 and N = 8 (Jose) -164 on the
+# camera; 4..7 are a straight line between them, NOT VERIFIED. The sup with
+# row k adds f(k+1) - f(k), so the sum over rows 2..N-1 is f(N), any order.
+RES_POPUP_F = {3: 0, 4: -33, 5: -66, 6: -98, 7: -131, 8: -164}
+RES_POPUP_VERIFIED = {3, 8}
+# Six page names (B2_5_5, B2_5_5_excl..5) the summary picks by mode: Jose
+# points all six at B2_5_5 once there are more rows than the _excl variants
+# list. Done by the sup with row 3 (it exists iff N >= 4); N = 4..7 NOT VERIFIED.
+RES_EXCL = (0xC1A74F57, [54, 64, 74, 84, 94, 104], 0x9B94)
+RES_K_MAX = 7
+
+
+def _if_slot(blk, slot, value, emit):
+    """IF_SLOT around the ops `emit` adds: only the sup whose slot is `value`."""
+    at = len(blk.ops)
+    blk.op(fpui.OP_IF_SLOT, slot, value, 0)
+    emit()
+    blk.ops[at] = (fpui.OP_IF_SLOT, [slot, value, len(blk.ops) - at - 1])
+
+
+def resolution_qs(label, summary, images, enum, layer, pack=b'', flags=1):
+    """A resolution entry with its own Quick Set state (QS_SHARE.md §9).
+
+    label: the Settings row text; summary: the collapsed summary text;
+    images: the three image names (QS, SET, FONT) in this sup's pack, already
+    carrying its file-name prefix (§9.4); enum: the resolution value this sup
+    stores -- from the one table, ui/enums.py, for the format `label` names
+    (the build fails otherwise); its row k is only a position; layer: (blob, sym) from
+    qs_build.layer_blob(); pack: its private NBR pack.
+
+    The row index k is handed out on the camera (CSV_ADD); everything that
+    depends on k is under IF_SLOT, so the block is the same for every k.
+
+    flags: 1 (QS_FLAG_SWITCH, the default) re-parses the cached Quick Set layout
+    once whenever the value becomes this sup's, and at power-on when it already
+    is. Camera 2026-10-07: the big tile's image names are fixed when the layout
+    is parsed, and the firmware re-parses it while the setter is still running,
+    before the setting holds the new value -- without this the images lag one
+    change, and a layout parsed before the layers never shows ours."""
+    from . import enums
+    enum = enums.resolution(label, enum)
+    img = image()
+    blob, sym = layer
+    blk = fpui.Block()
+    hook_fv(blk)
+    name, addr, size = RES_CSV
+    csv_file(blk, addr, size, ['{N},%s,Popup,,1,2' % label])          # slot 0 = k
+    a, off, n = resource_set('B2_5')
+    s = blk.string(summary, fpui.NOT_STOCK)
+    blk.op(fpui.OP_PAGE, blk.string('B2_5', fpui.NAME), off, n, 1, 0, 64, 4)
+    blk.op(fpui.OP_GUARD, 0, struct.unpack('>I', at(img, a, 4))[0])
+    blk.op(fpui.OP_ADDF, RES_LIST_MAX - a, 1)
+    ks = sorted(RES_SUMMARY_K)
+    blk.op(fpui.OP_SETSTR_SLOT, 0, ks[0], len(ks), s, *[RES_SUMMARY_K[k][0] + 32 - a for k in ks])
+    zeros = blk.fragment(bytes(5))
+    for k in ks:
+        rec, grow = RES_SUMMARY_K[k]
+        step = RES_POPUP_F.get(k + 1, 0) - RES_POPUP_F.get(k, 0)
+
+        def emit(rec=rec, grow=grow, step=step, k=k):
+            if grow:
+                blk.op(fpui.OP_GUARD, rec + 28 - a, struct.unpack('>I', at(img, rec + 28, 4))[0])
+                blk.op(fpui.OP_ADD32, rec + 4 - a, 5)              # the record's length
+                blk.op(fpui.OP_ADD32, rec + 28 - a, 1)             # +31: the text flag
+                blk.op(fpui.OP_INSERT, rec + 36 - a, zeros, 5)
+            if step:
+                blk.op(fpui.OP_ADDF, RES_POPUP_Y - a, step)
+            if k == 3:
+                base, offs, want = RES_EXCL
+                for o in offs:
+                    stock = struct.unpack('>I', at(img, base + o, 4))[0]
+                    blk.op(fpui.OP_ADD32, base + o - a, (want - stock) & 0xFFFFFFFF)
+        if grow or step or k == 3:
+            _if_slot(blk, 0, k, emit)
+    blk.op(fpui.OP_DONE)
+    # the layers and the pack, in the fragment: the layer 8-aligned, the pack with room to align
+    blk.frag.extend(bytes(-len(blk.frag) % 8))
+    lay = blk.fragment(blob)
+    pk = room = 0
+    if pack:
+        pk = blk.fragment(pack + bytes(64))
+        room = len(pack) + 64
+    qs_s = [blk.string(i, fpui.NOT_STOCK) for i in images]
+    blk.op(fpui.OP_QS_OPTION, 0, enum, flags, lay, len(blob), sym['table'], sym['qs_check'],
+           sym['qs_hang'], sym['qs_pack_place'], *qs_s, pk, len(pack), room, addr)
+    return blk

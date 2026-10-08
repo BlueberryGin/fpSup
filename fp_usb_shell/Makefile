@@ -1,4 +1,4 @@
-# fp USB Shell v2
+# fp USB Shell v3
 #
 # The host tools need libusb-1.0.  The usual route is `brew install libusb`
 # (macOS) or `apt install libusb-1.0-0-dev` (Debian/Ubuntu); this Makefile finds
@@ -25,6 +25,11 @@ ifeq ($(USB_LDFLAGS),)
   ifneq ($(BREW),)
     USB_CFLAGS := -I$(BREW)/include/libusb-1.0
     USB_LDFLAGS := -L$(BREW)/lib -lusb-1.0
+  else ifneq ($(and $(wildcard ../../projects/fp-af-assist/diagnostics/include/libusb.h),$(wildcard ../../projects/usb-shell-sup/lib/libusb-1.0.dylib)),)
+    LOCAL_USB_HEADER := $(abspath ../../projects/fp-af-assist/diagnostics/include)
+    LOCAL_USB_LIB := $(abspath ../../projects/usb-shell-sup/lib)
+    USB_CFLAGS := -I$(LOCAL_USB_HEADER)
+    USB_LDFLAGS := -L$(LOCAL_USB_LIB) -lusb-1.0 -Wl,-rpath,$(LOCAL_USB_LIB)
   else
     USB_CFLAGS := -I/usr/include/libusb-1.0
     USB_LDFLAGS := -lusb-1.0
@@ -34,7 +39,7 @@ endif
 all: fpshd lsdesc autorun
 
 fpshd: host/fpshd.c
-	$(CC) $(CFLAGS) $< $(USB_CFLAGS) $(USB_LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $< $(USB_CFLAGS) $(USB_LDFLAGS) -lz -o $@
 
 lsdesc: host/lsdesc.c
 	$(CC) $(CFLAGS) $< $(USB_CFLAGS) $(USB_LDFLAGS) -o $@

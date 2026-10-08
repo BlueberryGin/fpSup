@@ -53,6 +53,22 @@ Ops, one header word (opcode << 24 | argument word count) then the arguments:
   EXPECT  slot, value                        (else the block is refused)
   SETSTR_SLOT slot, base, n, string#, n stock positions
                                              (page word at position[slot - base] = string)
+  STRBASE string#, address                   (at commit: LE word at address = the offset
+                                              string# was given -- a sup's own data)
+  QS_OPTION slot, enum, flags, layer frag offset, layer length, table / qs_check /
+          qs_hang / qs_pack_place offsets in the layer, QS# SET# FONT# (image
+          names), pack frag offset, pack length, pack room, CSV stock address
+          -- this sup's Quick Set state (QS_SHARE.md): row k = slot, N = the
+          CSV's rows (a FILE of it is done in this block); checked here,
+          hung at commit, last. At most one per block.
+  IF_SLOT slot, value, ops                   (skip the next `ops` ops unless slot == value:
+                                              edits only the sup with that row makes)
+
+Strings (2026-10-04, NESTED_HOOKS.md). A string whose stock_at holds in the
+stock pool resolves there; every other string goes into this block's own layer
+of the nested string hooks: offsets base, base+1, ... in block order, base =
+where the layer inside it ended (the first layer starts at LAYER_FIRST). The
+pool is never copied or scanned; the layer goes up at commit.
 
 Templates expand {N} = the row count after the row is added (the new row's
 number), {P} = N - 1, {Q} = N - 2. Nothing takes effect until the whole block
@@ -67,7 +83,12 @@ MAGIC, VERSION = b'FPUI', 1
 NOT_STOCK, NAME = 0xFFFFFFFF, 0xFFFFFFFE
 OP_PAGE, OP_GUARD, OP_INSERT, OP_ADD32, OP_ADDF, OP_ALLOC, OP_DONE = 1, 2, 3, 4, 5, 6, 7
 OP_HOOK_FV, OP_FILE, OP_CSV_ADD, OP_CSV_CELL, OP_FILE_SET, OP_FILE_DONE = 8, 9, 10, 11, 12, 13
-OP_EXPECT, OP_SETSTR_SLOT = 14, 15
+OP_EXPECT, OP_SETSTR_SLOT, OP_STRBASE = 14, 15, 16
+# 2026-10-06 (QS_SHARE.md §9): one place for the new opcodes; Loader v3's All Sups
+# menu (projects/usb-shell-sup) takes the numbers after these.
+OP_QS_OPTION, OP_IF_SLOT = 17, 18
+QS_OPTION_ARGS = 16
+LAYER_FIRST = 0x40000000    # ui_pool.h UIS_LAYER_FIRST
 ROW_FIRST, ROW_LAST_BEFORE = 0, 1
 R_LOCAL_ID, R_STRING, R_SLOT_F32, R_SLOT_U32 = 1, 2, 3, 4
 MAX_COUNTERS = 8            # per page copy (ui_apply.h UIA_COUNTERS)
@@ -178,29 +199,94 @@ def decode(blob):
 
 
 # ---- the reference applier ---------------------------------------------------
-class Pool:
-    """The shared string pool as uishare/ui_pool.c keeps it (offsets only)."""
+class Strings:
+    """The stock pool and the nested string layers, as ui_pool.c builds them
+    (NESTED_HOOKS.md): the pool never changes; each block's private strings
+    are one layer, offsets after the layer inside it."""
 
     def __init__(self, stock):
         self.stock = bytes(stock)
-        self.data = bytearray(stock)
+        self.layers = []            # (base, [text, ...]), innermost first
+        self.qs = []                # (qsid, enum, [three names]) per QS layer, innermost first
 
-    def intern(self, text, stock_at):
+    def next_base(self):
+        if not self.layers:
+            return LAYER_FIRST
+        base, texts = self.layers[-1]
+        return base + len(texts)
+
+    def stock_has(self, text, stock_at):
         s = text.encode()
-        if stock_at not in (NOT_STOCK, NAME) and stock_at + len(s) < len(self.stock) and \
-                self.data[stock_at:stock_at + len(s) + 1] == s + b'\0':
+        return stock_at not in (NOT_STOCK, NAME) and stock_at + len(s) < len(self.stock) and \
+            self.stock[stock_at:stock_at + len(s) + 1] == s + b'\0'
+
+    def plan(self, strings):
+        """(offset per string (None for names), the texts a new layer holds)."""
+        offsets, private = [], []
+        base = self.next_base()
+        for text, at in strings:
+            if at == NAME:
+                offsets.append(None)
+            elif self.stock_has(text, at):
+                offsets.append(at)
+            else:
+                offsets.append(base + len(private))
+                private.append(text)
+        return offsets, private
+
+    def view(self):
+        return StringView(self)
+
+    def offset(self, text, stock_at=NOT_STOCK):
+        """Where `text` resolves: its stock place if stock_at holds, else its
+        first place in a layer."""
+        if self.stock_has(text, stock_at):
             return stock_at
-        start = len(self.stock) if stock_at == NOT_STOCK else 0
-        i = self.data.find(s + b'\0', start)
-        if i >= 0:
-            return i
-        self.data.extend(b'\0' * (-len(self.data) % 4))
-        at = len(self.data)
-        self.data.extend(s + b'\0')
-        return at
+        for base, texts in self.layers:
+            if text in texts:
+                return base + texts.index(text)
+        raise FpuiError('%r is in no layer' % text)
 
     def text(self, offset):
-        return self.data[offset:self.data.index(b'\0', offset)].decode()
+        for base, texts in self.layers:
+            if base <= offset < base + len(texts):
+                return texts[offset - base]
+        check(offset < len(self.stock), 'offset 0x%X resolves to nothing' % offset)
+        return self.stock[offset:self.stock.index(b'\0', offset)].decode()
+
+
+class StringView:
+    """Strings read like one bytes pool, for tools that slice a pool by offset
+    (len, [a:b], find(b'\\0', a)): stock offsets read the stock bytes, layer
+    offsets read the layer's text and its NUL."""
+
+    def __init__(self, strings):
+        self.s = strings
+
+    def __len__(self):
+        return self.s.next_base()
+
+    def _layer(self, off):
+        for base, texts in self.s.layers:
+            if base <= off < base + len(texts):
+                return texts[off - base].encode() + b'\0'
+        return None
+
+    def __getitem__(self, k):
+        check(isinstance(k, slice) and k.step is None, 'StringView takes [a:b]')
+        start = k.start or 0
+        text = self._layer(start)
+        if text is None:
+            return self.s.stock[k]
+        stop = len(text) if k.stop is None else k.stop - start
+        return text[:stop]
+
+    def find(self, sub, start=0):
+        text = self._layer(start)
+        if text is None:
+            return self.s.stock.find(sub, start)
+        i = text.find(sub)
+        return -1 if i < 0 else start + i
 
 
 class PageCopy:
@@ -282,13 +368,20 @@ def csv_cell(data, row, col, tpl):
 
 
 def apply(blob, pages, pool, files=None):
-    """Carry out one block. pages: {entry name: PageCopy}; a page this block
-    touches is replaced by a new PageCopy only if every op succeeded (the
-    camera switches the entry at DONE). Returns {entry name: first local id}."""
+    """Carry out one block. pages: {entry name: PageCopy}; pool: Strings. A
+    page this block touches is replaced by a new PageCopy only if every op
+    succeeded (the camera switches the entry at DONE). Returns {entry name:
+    first local id, 'slots': [...], 'strbase': [(address, offset)]}."""
     strings, ops, frag = decode(blob)
+    offsets, private = pool.plan(strings)
+    strbase = []
     work, page, name, first_id, slots, result = None, None, None, 0, [], {}
     done_pages, done_files, fwork = {}, {}, None
+    skip, qs = 0, None
     for code, a in ops:
+        if skip:
+            skip -= 1
+            continue
         if code == OP_PAGE:
             check(work is None and len(a) == 7, 'bad PAGE')
             name = strings[a[0]][0]
@@ -315,7 +408,8 @@ def apply(blob, pages, pool, files=None):
                 if kind == R_LOCAL_ID:
                     v = first_id + arg
                 elif kind == R_STRING:
-                    v = pool.intern(*strings[arg])
+                    check(offsets[arg] is not None, 'a name is not a string')
+                    v = offsets[arg]
                 elif kind == R_SLOT_F32:
                     v = int_to_f32(slots[arg])
                 elif kind == R_SLOT_U32:
@@ -389,14 +483,45 @@ def apply(blob, pages, pool, files=None):
             check(work is not None and len(a) >= 4 and a[0] < len(slots), 'bad SETSTR_SLOT')
             idx = slots[a[0]] - a[1]
             check(0 <= idx < a[2] and idx < len(a) - 4, 'slot outside the positions')
-            work.put(a[4 + idx], pool.intern(*strings[a[3]]))
+            check(offsets[a[3]] is not None, 'a name is not a string')
+            work.put(a[4 + idx], offsets[a[3]])
+        elif code == OP_STRBASE:
+            check(len(a) == 2 and a[0] < len(strings) and offsets[a[0]] is not None,
+                  'bad STRBASE')
+            strbase.append((a[1], offsets[a[0]]))
+        elif code == OP_QS_OPTION:
+            check(len(a) == QS_OPTION_ARGS and a[0] < len(slots) and qs is None, 'bad QS_OPTION')
+            check(all(offsets[i] is not None for i in a[9:12]), 'a name is not a string')
+            check(a[3] + a[4] <= len(frag) and a[4] and a[12] + a[14] <= len(frag) and
+                  (not a[13] or a[13] + 63 <= a[14]), 'QS_OPTION outside the fragment')
+            check(a[15] in done_files, 'QS_OPTION before its CSV is done')
+            own = offsets[a[9]]
+            check(strings[a[9]][1] != NAME and own in range(pool.next_base(), 1 << 32) and
+                  offsets[a[10]] == own + 1 and offsets[a[11]] == own + 2,
+                  'QS images are not three private strings in a row')
+            # the shared ids: the first QS sup's own (QS_SHARE.md §4.3)
+            shared = pool.qs[0][0] if pool.qs else own
+            qs = {'k': slots[a[0]], 'n': csv_rows(done_files[a[15]]), 'enum': a[1], 'flags': a[2],
+                  'ids': [shared, shared + 1, shared + 2, offsets[a[10]]],
+                  'layer': (shared, a[1], [strings[i][0] for i in a[9:12]])}
+        elif code == OP_IF_SLOT:
+            check(len(a) == 3 and a[0] < len(slots), 'bad IF_SLOT')
+            if slots[a[0]] != a[1]:
+                skip = a[2]
         else:
             raise FpuiError('unknown op %d' % code)
-    check(work is None and fwork is None, 'block ends inside a PAGE or FILE')
+    check(work is None and fwork is None and not skip, 'block ends inside a PAGE, a FILE or an IF_SLOT')
     if files is not None:
         fresh = [s for s in done_files if s not in files.table]
         check(len(files.table) + len(fresh) <= files.capacity, 'redirect table full')
         files.table.update(done_files)
+    if private:
+        pool.layers.append((pool.next_base(), private))
+    if qs is not None:
+        pool.qs.append(qs['layer'])
     pages.update(done_pages)
     result['slots'] = slots
+    result['strbase'] = strbase
+    if qs is not None:
+        result['qs'] = qs
     return result

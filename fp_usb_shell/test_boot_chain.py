@@ -32,7 +32,7 @@ class BootChainTests(unittest.TestCase):
         for profile in (False, True):
             with self.subTest(profile=profile):
                 defines = DEFINES + (['LOAD_START_US=0xC072F6F4'] if profile else [])
-                code = words(assemble(HERE / 'templates/loader.S', defines))
+                code = words(assemble(HERE / 'asm/loader.S', defines))
                 calls = [(i, branch_target(w, i * 4, LOADER_BASE))
                          for i, w in enumerate(code) if w >> 24 == 0xEB]
                 dcall = [i for i, target in calls if target == DCACHE]
@@ -55,9 +55,9 @@ class BootChainTests(unittest.TestCase):
     def test_store_hit_and_miss_preserve_stack_and_return(self):
         for profile in (False, True):
             defines = DEFINES + (['LOAD_START_US=0xC072F6F4'] if profile else [])
-            length = len(assemble(HERE / 'templates/loader.S', defines))
+            length = len(assemble(HERE / 'asm/loader.S', defines))
             with self.subTest(length=length):
-                code = words(assemble(HERE / 'templates/store_boot.S',
+                code = words(assemble(HERE / 'asm/store_boot.S',
                                       [f'STORE_LEN={length}', 'STORE_MAGIC=0x12345678']))
                 # The complete executable part: reject unexpected control/stack
                 # changes, including changes inside the repeated copy loop.
@@ -111,7 +111,7 @@ class BootChainTests(unittest.TestCase):
 
     def test_bin_padding_uses_loader_capacity_without_changing_autorun(self):
         import re
-        source = (HERE / 'templates/loader.S').read_text()
+        source = (HERE / 'asm/loader.S').read_text()
         cap = int(re.search(r'^\.equ\s+MAXLEN,\s*(0x[0-9A-Fa-f]+)',
                             source, re.M).group(1), 16)
         with tempfile.TemporaryDirectory(prefix='boot-padding-test-') as tmp:

@@ -146,7 +146,7 @@ Register in **both** lists. The USB gadget does, for the same reason.
 ## What the disarm routine must be
 
 *History: this was gyro v1.13.1's own routine, removed in v1.14.0. The loader's
-write-back (`lh_unhook` in `fp_usb_shell/templates/stage2.S`) replaces it; it
+write-back (`lh_unhook` in `fp_usb_shell/asm/stage2.S`) replaces it; it
 runs from the journal block, which is still valid at power-off.*
 
 - **It lives in the cave, not in the pool.** It runs at power-off, so it

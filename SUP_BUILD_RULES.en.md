@@ -56,7 +56,7 @@ built with the generic builder directly, without the diagnostic shell, uses
 - A packaging layer keeps every non-zero upstream entry. It must not re-pack the
   sections and drop the entry, and it must not assume every product's entry
   is 0.
-- Chain entries through [entries.S](fp_usb_shell/templates/entries.S); no sup
+- Chain entries through [entries.S](fp_usb_shell/asm/entries.S); no sup
   calls the next sup itself. The generic builder's order is worker → each
   boot-bin (in argument order) → vshl-entry; today's OG + gyro is
   worker → gyro → restore. A new sup with an initialisation dependency has it
@@ -256,8 +256,8 @@ contract really changes, not with a running log of each experiment.
 
 ## 7. Read the code, not remembered numbers
 
-- [loader.S](fp_usb_shell/templates/loader.S), [stage2.S](fp_usb_shell/templates/stage2.S),
-  [store_boot.S](fp_usb_shell/templates/store_boot.S), [entries.S](fp_usb_shell/templates/entries.S):
+- [loader.S](fp_usb_shell/asm/loader.S), [stage2.S](fp_usb_shell/asm/stage2.S),
+  [store_boot.S](fp_usb_shell/asm/store_boot.S), [entries.S](fp_usb_shell/asm/entries.S):
   the execution contract.
 - [build_autorun.py](fp_usb_shell/build_autorun.py): the container, the entry
   table, capacity and packaging options.

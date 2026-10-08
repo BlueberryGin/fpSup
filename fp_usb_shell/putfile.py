@@ -7,10 +7,13 @@
 Which is how the AutoRun gets updated without taking the card out: the file the
 shell was started from is just a file, and the shell can replace it.
 
-Most of this is native commands.  `mem set` stages the bytes, `mem get` checks
-them, `dir` confirms the result.  Only the write itself is code, because nothing
-in the shell writes arbitrary content to a path -- that is templates/putfile.S,
-run by borrowing the `echo` command's handler.
+Mode 7 overwrites but does not truncate an existing file. Use deploy.py for
+card updates: it prepares a long enough file and checks the complete readback.
+
+Most of this is native commands. An UP01 worker stages large files through a
+binary OUT request; older workers use `echo` and `mem set` repairs. `dir`
+confirms the final result. The file write itself is asm/putfile.S, run by
+borrowing the `echo` command's handler.
 
 Measured 2026-09-19: a 32 KB file in 10 seconds the first time and half a
 second after that -- the first call pays for putting the bulk loader itself in,
@@ -19,16 +22,21 @@ one word per command, and every call after it moves 240 bytes a round trip at
 minutes" was this file's own description of itself and had been wrong since the
 bulk loader was added.
 
+An UP01 worker accepts 16 KiB binary chunks on EP01, each at an absolute
+address with CRC and an acknowledged last-chunk record. Older workers use the
+240-byte `echo` loader. Both paths read back staging before opening a card
+file; the final card file readback belongs to deploy.py.
+
 `mem set` drops whole commands, so what is staged is read back and repaired.
 The loss is not steady: one run repaired 2,673 words of 8,193 and the next
 repaired none.
 """
-import argparse, pathlib, re, socket, struct, sys, time
+import argparse, os, pathlib, re, socket, struct, sys, time, zlib
 
 from armasm import assemble
 
 HERE = pathlib.Path(__file__).resolve().parent
-SOCK = '/tmp/fpshd.sock'
+SOCK = os.environ.get('FPSHD_SOCKET', '/tmp/fpshd.sock')
 
 # Where this tool's blocks are: asked for, not chosen.  These used to be six
 # hand-picked addresses in a row -- and the parameter block's was 0xC072F700,
@@ -108,6 +116,10 @@ READ_TIMEOUT = 200              # ms
 # late here -- the camera has the block ready, and walking away from one it has
 # prepared is what leaves the worker unable to answer anything again.
 CHUNK     = 240                 # bytes per command; the line holds about 502 chars
+BULK_BATCH = 32                 # checkpoint before a lost command shifts a large suffix
+BULK_RETRIES = 6                # bounded whole-batch resends, never wordwise for drift
+UPLOAD_CHUNK = 0x3FC0           # 16 KiB OUT TRB minus the FPSH frame
+UPLOAD_RETRIES = 3             # retry only after a fresh worker status query
 ECHO_SLOT = 0xC0BAC2F8          # command table entry 17, echo's handler pointer
 ECHO_ORIG = 0xC03D99A0
 # The WORKER's pool, not the card's.  0xC3757A7C was the one pool the AutoRun
@@ -120,9 +132,9 @@ ECHO_ORIG = 0xC03D99A0
 # asked for its own pool -- on those the loader published one at 0xC3757A7C and
 # everything shared it.  Being able to drive both is what makes an A/B between
 # an old card and a new one one variable instead of two.
-POOL_PTR  = int(__import__('os').environ.get('FPSUP_POOL_PTR', '0xC072F050'), 0)
+POOL_PTR  = int(os.environ.get('FPSUP_POOL_PTR', '0xC072F050'), 0)
 POOL_SIZE_AT = POOL_PTR + 4     # what the worker asked for
-POOL_OFF  = 0x10000             # the templates' own scratch, past shell and gyro
+POOL_OFF  = 0x10000             # USB transfer scratch, past shell and gyro
 FOBJ_ROOM = 0x400
 
 P_STATUS, P_OPENR, P_WRITER = 0x08, 0x0C, 0x10
@@ -138,7 +150,9 @@ def sh(line: str, retries: int = 3, raw: int = 0, timeout_ms: int = 0,
 
     Roughly one command in ten goes missing, in one direction or the other, so a
     reply that does not come back is retried rather than believed.  The daemon
-    gives up after 200 ms, which is what makes retrying cheap.
+    gives up after 200 ms, which is what makes retrying cheap. Pass
+    `retries=0` for non-idempotent commands such as bulkload's append-style
+    `echo`, then inspect the camera-side counter instead.
 
     Not cheap enough, though, when the command itself answers in under two
     milliseconds: a reply lost every few dozen chunks then costs more than the
@@ -181,6 +195,184 @@ def sh(line: str, retries: int = 3, raw: int = 0, timeout_ms: int = 0,
     return text
 
 
+def sh_raw(line: str, nbytes: int, timeout_ms: int = 0) -> bytes:
+    """A raw block straight into a buffer: `RAW <n>` answers "OKB <n>\\n" and
+    the bytes, no hex.  Returns b'' on any error (the caller retries).  The old
+    `BULK` path hex-encoded the block and this side grew it with `+=`, which
+    is quadratic: 8 MiB reads ran at 5 MB/s."""
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(SOCK)
+    head = (f'TMO {timeout_ms} ' if timeout_ms else '') + f'RAW {nbytes} '
+    s.sendall(head.encode() + line.encode() + b'\n')
+    first = b''
+    while b'\n' not in first and len(first) < 64:
+        b = s.recv(64 - len(first))
+        if not b:
+            break
+        first += b
+    if not first.startswith(b'OKB '):
+        s.close()
+        return b''
+    hdr, _, rest = first.partition(b'\n')
+    n = int(hdr[4:])
+    buf = bytearray(n)
+    view = memoryview(buf)
+    got = len(rest)
+    view[:got] = rest[:n]
+    while got < n:
+        k = s.recv_into(view[got:], n - got)
+        if not k:
+            break
+        got += k
+    s.close()
+    return bytes(buf) if got == n else b''
+
+
+_shm = [None]
+
+
+def _shm_release():
+    m, _shm[0] = _shm[0], None
+    if m is None:
+        return
+    try:
+        m.close()
+    except BufferError:                 # a caller still holds a view: let it go
+        pass
+    try:
+        m.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _shared(nbytes):
+    """One shared-memory buffer per process, grown when needed, removed at exit."""
+    from multiprocessing import shared_memory
+    import atexit
+    cur = _shm[0]
+    if cur is None or cur.size < nbytes:
+        if cur is None:
+            atexit.register(_shm_release)
+        else:
+            _shm_release()
+        _shm[0] = shared_memory.SharedMemory(create=True, size=max(nbytes, 16 << 20))
+    return _shm[0]
+
+
+def sh_shm(line: str, nbytes: int, timeout_ms: int = 0):
+    """A raw block read by the daemon straight into shared memory (`RAWSHM`):
+    nothing crosses the socket but "OKS <n>".  Returns a memoryview of the
+    shared buffer (valid until the next call), or None on any error."""
+    m = _shared(nbytes)
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(SOCK)
+    head = (f'TMO {timeout_ms} ' if timeout_ms else '') + f'RAWSHM {nbytes} /{m.name.lstrip("/")} '
+    s.sendall(head.encode() + line.encode() + b'\n')
+    ans = b''
+    while b'\n' not in ans and len(ans) < 256:
+        b = s.recv(256)
+        if not b:
+            break
+        ans += b
+    s.close()
+    if not ans.startswith(b'OKS ') or int(ans[4:ans.index(b'\n')]) != nbytes:
+        return None
+    return m.buf[:nbytes]
+
+
+# --- MEM1: the worker's TRB pointed straight at the bytes, both directions ----
+# No echo handler is borrowed and nothing is copied on the camera; the bytes go
+# between libusb and a shared-memory buffer and never cross the socket.  The
+# camera refuses anything outside a window (worker.S, MEM1): its own pool is
+# implicit (read all, write past +0x10000); anything else must be granted with
+# mem_window first, writable only from 0x44000000 up and never over the
+# worker's header or code.
+MEM_OPT_SYNC, MEM_OPT_CRC = 1, 2
+MEM_TRANSIENT_SLOT = 7          # read_direct's grant: given, used, revoked
+_mem1 = [None]                  # None = not asked yet, False = old worker
+
+
+def mem_line(line: str, timeout: float = 60) -> str:
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.settimeout(timeout)
+        conn.connect(SOCK)
+        conn.sendall(line.encode('ascii') + b'\n')
+        answer = bytearray()
+        while b'\n' not in answer and len(answer) < 1024:
+            block = conn.recv(1024)
+            if not block:
+                break
+            answer.extend(block)
+    return answer.decode('ascii', errors='replace').strip()
+
+
+def mem_caps(refresh=False):
+    """{'xfer', 'pool', 'pool_size', 'windows'} from a MEM1 worker, else None.
+
+    FPSUP_NO_MEM1=1 says None without asking: the checked old paths, for a
+    worker whose MEM1 is suspect (it is how a fixed one gets deployed)."""
+    if os.environ.get('FPSUP_NO_MEM1') == '1':
+        return None
+    if _mem1[0] is None or refresh:
+        answer = mem_line('MCAPS', timeout=5)
+        nums = answer.split()[1:]
+        if answer.startswith('OKMC ') and len(nums) == 27:
+            v = [int(x, 0) for x in nums]
+            _mem1[0] = {'xfer': v[0], 'pool': v[1], 'pool_size': v[2],
+                        'windows': [tuple(v[3 + 3 * i:6 + 3 * i]) for i in range(8)]}
+        elif answer in ('ERR unknown', 'ERR mcaps unsupported'):
+            _mem1[0] = False            # an older daemon or worker
+        else:
+            raise RuntimeError(f'MEM1 capability uncertain: {answer!r}')
+    return _mem1[0] or None
+
+
+def mem_window(slot, base, length, perm):
+    """Grant (perm 1 read, 2 write, 3 both) or revoke (perm 0) one window."""
+    answer = mem_line(f'WIN {slot} 0x{base:08X} {length} {perm}', timeout=5)
+    if answer != 'OKW':
+        raise RuntimeError(f'window {slot} 0x{base:08X}+{length}: {answer}')
+
+
+def mem_read(addr, nbytes, sync=True, label='memr  '):
+    """Bytes at `addr`, one transfer per 16 MiB, nothing copied on the camera."""
+    m = _shared(nbytes)
+    answer = mem_line(f'MEMR 0x{addr:08X} {nbytes} {MEM_OPT_SYNC if sync else 0} '
+                      f'/{m.name.lstrip("/")}')
+    if not answer.startswith('OKR '):
+        raise RuntimeError(f'{label}: {answer}')
+    ms = float(answer.split()[2])
+    print(f'\r  {label} {nbytes} bytes in {ms/1000:.3f}s '
+          f'({nbytes/max(ms, 1e-3)/1000:.1f} MB/s)      ', file=sys.stderr)
+    return bytes(m.buf[:nbytes])
+
+
+def mem_write(addr, data, sync=True, crc=False, verify=True, label='memw  '):
+    """Write `data` at `addr`, then (by default) read all of it back and compare.
+
+    USB 3 already checks every packet and the camera reports how many bytes
+    landed; the readback is what proves they landed where they should and that
+    nothing on the camera wrote over them since.  `crc` asks the camera to CRC
+    what landed as well -- measured separately, since it is the CPU touching
+    every byte, which is exactly what this path exists to avoid."""
+    data = bytes(data)
+    m = _shared(len(data))
+    m.buf[:len(data)] = data
+    opts = (MEM_OPT_SYNC if sync else 0) | (MEM_OPT_CRC if crc else 0)
+    answer = mem_line(f'MEMW 0x{addr:08X} {len(data)} {opts} /{m.name.lstrip("/")}')
+    if not answer.startswith('OKW '):
+        raise RuntimeError(f'{label}: {answer}')
+    ms = float(answer.split()[2])
+    print(f'\r  {label} {len(data)} bytes in {ms/1000:.3f}s '
+          f'({len(data)/max(ms, 1e-3)/1000:.1f} MB/s)      ', file=sys.stderr)
+    if verify:
+        back = mem_read(addr, len(data), sync, 'verify')
+        if back != data:
+            bad = next(i for i in range(len(data)) if back[i] != data[i])
+            raise RuntimeError(f'{label}: readback differs from offset {bad} '
+                               f'(0x{addr + bad:08X})')
+
+
 def mem_set(addr, value):
     sh(f'mem set 0x{addr:08X} 0x{value:08X}')
 
@@ -205,6 +397,17 @@ def mem_get(addr, count=1, tries=4):
         if all(addr + i * 4 in seen for i in range(count)):
             break
     return [seen.get(addr + i * 4) for i in range(count)]
+
+
+def set_echo_handler(handler, tries=8):
+    """Publish or restore the borrowed handler with a checked readback."""
+    for _ in range(tries):
+        mem_set(ECHO_SLOT, handler)
+        got = mem_get(ECHO_SLOT)
+        if got and got[0] == handler:
+            return
+    raise SystemExit(f'echo handler did not become 0x{handler:08X}; '
+                     'stop using echo until ownership is established')
 
 
 def staging_area():
@@ -335,7 +538,7 @@ def ensure_direct():
     _claims()
     global _direct_loaded
     if not _direct_loaded:
-        code = assemble(HERE / 'templates' / 'dumpdirect.S')
+        code = assemble(HERE / 'asm' / 'dumpdirect.S')
         put_slow(DIRECT, code, 'direct')
         _direct_loaded = True
 
@@ -344,7 +547,7 @@ def ensure_dump():
     _claims()
     global _dump_loaded
     if not _dump_loaded:
-        code = assemble(HERE / 'templates' / 'dumpraw.S', [f'P=0x{P:08X}'])
+        code = assemble(HERE / 'asm' / 'dumpraw.S', [f'P=0x{P:08X}'])
         if DUMP + len(code) > DUMP_END:
             raise SystemExit(f'dumpraw is {len(code)} bytes and would run into '
                              f'the scratch at 0x{DUMP_END:08X}')
@@ -373,6 +576,13 @@ def read_direct(addr, nbytes, label='direct'):
     different bet, and one worth knowing you are making.
     """
     _claims()
+    if mem_caps():
+        # A one-off read grant for exactly these bytes, revoked after.
+        mem_window(MEM_TRANSIENT_SLOT, addr & ~3, (addr + nbytes - (addr & ~3) + 3) & ~3, 1)
+        try:
+            return mem_read(addr, nbytes, label=label)
+        finally:
+            mem_window(MEM_TRANSIENT_SLOT, 0, 0, 0)
     ensure_direct()
     orig = mem_get(ECHO_SLOT)
     if not orig or orig[0] not in (ECHO_ORIG, DIRECT):
@@ -384,10 +594,10 @@ def read_direct(addr, nbytes, label='direct'):
         while len(out) < nbytes:
             n = min(DIRECT_CHUNK, nbytes - len(out))
             for attempt in range(6):
-                r = sh(f'echo {addr + len(out):X} {n:X}', retries=0, raw=n,
-                       timeout_ms=4000)
-                if len(r) >= n and not r.startswith('ERR'):
-                    out += r[:n].encode('latin-1')
+                r = sh_shm(f'echo {addr + len(out):X} {n:X}', n, timeout_ms=4000)
+                if r is not None:
+                    out += r
+                    r.release()
                     break
             else:
                 raise SystemExit(f'{label}: no reply for {n} bytes at '
@@ -490,7 +700,7 @@ def ensure_bulk():
     global _bulk_loaded
     if _bulk_loaded:
         return
-    code = assemble(HERE / 'templates' / 'bulkload.S',
+    code = assemble(HERE / 'asm' / 'bulkload.S',
                         [f'P=0x{BULK_STATE:08X}'])
     if BULK + len(code) > BULK_END:
         raise SystemExit('bulkload does not fit its region')
@@ -498,7 +708,222 @@ def ensure_bulk():
     _bulk_loaded = True
 
 
-def put(addr, blob, label, passes=6):
+def set_bulk_cursor(destination, accepted, tries=8):
+    """Reset a batch to a known offset before resending it."""
+    for _ in range(tries):
+        mem_set(BULK_STATE, destination)
+        mem_set(BULK_STATE + 4, accepted)
+        if read_bulk_cursor() == [destination, accepted]:
+            return
+    raise SystemExit('bulkload cursor did not read back; staged bytes are unconfirmed')
+
+
+def read_bulk_cursor():
+    """Read the two idle cursor words, falling back to one word at a time.
+
+    A shell reply can omit one line even when the other word arrived. The
+    loader is idle between host commands, so completing that read separately
+    does not introduce a moving-snapshot race.
+    """
+    pair = mem_get(BULK_STATE, 2)
+    destination = pair[0] if len(pair) > 0 else None
+    accepted = pair[1] if len(pair) > 1 else None
+    if destination is None:
+        single = mem_get(BULK_STATE, tries=2)
+        destination = single[0] if single else None
+    if accepted is None:
+        single = mem_get(BULK_STATE + 4, tries=2)
+        accepted = single[0] if single else None
+    return [destination, accepted]
+
+
+def bulk_accepted(addr, label):
+    destination, accepted = read_bulk_cursor()
+    if destination is None or accepted is None:
+        raise SystemExit(f'{label}: bulkload cursor unavailable after pair and '
+                         'single-word reads; stop before file write')
+    if destination != addr + accepted:
+        raise SystemExit(f'{label}: bulkload cursor diverged '
+                         f'(0x{destination:08X}, {accepted} B); '
+                         'stop before file write')
+    return accepted
+
+
+def stage_bulk(addr, blob, label, started):
+    """Upload bounded batches; use the camera's byte counter before advancing.
+
+    `echo` is non-idempotent here: a host retry can append a chunk twice, while
+    a dropped command shifts every later chunk. Send each command only once,
+    then use the camera-side cursor to decide whether to resend this batch at
+    its absolute starting address. The full memory comparison in `put()` still
+    checks content before any file write.
+    """
+    set_bulk_cursor(addr, 0)
+    offset = 0
+    restarted = 0
+    retried_chunks = 0
+    batch_size = CHUNK * BULK_BATCH
+    while offset < len(blob):
+        end = min(offset + batch_size, len(blob))
+        for attempt in range(BULK_RETRIES):
+            if attempt:
+                set_bulk_cursor(addr + offset, offset)
+                restarted += 1
+            restart_batch = False
+            for pos in range(offset, end, CHUNK):
+                piece = blob[pos:min(pos + CHUNK, end)]
+                for delivery in range(BULK_RETRIES):
+                    reply = sh('echo ' + piece.hex(), retries=0)
+                    if not reply.startswith('ERR'):
+                        break
+                    accepted = bulk_accepted(addr, label)
+                    if accepted == pos + len(piece):
+                        # Only the reply was lost; never append the chunk again.
+                        break
+                    if accepted == pos:
+                        if delivery + 1 == BULK_RETRIES:
+                            raise SystemExit(f'{label}: chunk at {pos} B did not '
+                                             'land; stop before file write')
+                        set_bulk_cursor(addr + pos, pos)
+                        retried_chunks += 1
+                        continue
+                    if offset <= accepted < pos + len(piece):
+                        # An earlier command silently failed or this one was
+                        # partial; replay only this bounded batch.
+                        restart_batch = True
+                        break
+                    raise SystemExit(f'{label}: bulkload accepted {accepted} B '
+                                     f'outside chunk {pos}..{pos + len(piece)}; '
+                                     'stop before file write')
+                if restart_batch:
+                    break
+            accepted = bulk_accepted(addr, label)
+            if not offset <= accepted <= end:
+                raise SystemExit(f'{label}: bulkload accepted {accepted} B '
+                                 f'outside batch {offset}..{end}; '
+                                 'stop before file write')
+            if accepted == end:
+                offset = end
+                elapsed = max(time.time() - started, 1e-6)
+                print(f'\r  {label} {offset}/{len(blob)} B  '
+                      f'{offset/elapsed/1024:.1f} KiB/s ',
+                      end='', flush=True, file=sys.stderr)
+                break
+        else:
+            raise SystemExit(f'{label}: batch at {offset} B did not land after '
+                             f'{BULK_RETRIES} attempts; stop before file write')
+    return restarted, retried_chunks
+
+
+def upload_request(header: str, data: bytes = b'') -> str:
+    """Use the daemon's binary socket path; no hex or borrowed echo handler."""
+    with socket.socket(socket.AF_UNIX) as conn:
+        conn.settimeout(5)
+        conn.connect(SOCK)
+        conn.sendall(header.encode('ascii') + b'\n' + data)
+        answer = bytearray()
+        while len(answer) < 512:
+            block = conn.recv(512 - len(answer))
+            if not block:
+                break
+            answer.extend(block)
+            if b'\n' in block:
+                break
+    return answer.decode('ascii', errors='replace').strip()
+
+
+def upload_caps():
+    """Return the current worker's capability and last accepted tuple."""
+    answer = upload_request('UCAPS')
+    if answer in ('ERR unknown', 'ERR upload unsupported'):
+        return None
+    match = re.fullmatch(r'OKUC (\d+) (\d+) (0x[0-9A-Fa-f]{8}) '
+                         r'(\d+) (0x[0-9A-Fa-f]{8})', answer)
+    if not match:
+        raise RuntimeError(f'upload capability uncertain: {answer!r}')
+    capacity, sequence, address, length, checksum = match.groups()
+    capacity = int(capacity)
+    if not 4 <= capacity <= UPLOAD_CHUNK or capacity % 4:
+        raise RuntimeError(f'upload capacity is invalid: {capacity}')
+    return capacity, (int(sequence), int(address, 16), int(length),
+                      int(checksum, 16))
+
+
+def stage_fast(addr, blob, label, started):
+    """Send absolute, CRC-checked binary chunks to an UP01 worker.
+
+    A failed reply has an uncertain outcome. Query the worker's last accepted
+    tuple after it has returned to its command loop, then either advance or
+    resend the same absolute chunk. The full staging readback in `put()` is
+    still the final proof before any card file is opened.
+    """
+    if addr & 3 or len(blob) & 3:
+        raise ValueError('fast upload requires aligned address and length')
+    try:
+        caps = upload_caps()
+    except (OSError, RuntimeError) as exc:
+        raise SystemExit(f'{label}: cannot check binary upload support ({exc}); '
+                         'stop before file write') from exc
+    if caps is None:
+        return False
+    chunk_size = caps[0]
+    offset = 0
+    while offset < len(blob):
+        piece = blob[offset:offset + chunk_size]
+        destination = addr + offset
+        checksum = zlib.crc32(piece)
+        accepted = False
+        for attempt in range(UPLOAD_RETRIES):
+            try:
+                response = upload_request(
+                    f'PUT 0x{destination:08X} {len(piece)} 0x{checksum:08X}', piece)
+            except OSError as exc:
+                response = f'ERR upload uncertain socket {exc}'
+            match = re.fullmatch(r'OKU (\d+) (0x[0-9A-Fa-f]{8}) '
+                                 r'(\d+) (0x[0-9A-Fa-f]{8})', response)
+            if match:
+                _sequence, got_addr, got_len, got_crc = match.groups()
+                if (int(got_addr, 16), int(got_len), int(got_crc, 16)) != \
+                        (destination, len(piece), checksum):
+                    raise SystemExit(f'{label}: upload acknowledgment mismatch; '
+                                     'stop before file write')
+                accepted = True
+                break
+            if response.startswith('ERR upload rejected'):
+                raise SystemExit(f'{label}: {response}; stop before file write')
+            # A successful command can lose only its reply. The worker waits
+            # at most 300 ms for EP82; give it time to return before probing.
+            time.sleep(0.35)
+            for _ in range(UPLOAD_RETRIES):
+                try:
+                    checked = upload_caps()
+                except (OSError, RuntimeError):
+                    time.sleep(0.35)
+                    continue
+                if checked is None:
+                    raise SystemExit(f'{label}: upload worker disappeared; '
+                                     'stop before file write')
+                last = checked[1][1:]
+                if last == (destination, len(piece), checksum):
+                    accepted = True
+                break
+            else:
+                raise SystemExit(f'{label}: cannot confirm upload at {offset} B; '
+                                 'stop before file write')
+            if accepted:
+                break
+        if not accepted:
+            raise SystemExit(f'{label}: upload at {offset} B did not land after '
+                             f'{UPLOAD_RETRIES} attempts; stop before file write')
+        offset += len(piece)
+        elapsed = max(time.time() - started, 1e-6)
+        print(f'\r  {label} {offset}/{len(blob)} B  '
+              f'{offset/elapsed/1024/1024:.1f} MiB/s ',
+              end='', flush=True, file=sys.stderr)
+    return True
+
+
+def put(addr, blob, label, passes=6, fast=False):
     """Write, verify, rewrite what did not land, until nothing is left.
 
     Bytes travel in the command line, about 240 at a time, because `mem set`
@@ -507,34 +932,47 @@ def put(addr, blob, label, passes=6):
     once.  The transport was never the problem.
 
     Verification stays, and matters more here, not less: `mem set` drops writes
-    and whole commands go missing, so a chunk that never arrives leaves a 240
-    byte hole.  Repairs go one word at a time, which is exact.
+    and whole commands go missing. The camera-side byte counter checkpoints
+    each batch, so a missing chunk resends that small batch at its original
+    address instead of shifting the rest of the file. The final full readback
+    still repairs any residual byte mismatch one word at a time.
     """
     _claims()
     if len(blob) <= 256:
         return put_slow(addr, blob, label, passes)
 
-    ensure_bulk()
     w = list(struct.unpack(f'<{len(blob)//4}I', blob))
     t0 = time.time()
-
-    orig = mem_get(ECHO_SLOT)
-    if not orig or orig[0] not in (ECHO_ORIG, BULK):
-        raise SystemExit(f'echo handler is {orig}, not free to borrow')
-    mem_set(ECHO_SLOT, BULK)
-    try:
-        mem_set(BULK_STATE, addr)        # destination, advanced by the loader
-        mem_set(BULK_STATE + 4, 0)       # bytes taken
-        sent = 0
-        while sent < len(blob):
-            piece = blob[sent:sent + CHUNK]
-            sh('echo ' + piece.hex())
-            sent += len(piece)
-            el = time.time() - t0
-            print(f'\r  {label} {sent}/{len(blob)} B  {sent/el/1024:.1f} KiB/s ',
-                  end='', flush=True, file=sys.stderr)
-    finally:
-        mem_set(ECHO_SLOT, ECHO_ORIG)
+    # MEM1: one transfer per 16 MiB, then the whole thing read back and
+    # compared -- the same proof the passes below give, at link speed.  Only
+    # where DMA reaches: the cave (0xC07xxxxx) is not, and goes the old way.
+    # A refusal arms nothing, so falling back is safe; anything uncertain stops.
+    if 0x44000000 <= addr < 0x80000000 and mem_caps():
+        try:
+            mem_write(addr, blob, label=label)
+        except RuntimeError as exc:
+            if 'ERR mem refused' not in str(exc):
+                raise SystemExit(f'{label}: {exc}; stop before file write')
+            print(f'  {label} MEM1 refused ({exc}); using the checked path',
+                  file=sys.stderr)
+        else:
+            dt = time.time() - t0
+            print(f'\r  {label} {len(blob)} bytes in {dt:.2f}s '
+                  f'({len(blob)/dt/1e6:.1f} MB/s), MEM1, read back whole          ',
+                  file=sys.stderr)
+            return w
+    used_fast = fast and stage_fast(addr, blob, label, t0)
+    restarted = retried_chunks = 0
+    if not used_fast:
+        ensure_bulk()
+        orig = mem_get(ECHO_SLOT)
+        if not orig or orig[0] not in (ECHO_ORIG, BULK):
+            raise SystemExit(f'echo handler is {orig}, not free to borrow')
+        try:
+            set_echo_handler(BULK)
+            restarted, retried_chunks = stage_bulk(addr, blob, label, t0)
+        finally:
+            set_echo_handler(ECHO_ORIG)
 
     repaired = 0
     for attempt in range(passes):
@@ -548,7 +986,9 @@ def put(addr, blob, label, passes=6):
         bad = [i for i in range(len(w)) if i >= len(got) or got[i] != w[i]]
         if not bad:
             dt = time.time() - t0
-            note = f', {repaired} repaired' if repaired else ''
+            note = (f', binary upload, {repaired} words repaired' if used_fast else
+                    f', {restarted} batches resent, {retried_chunks} chunks '
+                    f'retried, {repaired} words repaired')
             print(f'\r  {label} {len(blob)} bytes in {dt:.1f}s '
                   f'({len(blob)/dt/1024:.1f} KiB/s){note}          ', file=sys.stderr)
             return w
@@ -560,15 +1000,41 @@ def put(addr, blob, label, passes=6):
     raise SystemExit(f'{label}: still short after {passes} passes')
 
 
+# The shell's own `fl del <path>` (fl table 0xC0BB24CC -> 0xC03E6CF0): a file
+# object on the current drive, then 0xC03665A8(obj, path).  Its help text says
+# "currently not working"; on 2026-10-06 it deleted a file and refused a
+# missing one.  The same table holds delall / delCinemaDng / deloneimg --
+# never those.  Mode 7 does not truncate, so a smaller file written over a
+# larger one keeps the old tail: delete first.
+_DELETABLE = re.compile(r'^\\[A-Za-z0-9_]+(\\[A-Za-z0-9_][A-Za-z0-9_.]*)+$')
+
+
+def delete_file(remote):
+    """Delete ONE file by absolute path.  True deleted, False not there or
+    refused.  Refuses anything that is not a plain \\DIR\\...\\NAME.EXT path,
+    and anything under \\DCIM or \\CINEMA."""
+    if not _DELETABLE.match(remote) or '.' not in remote.rsplit('\\', 1)[1]:
+        raise ValueError(f'refusing to delete {remote!r}: not a plain file path')
+    if remote.upper().startswith(('\\DCIM', '\\CINEMA')):
+        raise ValueError(f'refusing to delete {remote!r}: camera media')
+    out = sh(f'fl del {remote}', retries=0)
+    if 'OK' in out.split():
+        return True
+    if "can't delete" in out:
+        return False
+    raise RuntimeError(f'fl del {remote}: unexpected reply {out!r}')
+
+
 def main():
-    _claims()
     ap = argparse.ArgumentParser()
     ap.add_argument('local')
     ap.add_argument('remote', help=r'camera path, e.g. \TEST.TXT')
     ap.add_argument('--mode', type=lambda s: int(s, 0), default=7,
-                    help='7 truncates or creates (default); 0x402 fails if it exists')
+                    help='7 overwrites or creates, but does not truncate (default); '
+                         '0x402 fails if it exists')
     ap.add_argument('--buf', type=lambda s: int(s, 0), default=None)
     a = ap.parse_args()
+    _claims()
 
     data = pathlib.Path(a.local).read_bytes()
     padded = data + b'\0' * (-len(data) % 4)
@@ -593,7 +1059,7 @@ def main():
     prove(buf, len(padded) + FOBJ_ROOM)
     print('  proof   region takes writes and still holds them a second later')
 
-    put(buf, padded, 'stage ')
+    put(buf, padded, 'stage ', fast=True)
 
     for off, val in ((P_STATUS, 0), (P_OPENR, 0), (P_WRITER, 0), (P_DATA, buf),
                      (P_LEN, len(data)), (P_FOBJ, fobj), (P_MODE, a.mode)):
@@ -610,23 +1076,21 @@ def main():
     for i, word in enumerate(struct.unpack(f'<{len(pw)//4}I', pw)):
         mem_set(P + P_PATH + i * 4, word)
 
-    code = assemble(HERE / 'templates' / 'putfile.S', [f'P=0x{P:08X}'])
+    code = assemble(HERE / 'asm' / 'putfile.S', [f'P=0x{P:08X}'])
     if CODE + len(code) > CODE_END:
-        raise SystemExit('template does not fit the code region')
+        raise SystemExit('assembly source does not fit the code region')
     put(CODE, code, 'code  ')
 
-    mem_set(ECHO_SLOT, CODE)
     try:
+        set_echo_handler(CODE)
         reply = sh('echo')
     finally:
-        mem_set(ECHO_SLOT, ECHO_ORIG)
-        back = mem_get(ECHO_SLOT)
-        if not back or back[0] != ECHO_ORIG:
-            print(f'  WARNING echo handler did not restore: {back}')
-        else:
-            print(f'  restored echo -> 0x{ECHO_ORIG:08X}')
+        set_echo_handler(ECHO_ORIG)
+        print(f'  restored echo -> 0x{ECHO_ORIG:08X}')
 
     print(f'  reply   {reply.strip()}')
+    if reply.lstrip().startswith('ERR'):
+        raise SystemExit('putfile echo reply failed; write outcome is unknown')
     st = mem_get(P + P_STATUS, 3)
     status = st[0] if st else 0
     print(f'  status  {status} — {STATUS.get(status, "unknown")}')

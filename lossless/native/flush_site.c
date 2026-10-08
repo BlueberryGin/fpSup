@@ -58,7 +58,7 @@ uint32_t fpl_flush_before(uintptr_t writer, struct fpl_frame_hold *h,
         return FPL_OK;
     }
     if (fpl_trailer_write_all(uncached(buffer), c->payload, c->tile_bytes, c->tiles,
-                              FPL_TILE_WIDTH, FPL_TILE_HEIGHT, c->capacity,
+                              c->tile_width, c->tile_height, c->capacity,
                               rd, wr, &t) != FPL_OK) {
         /* The payload is already in the raster and the header was refused:
          * this frame is lost either way. Recorded, consumed, not retried. */

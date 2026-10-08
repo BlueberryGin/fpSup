@@ -1,0 +1,1144 @@
+{
+  "schema": "sigma-fp-native-hook-sites/v1",
+  "version": 1,
+  "firmware": "SIGMA fp Ver.5.02",
+  "created": "2026-09-27",
+  "offline_only": true,
+  "deployment_ready": false,
+  "installable": false,
+  "hardware_io_performed": false,
+  "rom": {
+    "path": "out/seg0_c0000000.bin",
+    "base_address": "0xC0000000",
+    "length_bytes": 49245696,
+    "sha256": "aaa5208a028d9c4aebb9cc8614add723d456e96b2a95914f433079954320e622"
+  },
+  "plan": "fpSup/focus/geometry/NATIVE_HOOK_PLAN.md",
+  "sites": [
+    {
+      "id": "af_terminal_pre_forward",
+      "status": "offline_abi_candidate_not_installable",
+      "instruction_set": "ARM",
+      "address": "0xC028E310",
+      "expected_word": "0xEBFE7502",
+      "expected_bytes_le": "0275feeb",
+      "original_target": "0xC022B720",
+      "continuation": "0xC028E314",
+      "patch_length_bytes": 4,
+      "record_phase": "before_original",
+      "wrapper_address": null,
+      "veneer_address": null,
+      "replacement_word": null,
+      "context": {
+        "address": "0xC028E2F8",
+        "length_bytes": 48,
+        "expected_bytes_le": "1f00a0e37f23f7eb9472feebf41600e30d1081e00020a0e30275feeb500901e33d034ce35b13f6eb000050e30500000a",
+        "instructions": [
+          {
+            "address": "0xC028E2F8",
+            "bytes_le": "1f00a0e3",
+            "word": "0xE3A0001F",
+            "assembly": "mov r0, #0x1f"
+          },
+          {
+            "address": "0xC028E2FC",
+            "bytes_le": "7f23f7eb",
+            "word": "0xEBF7237F",
+            "assembly": "bl #0xc0057100"
+          },
+          {
+            "address": "0xC028E300",
+            "bytes_le": "9472feeb",
+            "word": "0xEBFE7294",
+            "assembly": "bl #0xc022ad58"
+          },
+          {
+            "address": "0xC028E304",
+            "bytes_le": "f41600e3",
+            "word": "0xE30016F4",
+            "assembly": "movw r1, #0x6f4"
+          },
+          {
+            "address": "0xC028E308",
+            "bytes_le": "0d1081e0",
+            "word": "0xE081100D",
+            "assembly": "add r1, r1, sp"
+          },
+          {
+            "address": "0xC028E30C",
+            "bytes_le": "0020a0e3",
+            "word": "0xE3A02000",
+            "assembly": "mov r2, #0"
+          },
+          {
+            "address": "0xC028E310",
+            "bytes_le": "0275feeb",
+            "word": "0xEBFE7502",
+            "assembly": "bl #0xc022b720"
+          },
+          {
+            "address": "0xC028E314",
+            "bytes_le": "500901e3",
+            "word": "0xE3010950",
+            "assembly": "movw r0, #0x1950"
+          },
+          {
+            "address": "0xC028E318",
+            "bytes_le": "3d034ce3",
+            "word": "0xE34C033D",
+            "assembly": "movt r0, #0xc33d"
+          },
+          {
+            "address": "0xC028E31C",
+            "bytes_le": "5b13f6eb",
+            "word": "0xEBF6135B",
+            "assembly": "bl #0xc0013090"
+          },
+          {
+            "address": "0xC028E320",
+            "bytes_le": "000050e3",
+            "word": "0xE3500000",
+            "assembly": "cmp r0, #0"
+          },
+          {
+            "address": "0xC028E324",
+            "bytes_le": "0500000a",
+            "word": "0x0A000005",
+            "assembly": "beq #0xc028e340"
+          }
+        ]
+      },
+      "caller_entry": "0xC028D968",
+      "caller_sp_delta_bytes": -2188,
+      "native_callee_frame_bytes": 20,
+      "stack_alignment_known": false,
+      "original_inputs": {
+        "r0": "0xC32044D8 from C022AD58",
+        "r1": "original_sp + 0x6F4; 0xAC-byte stack payload",
+        "r2": "0",
+        "r3_r12_flags": "Preserve conservatively; no added parameter assumptions."
+      },
+      "native_return": {
+        "r0": "No semantic success return; generic observer forwarder.",
+        "payload_a8": "Written from model+0x2254 only when an observer is invoked; pre-forward bytes must not be labelled observer-supplied."
+      },
+      "no_sp_leaf_alternative_scratch": {
+        "pre_phase": null,
+        "post_only_alternative": [
+          "r0",
+          "lr"
+        ],
+        "note": "AF pre phase requires save/restore recorder; post-only leaf changes event phase and is not an equivalent replacement."
+      },
+      "source_refs": [
+        {
+          "path": "out/decomp/full/blk_c02.c",
+          "line": 32811,
+          "end_line": 32826
+        },
+        {
+          "path": "out/decomp/full/blk_c02.c",
+          "line": 87198,
+          "end_line": 87215
+        },
+        {
+          "path": "fpSup/focus/geometry/NATIVE_CONFIRMATION_AUDIT.md",
+          "line": 95,
+          "end_line": 121
+        }
+      ],
+      "unverified": [
+        "No live reachability, ownership, instruction-cache publication, attach/detach quiescence or WCET validation.",
+        "Absolute SP alignment and stack high-water not established; a C recorder requires explicit save/alignment/restore and compiled-binary verification.",
+        "No timestamp/exposure identity, cross-task total ordering, episode/drive/target/context/scale generation or optical validity established.",
+        "Terminal can be cancellation cleanup; error=0/payload[0]=1 alone does not authorize confirmation.",
+        "Pre callback recorder must fully restore parameters, APSR and exact original SP before dispatching native callee.",
+        "AF manager result does not prove final lens completion."
+      ],
+      "raw_capture": [
+        {
+          "source": "r1 at wrapper entry",
+          "length_bytes": 172,
+          "meaning": "pre-forward terminal payload; copy before native callback",
+          "type": "bytes"
+        },
+        {
+          "source": "0xC329160B",
+          "length_bytes": 1,
+          "meaning": "error raw at pre-forward CPU read",
+          "type": "u8"
+        },
+        {
+          "source": "0xC32914E0",
+          "length_bytes": 4,
+          "meaning": "AF target/manager position raw, not optical position",
+          "type": "i32"
+        },
+        {
+          "source": "0xC33D51FC",
+          "length_bytes": 4,
+          "meaning": "native counter raw, not adapter episode generation",
+          "type": "u32"
+        }
+      ],
+      "callee_entry_guard": {
+        "address": "0xC022B720",
+        "length_bytes": 16,
+        "expected_bytes_le": "70412de90040a0e10150a0e10260a0e1",
+        "instructions": [
+          {
+            "address": "0xC022B720",
+            "bytes_le": "70412de9",
+            "word": "0xE92D4170",
+            "assembly": "push {r4, r5, r6, r8, lr}"
+          },
+          {
+            "address": "0xC022B724",
+            "bytes_le": "0040a0e1",
+            "word": "0xE1A04000",
+            "assembly": "mov r4, r0"
+          },
+          {
+            "address": "0xC022B728",
+            "bytes_le": "0150a0e1",
+            "word": "0xE1A05001",
+            "assembly": "mov r5, r1"
+          },
+          {
+            "address": "0xC022B72C",
+            "bytes_le": "0260a0e1",
+            "word": "0xE1A06002",
+            "assembly": "mov r6, r2"
+          }
+        ]
+      },
+      "callee_return_guard": {
+        "address": "0xC022B79C",
+        "bytes_le": "7081bde8",
+        "word": "0xE8BD8170",
+        "assembly": "pop {r4, r5, r6, r8, pc}"
+      },
+      "entry_lr_use": "Entry LR saved in prologue and used by normal POP-PC return only; no data/caller-ID use found in direct callee body. Transitive debug/unwinder behavior not certified.",
+      "native_call_count_required": 1
+    },
+    {
+      "id": "native_l_final_event_set_return",
+      "status": "offline_abi_candidate_not_installable",
+      "instruction_set": "ARM",
+      "address": "0xC0340458",
+      "expected_word": "0xEB00B4BE",
+      "expected_bytes_le": "beb400eb",
+      "original_target": "0xC036D758",
+      "continuation": "0xC034045C",
+      "patch_length_bytes": 4,
+      "record_phase": "after_original",
+      "wrapper_address": null,
+      "veneer_address": null,
+      "replacement_word": null,
+      "context": {
+        "address": "0xC0340448",
+        "length_bytes": 48,
+        "expected_bytes_le": "0400a0e1850000eb440084e20110a0e3beb400eb141094e5010051e3020051130200001a081094e5340084e2b1c000eb",
+        "instructions": [
+          {
+            "address": "0xC0340448",
+            "bytes_le": "0400a0e1",
+            "word": "0xE1A00004",
+            "assembly": "mov r0, r4"
+          },
+          {
+            "address": "0xC034044C",
+            "bytes_le": "850000eb",
+            "word": "0xEB000085",
+            "assembly": "bl #0xc0340668"
+          },
+          {
+            "address": "0xC0340450",
+            "bytes_le": "440084e2",
+            "word": "0xE2840044",
+            "assembly": "add r0, r4, #0x44"
+          },
+          {
+            "address": "0xC0340454",
+            "bytes_le": "0110a0e3",
+            "word": "0xE3A01001",
+            "assembly": "mov r1, #1"
+          },
+          {
+            "address": "0xC0340458",
+            "bytes_le": "beb400eb",
+            "word": "0xEB00B4BE",
+            "assembly": "bl #0xc036d758"
+          },
+          {
+            "address": "0xC034045C",
+            "bytes_le": "141094e5",
+            "word": "0xE5941014",
+            "assembly": "ldr r1, [r4, #0x14]"
+          },
+          {
+            "address": "0xC0340460",
+            "bytes_le": "010051e3",
+            "word": "0xE3510001",
+            "assembly": "cmp r1, #1"
+          },
+          {
+            "address": "0xC0340464",
+            "bytes_le": "02005113",
+            "word": "0x13510002",
+            "assembly": "cmpne r1, #2"
+          },
+          {
+            "address": "0xC0340468",
+            "bytes_le": "0200001a",
+            "word": "0x1A000002",
+            "assembly": "bne #0xc0340478"
+          },
+          {
+            "address": "0xC034046C",
+            "bytes_le": "081094e5",
+            "word": "0xE5941008",
+            "assembly": "ldr r1, [r4, #8]"
+          },
+          {
+            "address": "0xC0340470",
+            "bytes_le": "340084e2",
+            "word": "0xE2840034",
+            "assembly": "add r0, r4, #0x34"
+          },
+          {
+            "address": "0xC0340474",
+            "bytes_le": "b1c000eb",
+            "word": "0xEB00C0B1",
+            "assembly": "bl #0xc0370740"
+          }
+        ]
+      },
+      "caller_entry": "0xC0340210",
+      "caller_sp_delta_bytes": -52,
+      "native_callee_frame_bytes": 12,
+      "stack_alignment_known": false,
+      "original_inputs": {
+        "r0": "r4+0x44; expected event wrapper 0xC3476458",
+        "r1": "1",
+        "r4": "Native-L F=0xC3476414; expected vtable=0xC0B8EEEC; selector 0xC3476408 == 1"
+      },
+      "native_return": {
+        "r0": "Boolean event-set success: 1 iff C0016B9C returned zero. Preserve in the recorder input.",
+        "semantic_limit": "Final branch reached, not optical settle or AF drive ownership."
+      },
+      "no_sp_leaf_alternative_scratch": {
+        "after_phase": [
+          "r1",
+          "lr"
+        ],
+        "must_preserve": [
+          "r0"
+        ],
+        "flags": "NZCV overwritten by C0340460 CMP; Q/GE unchanged."
+      },
+      "source_refs": [
+        {
+          "path": "out/decomp/full/blk_c03.c",
+          "line": 42179,
+          "end_line": 42210
+        },
+        {
+          "path": "out/decomp/full/blk_c03.c",
+          "line": 74825,
+          "end_line": 74834
+        }
+      ],
+      "unverified": [
+        "No live reachability, ownership, instruction-cache publication, attach/detach quiescence or WCET validation.",
+        "Absolute SP alignment and stack high-water not established; a C recorder requires explicit save/alignment/restore and compiled-binary verification.",
+        "No timestamp/exposure identity, cross-task total ordering, episode/drive/target/context/scale generation or optical validity established.",
+        "tk_set_flg may schedule another task before post-record: subsequent field reads are not atomic with native completion.",
+        "Abort-pending byte was already cleared, so zero does not prove absence of abort history.",
+        "Cached position lacks validated packet receive time and optical settle policy."
+      ],
+      "raw_capture": [
+        {
+          "source": "r0 after C036D758",
+          "length_bytes": 4,
+          "type": "u32",
+          "meaning": "event_set_return_raw"
+        },
+        {
+          "source": "0xC3476418 (F+4)",
+          "length_bytes": 4,
+          "type": "i32",
+          "meaning": "cached position after native event-set return, not event-atomic position"
+        },
+        {
+          "source": "F+0x14",
+          "length_bytes": 4,
+          "type": "u32",
+          "meaning": "focus mode raw"
+        },
+        {
+          "source": "F+0x28",
+          "length_bytes": 1,
+          "type": "u8",
+          "meaning": "already-cleared abort pending raw, not abort history"
+        },
+        {
+          "source": "F+0x30",
+          "length_bytes": 4,
+          "type": "u32",
+          "meaning": "backlash state raw"
+        },
+        {
+          "source": "F+0x58",
+          "length_bytes": 4,
+          "type": "u32",
+          "meaning": "sync pointer raw; no dereference without independent range guard"
+        }
+      ],
+      "callee_entry_guard": {
+        "address": "0xC036D758",
+        "length_bytes": 16,
+        "expected_bytes_le": "30402de90040a0e10150a0e1000094e5",
+        "instructions": [
+          {
+            "address": "0xC036D758",
+            "bytes_le": "30402de9",
+            "word": "0xE92D4030",
+            "assembly": "push {r4, r5, lr}"
+          },
+          {
+            "address": "0xC036D75C",
+            "bytes_le": "0040a0e1",
+            "word": "0xE1A04000",
+            "assembly": "mov r4, r0"
+          },
+          {
+            "address": "0xC036D760",
+            "bytes_le": "0150a0e1",
+            "word": "0xE1A05001",
+            "assembly": "mov r5, r1"
+          },
+          {
+            "address": "0xC036D764",
+            "bytes_le": "000094e5",
+            "word": "0xE5940000",
+            "assembly": "ldr r0, [r4]"
+          }
+        ]
+      },
+      "callee_return_guard": {
+        "address": "0xC036D788",
+        "bytes_le": "3080bde8",
+        "word": "0xE8BD8030",
+        "assembly": "pop {r4, r5, pc}"
+      },
+      "entry_lr_use": "Entry LR saved in prologue and used by normal POP-PC return only; no data/caller-ID use found in direct callee body. Transitive debug/unwinder behavior not certified.",
+      "native_call_count_required": 1
+    },
+    {
+      "id": "face_parser_publication_return",
+      "status": "offline_abi_candidate_not_installable",
+      "instruction_set": "ARM",
+      "address": "0xC05AB348",
+      "expected_word": "0xEBFFF96C",
+      "expected_bytes_le": "6cf9ffeb",
+      "original_target": "0xC05A9900",
+      "continuation": "0xC05AB34C",
+      "patch_length_bytes": 4,
+      "record_phase": "after_original",
+      "wrapper_address": null,
+      "veneer_address": null,
+      "replacement_word": null,
+      "context": {
+        "address": "0xC05AB32C",
+        "length_bytes": 52,
+        "expected_bytes_le": "040084e20010a0e371feffeb0430d4e5000053e30100001a0400a0e16cf9ffeb0c008de20210a0e3dd93e9eb4edf8de2f08dbde8",
+        "instructions": [
+          {
+            "address": "0xC05AB32C",
+            "bytes_le": "040084e2",
+            "word": "0xE2840004",
+            "assembly": "add r0, r4, #4"
+          },
+          {
+            "address": "0xC05AB330",
+            "bytes_le": "0010a0e3",
+            "word": "0xE3A01000",
+            "assembly": "mov r1, #0"
+          },
+          {
+            "address": "0xC05AB334",
+            "bytes_le": "71feffeb",
+            "word": "0xEBFFFE71",
+            "assembly": "bl #0xc05aad00"
+          },
+          {
+            "address": "0xC05AB338",
+            "bytes_le": "0430d4e5",
+            "word": "0xE5D43004",
+            "assembly": "ldrb r3, [r4, #4]"
+          },
+          {
+            "address": "0xC05AB33C",
+            "bytes_le": "000053e3",
+            "word": "0xE3530000",
+            "assembly": "cmp r3, #0"
+          },
+          {
+            "address": "0xC05AB340",
+            "bytes_le": "0100001a",
+            "word": "0x1A000001",
+            "assembly": "bne #0xc05ab34c"
+          },
+          {
+            "address": "0xC05AB344",
+            "bytes_le": "0400a0e1",
+            "word": "0xE1A00004",
+            "assembly": "mov r0, r4"
+          },
+          {
+            "address": "0xC05AB348",
+            "bytes_le": "6cf9ffeb",
+            "word": "0xEBFFF96C",
+            "assembly": "bl #0xc05a9900"
+          },
+          {
+            "address": "0xC05AB34C",
+            "bytes_le": "0c008de2",
+            "word": "0xE28D000C",
+            "assembly": "add r0, sp, #0xc"
+          },
+          {
+            "address": "0xC05AB350",
+            "bytes_le": "0210a0e3",
+            "word": "0xE3A01002",
+            "assembly": "mov r1, #2"
+          },
+          {
+            "address": "0xC05AB354",
+            "bytes_le": "dd93e9eb",
+            "word": "0xEBE993DD",
+            "assembly": "bl #0xc00102d0"
+          },
+          {
+            "address": "0xC05AB358",
+            "bytes_le": "4edf8de2",
+            "word": "0xE28DDF4E",
+            "assembly": "add sp, sp, #0x138"
+          },
+          {
+            "address": "0xC05AB35C",
+            "bytes_le": "f08dbde8",
+            "word": "0xE8BD8DF0",
+            "assembly": "pop {r4, r5, r6, r7, r8, sl, fp, pc}"
+          }
+        ]
+      },
+      "caller_entry": "0xC05AAFF8",
+      "caller_sp_delta_bytes": -344,
+      "native_callee_frame_bytes": 1152,
+      "stack_alignment_known": false,
+      "original_inputs": {
+        "r0": "r4=M; whitelist 0xC37CCA9C",
+        "r4": "Parser manager M; outer lock guard not released until C05AB354",
+        "stack": "Parser local frame remains active; do not relocate SP."
+      },
+      "native_return": {
+        "r0": "No interpreted return value.",
+        "semantic_limit": "Conditional publication returned; config can publish stale/invalid status."
+      },
+      "no_sp_leaf_alternative_scratch": {
+        "after_phase": [
+          "r0",
+          "lr"
+        ],
+        "flags": "Next C00102D0 compares at C00102DC before conditional use; Q/GE unchanged."
+      },
+      "source_refs": [
+        {
+          "path": "out/decomp/full/blk_c05.c",
+          "line": 131618,
+          "end_line": 131666
+        },
+        {
+          "path": "out/decomp/full/blk_c05.c",
+          "line": 130628,
+          "end_line": 130652
+        }
+      ],
+      "unverified": [
+        "No live reachability, ownership, instruction-cache publication, attach/detach quiescence or WCET validation.",
+        "Absolute SP alignment and stack high-water not established; a C recorder requires explicit save/alignment/restore and compiled-binary verification.",
+        "No timestamp/exposure identity, cross-task total ordering, episode/drive/target/context/scale generation or optical validity established.",
+        "Only M+4==0 invokes this publication; does not count all parser invocations or frames.",
+        "Config +0x0C/+0x0F can reuse status or clear validity; group bytes are not evidence of AF adoption.",
+        "Other writer coverage and reentrancy/lock discipline not established."
+      ],
+      "raw_capture": [
+        {
+          "source": "0xC37CCAAC (M+0x10)",
+          "length_bytes": 156,
+          "type": "bytes",
+          "meaning": "group0 parsed face bytes; slot does not establish target identity"
+        },
+        {
+          "source": "M+4",
+          "length_bytes": 1,
+          "type": "u8",
+          "meaning": "publication gate raw"
+        },
+        {
+          "source": "M+0x0C",
+          "length_bytes": 1,
+          "type": "u8",
+          "meaning": "parsed found raw"
+        },
+        {
+          "source": "M+0x0D",
+          "length_bytes": 1,
+          "type": "u8",
+          "meaning": "parser state raw"
+        }
+      ],
+      "callee_entry_guard": {
+        "address": "0xC05A9900",
+        "length_bytes": 16,
+        "expected_bytes_le": "10402de9784400e3004040e304d04de0",
+        "instructions": [
+          {
+            "address": "0xC05A9900",
+            "bytes_le": "10402de9",
+            "word": "0xE92D4010",
+            "assembly": "push {r4, lr}"
+          },
+          {
+            "address": "0xC05A9904",
+            "bytes_le": "784400e3",
+            "word": "0xE3004478",
+            "assembly": "movw r4, #0x478"
+          },
+          {
+            "address": "0xC05A9908",
+            "bytes_le": "004040e3",
+            "word": "0xE3404000",
+            "assembly": "movt r4, #0"
+          },
+          {
+            "address": "0xC05A990C",
+            "bytes_le": "04d04de0",
+            "word": "0xE04DD004",
+            "assembly": "sub sp, sp, r4"
+          }
+        ]
+      },
+      "callee_return_guard": {
+        "address": "0xC05A99C4",
+        "bytes_le": "1080bde8",
+        "word": "0xE8BD8010",
+        "assembly": "pop {r4, pc}"
+      },
+      "entry_lr_use": "Entry LR saved in prologue and used by normal POP-PC return only; no data/caller-ID use found in direct callee body. Transitive debug/unwinder behavior not certified.",
+      "native_call_count_required": 1
+    },
+    {
+      "id": "aat_color_run_return",
+      "status": "offline_abi_candidate_not_installable",
+      "instruction_set": "ARM",
+      "address": "0xC05AB8C8",
+      "expected_word": "0xEB002D0A",
+      "expected_bytes_le": "0a2d00eb",
+      "original_target": "0xC05B6CF8",
+      "continuation": "0xC05AB8CC",
+      "patch_length_bytes": 4,
+      "record_phase": "after_original",
+      "wrapper_address": null,
+      "veneer_address": null,
+      "replacement_word": null,
+      "context": {
+        "address": "0xC05AB8B8",
+        "length_bytes": 40,
+        "expected_bytes_le": "0110a0e30020a0e30100a0e1f73200eb0a2d00eb000050e30110a0030010a0130100a0e11080bde8",
+        "instructions": [
+          {
+            "address": "0xC05AB8B8",
+            "bytes_le": "0110a0e3",
+            "word": "0xE3A01001",
+            "assembly": "mov r1, #1"
+          },
+          {
+            "address": "0xC05AB8BC",
+            "bytes_le": "0020a0e3",
+            "word": "0xE3A02000",
+            "assembly": "mov r2, #0"
+          },
+          {
+            "address": "0xC05AB8C0",
+            "bytes_le": "0100a0e1",
+            "word": "0xE1A00001",
+            "assembly": "mov r0, r1"
+          },
+          {
+            "address": "0xC05AB8C4",
+            "bytes_le": "f73200eb",
+            "word": "0xEB0032F7",
+            "assembly": "bl #0xc05b84a8"
+          },
+          {
+            "address": "0xC05AB8C8",
+            "bytes_le": "0a2d00eb",
+            "word": "0xEB002D0A",
+            "assembly": "bl #0xc05b6cf8"
+          },
+          {
+            "address": "0xC05AB8CC",
+            "bytes_le": "000050e3",
+            "word": "0xE3500000",
+            "assembly": "cmp r0, #0"
+          },
+          {
+            "address": "0xC05AB8D0",
+            "bytes_le": "0110a003",
+            "word": "0x03A01001",
+            "assembly": "moveq r1, #1"
+          },
+          {
+            "address": "0xC05AB8D4",
+            "bytes_le": "0010a013",
+            "word": "0x13A01000",
+            "assembly": "movne r1, #0"
+          },
+          {
+            "address": "0xC05AB8D8",
+            "bytes_le": "0100a0e1",
+            "word": "0xE1A00001",
+            "assembly": "mov r0, r1"
+          },
+          {
+            "address": "0xC05AB8DC",
+            "bytes_le": "1080bde8",
+            "word": "0xE8BD8010",
+            "assembly": "pop {r4, pc}"
+          }
+        ]
+      },
+      "caller_entry": "0xC05AB8A0",
+      "caller_sp_delta_bytes": -8,
+      "native_callee_frame_bytes": 168,
+      "stack_alignment_known": false,
+      "original_inputs": {
+        "arguments": "C05B6CF8 does not consume incoming parameters; preserve original registers regardless.",
+        "r4": "AatInterfaceColorTracking caller object; do not mutate."
+      },
+      "native_return": {
+        "r0": "Signed 0 or -1; live at C05AB8CC CMP and must be preserved.",
+        "semantic_limit": "-1 may mean no model update or update followed by failure; 0 is Run success, not scale validation."
+      },
+      "no_sp_leaf_alternative_scratch": {
+        "after_phase": [
+          "r1",
+          "lr"
+        ],
+        "must_preserve": [
+          "r0"
+        ],
+        "flags": "C05AB8CC CMP r0,#0 overwrites NZCV; Q/GE unchanged."
+      },
+      "source_refs": [
+        {
+          "path": "out/decomp/full/blk_c05.c",
+          "line": 131968,
+          "end_line": 131980
+        },
+        {
+          "path": "out/decomp/full/blk_c05.c",
+          "line": 139307,
+          "end_line": 139452
+        }
+      ],
+      "unverified": [
+        "No live reachability, ownership, instruction-cache publication, attach/detach quiescence or WCET validation.",
+        "Absolute SP alignment and stack high-water not established; a C recorder requires explicit save/alignment/restore and compiled-binary verification.",
+        "No timestamp/exposure identity, cross-task total ordering, episode/drive/target/context/scale generation or optical validity established.",
+        "Other callsite C05B6C60 (initialization/reseed) is excluded; no global model generation claim.",
+        "Model can be adapted after first copyback; C05B7080 is not a final completion boundary.",
+        "Failure return does not identify whether this invocation changed the model."
+      ],
+      "raw_capture": [
+        {
+          "source": "r0 after C05B6CF8",
+          "length_bytes": 4,
+          "type": "i32",
+          "meaning": "Run return raw; preserve across recorder"
+        },
+        {
+          "source": "0xC37CDFA8",
+          "length_bytes": 44,
+          "type": "bytes",
+          "meaning": "model bytes after complete color-v2 Run return"
+        },
+        {
+          "source": "0xC37CDFD4",
+          "length_bytes": 1,
+          "type": "i8",
+          "meaning": "post Run state"
+        },
+        {
+          "source": "0xC37CDFD5",
+          "length_bytes": 1,
+          "type": "i8",
+          "meaning": "post GetResult state raw"
+        },
+        {
+          "source": "0xC2F2D860",
+          "length_bytes": 1,
+          "type": "u8",
+          "meaning": "cache dirty raw; not validated completion flag"
+        }
+      ],
+      "callee_entry_guard": {
+        "address": "0xC05B6CF8",
+        "length_bytes": 16,
+        "expected_bytes_le": "f04f2de984d04de20000a0e304008de5",
+        "instructions": [
+          {
+            "address": "0xC05B6CF8",
+            "bytes_le": "f04f2de9",
+            "word": "0xE92D4FF0",
+            "assembly": "push {r4, r5, r6, r7, r8, sb, sl, fp, lr}"
+          },
+          {
+            "address": "0xC05B6CFC",
+            "bytes_le": "84d04de2",
+            "word": "0xE24DD084",
+            "assembly": "sub sp, sp, #0x84"
+          },
+          {
+            "address": "0xC05B6D00",
+            "bytes_le": "0000a0e3",
+            "word": "0xE3A00000",
+            "assembly": "mov r0, #0"
+          },
+          {
+            "address": "0xC05B6D04",
+            "bytes_le": "04008de5",
+            "word": "0xE58D0004",
+            "assembly": "str r0, [sp, #4]"
+          }
+        ]
+      },
+      "callee_return_guard": {
+        "address": "0xC05B7364",
+        "bytes_le": "f08fbde8",
+        "word": "0xE8BD8FF0",
+        "assembly": "pop {r4, r5, r6, r7, r8, sb, sl, fp, pc}"
+      },
+      "entry_lr_use": "Entry LR saved in prologue and used by normal POP-PC return only; no data/caller-ID use found in direct callee body. Transitive debug/unwinder behavior not certified.",
+      "native_call_count_required": 1
+    }
+  ],
+  "candidate_wrapper_contract": {
+    "status": "design_only_pending_compilation_emulation_and_stack_audit",
+    "af_phase": "pre-forward; preserve r0-r12, LR, APSR before bounded recorder, restore all and exact original SP before native callee",
+    "other_phase": "post-native; capture native return r0 before recorder; save/restore all scalar registers and APSR if calling C",
+    "native_dispatch": "Load LR=after_native and PC=original ARM callee via literals without changing r12 or SP. Native original executes exactly once.",
+    "resume": "Use fixed continuation; LR=site+4 may be established only because these four continuations do not read current LR before BL or POP-PC. This is not byte-identical native post-call LR state.",
+    "alignment": "Do not infer alignment from push count. Recorder public ABI requires dynamically aligned stack and exact saved-SP restoration; original native callee must receive original SP.",
+    "floating_point": "C recorder must compile to integer-only code without VFP/SIMD or FPSCR changes, or explicitly preserve that state.",
+    "not_authorized": [
+      "firmware writes",
+      "camera access",
+      "loader/card/transport modification",
+      "USB in hooks",
+      "motion or optical-confirmation flags"
+    ]
+  },
+  "branch_contract": {
+    "isa": "ARM",
+    "encoding": "0xEB000000 | (((target - site - 8) >> 2) & 0xFFFFFF)",
+    "alignment_bytes": 4,
+    "displacement_min": -33554432,
+    "displacement_max_exclusive": 33554432,
+    "far_veneer": {
+      "required_for_0x4_pool": true,
+      "address": null,
+      "length_bytes": 8,
+      "instruction_word": "0xE51FF004",
+      "instruction_bytes_le": "04f01fe5",
+      "layout": "LDR pc,[pc,#-4]; .word aligned_ARM_wrapper_address",
+      "preserves": "LR and all other registers; no instruction relocation",
+      "ownership_verified": false
+    }
+  },
+  "non_selected_points": [
+    {
+      "address": "0xC034045C",
+      "bytes_le": "141094e5",
+      "word": "0xE5941014",
+      "assembly": "ldr r1, [r4, #0x14]",
+      "reason": "Ordinary LDR: would require displaced-instruction replay; prefer original BL wrapper."
+    },
+    {
+      "address": "0xC05AB358",
+      "bytes_le": "4edf8de2",
+      "word": "0xE28DDF4E",
+      "assembly": "add sp, sp, #0x138",
+      "reason": "SP-changing epilogue, not BL: requires explicit unwind relocation; not selected."
+    },
+    {
+      "address": "0xC05B7080",
+      "bytes_le": "030082e8",
+      "word": "0xE8820003",
+      "assembly": "stm r2, {r0, r1}",
+      "reason": "Intermediate STM copyback; adaptation at C05B709C still follows; not final model completion."
+    },
+    {
+      "address": "0xC05B70B0",
+      "bytes_le": "e20000eb",
+      "word": "0xEB0000E2",
+      "assembly": "bl #0xc05b7440",
+      "reason": "Cache-dirty marker only; Run can still fail."
+    },
+    {
+      "address": "0xC05B6C60",
+      "bytes_le": "240000eb",
+      "word": "0xEB000024",
+      "assembly": "bl #0xc05b6cf8",
+      "reason": "Other Run callsite used in initialization/reseed; not same color-v2 source contract."
+    },
+    {
+      "address": "0xC05AC878",
+      "bytes_le": "20f4ffeb",
+      "word": "0xEBFFF420",
+      "assembly": "bl #0xc05a9900",
+      "reason": "Supplemental AAT status-publication BL, conditional copy can be stale; caller flags/live-state audit not complete."
+    }
+  ],
+  "unknown_contract_fields": {
+    "event_ms": null,
+    "exposure_sequence": null,
+    "cross_task_stream_sequence": null,
+    "episode_generation": null,
+    "drive_generation": null,
+    "target_generation": null,
+    "context_generation": null,
+    "scale_generation": null,
+    "optical_confirmation": false,
+    "position_valid": false,
+    "settle_validated": false,
+    "geometry_eligible": false,
+    "motion_authorized": false
+  },
+  "required_preflight": [
+    "Compile four distinct wrapper candidates and verify emitted instructions against each source contract.",
+    "Emulate original exactly once, pre/post ordering, full state preservation, original SP, native return and continuation under register/flag/SP phase variations.",
+    "Establish per-producer owned finite buffers, commit protocol, loss/overflow reporting and reader exclusion.",
+    "Provide live expected-word/ROM identity and task quiescence/code-cache publication/restore checks before any future arm.",
+    "Validate reachability, scheduling, concurrency, timing and source semantics on camera only when explicitly authorized."
+  ],
+  "timer_audit": {
+    "status": "offline_source_audit_not_a_validated_inline_clock",
+    "getter": "0xC002B6E0",
+    "getter_is_bounded_leaf": false,
+    "native_algorithm": "C002B4E0: raw-before, software epoch, pending, raw-after; recurse on rollover/epoch races, then C002B440 converts to requested units.",
+    "unbounded_recursive_calls": [
+      "0xC002B564",
+      "0xC002B588",
+      "0xC002B5A0"
+    ],
+    "timer_index": 5,
+    "counter": {
+      "pointer_cell": "0xC30337F0",
+      "initialized_base": "0x2D810000",
+      "offset_bytes": 84,
+      "effective_address": "0x2D810054",
+      "read_width_bits": 32,
+      "hardware_counter_width_bits": null
+    },
+    "pending": {
+      "pointer_cell": "0xC30337FC",
+      "initialized_base": "0x2D810080",
+      "offset_bytes": 4,
+      "effective_address": "0x2D810084",
+      "mask": 32,
+      "clear_operation_allowed": false
+    },
+    "epoch": {
+      "address": "0xC30781A4",
+      "width_bits": 32,
+      "increment_callback": "0xC002B820",
+      "meaning": "one increment per configured timer callback; native conversion treats each epoch as one second"
+    },
+    "period": {
+      "address": "0xC2EFABC8",
+      "native_initial_value": 12000000,
+      "maximum_configuration_value": 16777215,
+      "configuration_width_bits": 24,
+      "microsecond_divisor_address": "0xC2EFABD0",
+      "native_initial_microsecond_divisor": 1200
+    },
+    "conversion": {
+      "formula_u32": "epoch*1000000 + (raw*100)/(period/10000), native 32-bit arithmetic",
+      "at_native_period": "epoch*1000000 + floor(raw/12)",
+      "return_width_bits": 32,
+      "return_unit": "microsecond",
+      "wrap_microseconds": 4294967296,
+      "raw_unit": "timer counts, not microseconds"
+    },
+    "inline_candidate": {
+      "enabled": false,
+      "status": "fixed-count raw diagnostic tuple only, pending runtime mapping/config and rollover validation",
+      "fields": [
+        "raw_before",
+        "epoch_before",
+        "pending_before",
+        "raw_after",
+        "epoch_after",
+        "pending_after",
+        "period_raw"
+      ],
+      "bounded_reads": true,
+      "retry_allowed": false,
+      "irq_fiq_mask_changes_allowed": false,
+      "timer_writes_allowed": false,
+      "calls_allowed": false,
+      "event_ms_valid": false
+    },
+    "source_refs": [
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 13671
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 19831
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 19974
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 20040
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 36095
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 36113
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 36149
+      },
+      {
+        "path": "out/decomp/full/blk_c00.c",
+        "line": 36203
+      }
+    ],
+    "instruction_guards": [
+      {
+        "address": "0xC0011574",
+        "bytes_le": "002000e3",
+        "word": "0xE3002000",
+        "assembly": "movw r2, #0"
+      },
+      {
+        "address": "0xC0011578",
+        "bytes_le": "812d42e3",
+        "word": "0xE3422D81",
+        "assembly": "movt r2, #0x2d81"
+      },
+      {
+        "address": "0xC001157C",
+        "bytes_le": "00208ce5",
+        "word": "0xE58C2000",
+        "assembly": "str r2, [ip]"
+      },
+      {
+        "address": "0xC0011598",
+        "bytes_le": "802000e3",
+        "word": "0xE3002080",
+        "assembly": "movw r2, #0x80"
+      },
+      {
+        "address": "0xC001159C",
+        "bytes_le": "812d42e3",
+        "word": "0xE3422D81",
+        "assembly": "movt r2, #0x2d81"
+      },
+      {
+        "address": "0xC00115A0",
+        "bytes_le": "002084e5",
+        "word": "0xE5842000",
+        "assembly": "str r2, [r4]"
+      },
+      {
+        "address": "0xC0016534",
+        "bytes_le": "040090e5",
+        "word": "0xE5900004",
+        "assembly": "ldr r0, [r0, #4]"
+      },
+      {
+        "address": "0xC0016660",
+        "bytes_le": "045090e5",
+        "word": "0xE5905004",
+        "assembly": "ldr r5, [r0, #4]"
+      },
+      {
+        "address": "0xC00161D0",
+        "bytes_le": "002b01e3",
+        "word": "0xE3012B00",
+        "assembly": "movw r2, #0x1b00"
+      },
+      {
+        "address": "0xC00161D4",
+        "bytes_le": "b72040e3",
+        "word": "0xE34020B7",
+        "assembly": "movt r2, #0xb7"
+      },
+      {
+        "address": "0xC002B564",
+        "bytes_le": "ddffffeb",
+        "word": "0xEBFFFFDD",
+        "assembly": "bl #0xc002b4e0"
+      },
+      {
+        "address": "0xC002B588",
+        "bytes_le": "d4ffffeb",
+        "word": "0xEBFFFFD4",
+        "assembly": "bl #0xc002b4e0"
+      },
+      {
+        "address": "0xC002B5A0",
+        "bytes_le": "ceffffeb",
+        "word": "0xEBFFFFCE",
+        "assembly": "bl #0xc002b4e0"
+      },
+      {
+        "address": "0xC002B6EC",
+        "bytes_le": "7bffffeb",
+        "word": "0xEBFFFF7B",
+        "assembly": "bl #0xc002b4e0"
+      },
+      {
+        "address": "0xC002B700",
+        "bytes_le": "4effffeb",
+        "word": "0xEBFFFF4E",
+        "assembly": "bl #0xc002b440"
+      },
+      {
+        "address": "0xC002B82C",
+        "bytes_le": "010080e2",
+        "word": "0xE2800001",
+        "assembly": "add r0, r0, #1"
+      }
+    ],
+    "unverified": [
+      "Live pointer initialization, timer5 running period, mapping and timer-read behavior in these hook contexts.",
+      "Accept/reject proof for bounded multiword rollover tuple, interrupt/preemption and timer pending races.",
+      "Cross-task monotonic ordering, capture latency, power-cycle identity and exposure synchronization."
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "schema": "fp.geometry.join-build/v1",
+  "offline_only": true,
+  "artifact_type": "relocatable_objects",
+  "deployment_ready": false,
+  "native_adapter_complete": false,
+  "confirmation_authorized": false,
+  "motion_authorized": false,
+  "arm_execution_verified": false,
+  "compiler_flags": [
+    "-target",
+    "armv7-none-eabi",
+    "-mcpu=cortex-a9",
+    "-marm",
+    "-mfloat-abi=soft",
+    "-O2",
+    "-ffreestanding",
+    "-fno-builtin",
+    "-fno-stack-protector",
+    "-fno-unwind-tables",
+    "-fno-asynchronous-unwind-tables",
+    "-fno-vectorize",
+    "-fno-slp-vectorize",
+    "-std=c11",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wvla"
+  ],
+  "compiler_version": "Apple clang version 21.0.0 (clang-2100.3.27.1)",
+  "modules": {
+    "geometry": {
+      "allocated_section_bytes": {
+        ".text": 5076,
+        ".ARM.exidx": 80
+      },
+      "exported_symbols": [
+        "fg_confirm",
+        "fg_default_config",
+        "fg_init",
+        "fg_invalidate",
+        "fg_update"
+      ],
+      "undefined_symbols": [],
+      "object_sha256": "5453b0f28c36cb481bf7b550dbc5b8693ad66c1bbad66fade712e7e85382b3b9"
+    },
+    "confirm_join": {
+      "allocated_section_bytes": {
+        ".text": 3268,
+        ".ARM.exidx": 80
+      },
+      "exported_symbols": [
+        "fj_default_config",
+        "fj_init",
+        "fj_reset",
+        "fj_step"
+      ],
+      "undefined_symbols": [],
+      "object_sha256": "686edfaf4a90bd07bf029b4ed2394f221cf4e50730f14229a6ee7a35e1fe72e7"
+    }
+  },
+  "source_sha256": {
+    "geometry.c": "8f38d0bb10b93ab186519b3e759ddb9f9415769f55d07d8474adf0d0da352c83",
+    "geometry.h": "5cbfdbe8ba276a200f01a02646d1a25e93007677a058af2f7d38428be06c3abf",
+    "confirm_join.c": "2b78c400548076d3b385858e870971802f3ea20bdce5b4e91f518b5bd9679c09",
+    "confirm_join.h": "d0c978a6e83b3cd78381e3d5ba59aaeede346a06ed9e65f51e5d42f77c9152be",
+    "build.py": "cbeb2bfee44ce1b901d3c997d0ab924b210d3a222c1fbb1c04a4e521c29d6de7",
+    "build_join.py": "ad1897e53a3d4f6eefa0deb20404aa218de6245e763d582ca4e693109d613dd3"
+  }
+}

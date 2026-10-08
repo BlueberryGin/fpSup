@@ -22,7 +22,41 @@ alone on the card or merged with others.
 5. **Call from an entry.** Entries run one after another on the loader's task.
    Nothing here is safe from a hook or from another task.
 
-## ui_pool — the string pool
+## Strings — nested layers (2026-10-04)
+
+**Private strings no longer go into the pool.** Each sup's private strings are
+one layer of the nested string hooks: a small resident block hung on the
+firmware's three string functions (resolve `C05E5B58`, owns `C05E61C8`,
+remain `C05E61E0`) in front of whatever was there. A layer answers for its own
+offsets (from `0x40000000` up, each after the layer inside it) and its own
+bytes, and passes everything else, arguments untouched, inward; the innermost
+does what the firmware did. The stock pool, `reader+0x10/+0x14` and every stock
+offset stay as they are: nothing is copied, nothing is scanned.
+
+`ui_apply.c` does this by itself for every FPUI block (a string whose
+`stock_at` holds gets its stock offset; every other one goes in the block's
+layer, which goes up at commit). `STRBASE string#, address` hands an offset to
+the sup's own data (OpenGate's `ui_aliases`). A block with any string makes
+`build_section.sites()` declare the three sites with their stock words.
+
+Rules, the firmware evidence and the open question for pages:
+[NESTED_HOOKS.md](NESTED_HOOKS.md). Code: `ui_strings.S` (one layer, ARM;
+`gen_strings_code.py` makes `ui_strings_code.h`), `ui_pool.c`
+(`uis_layer_base`, `uis_layer_add`, `uis_layer_fixed`, `uis_stock_has`). Tests:
+`test_ui_strings.py` (the layers as ARM on the real image, against the
+firmware's own functions, with mutations). `ui/chain.py` reads layers back.
+
+**Whose layer (header v2, 2026-10-06).** A layer's first 8 bytes are the name
+of the sup that hung it: the base name of the file Loader v3 loaded it from
+(`10LOSS`, `31FMT`). uishare finds the loader's service table itself
+(`SL_SVC_AT`, only while entries run) -- callers pass nothing -- and takes the
+name from `svc->self()`; a layer already on a site counts only if its name is
+one `svc->holder()` lists for that site. Without a running Loader v3 the name
+is `FSDL`. v1 and v2 layers do not recognise each other: build every sup on a
+card with the same uishare. `uis_layer_fixed` hangs a layer for ids someone
+already hard-coded (>= `0xF0000000`, used in place, skipped by later numbering).
+
+## ui_pool — the old string pool (kept for older sups)
 
 `uis_intern(s, n, &offset)` returns the offset at which `s` resolves in the NBU
 string pool. If the pool already contains `s` (stock, or added by any sup), it
@@ -61,7 +95,8 @@ stock bytes. Hinted and unhinted callers get the same offsets.
 Tests: `python3 -B -m unittest test_ui_pool` (host model plus mutations; the
 ARM build must have no `.rodata` and no `.text` relocations).
 
-Users: `fpSup/lossless/native/menu_page.c`, `fpSup/lcdflip/native/lcd_menu_page.c`.
+Users: none through `ui_apply` any more (2026-10-04); `fpSup/lcdflip` (retired)
+still calls `uis_intern`. Lossless's `menu_page.c` only asks `uis_pool_known`.
 
 ## Build
 

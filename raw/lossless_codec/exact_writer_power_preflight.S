@@ -25,7 +25,11 @@
 .equ HOOK_SITE,       0xC0722AFC
 .equ HOOK_ORIG,       0xEBFDE061
 .equ REAL_WRITE,      0xC069AC88
-.equ STATE,           0xC072F700
+/* Claimed at run time; the default is what this file assembles to on its
+ * own. cave.py's rule: the caller passes the real address. */
+#ifndef STATE
+#define STATE 0xC072F700
+#endif
 .equ DONE_MAGIC,      0x454E4F44
 .equ PREFLIGHT_MAGIC, 0x52575050       /* "PPWR" little-endian */
 
@@ -158,8 +162,15 @@ probe_entry:
     LDA     r12, CODEC_MODE
     ldr     r0, [r12]
     str     r0, [r4, #S_CODEC_MODE]
-    cmp     r0, #0
-    bne     codec_busy
+    /* 0xC37CF87C selects which client owns the engine; it is NOT a busy
+       flag.  C06301F8 latches 1 (callback at +0x04) and C06303E4 latches 2
+       (callback at +0x38); the mode-1 starter C0630208 and the mode-2
+       starter C06303F8 each gate on their own value.  0 means CLOSED and is
+       written only by the close routine at C062FF7A, so a non-zero read is
+       the normal state whenever the engine is open.  Refuse only a value no
+       setup path can produce.  [C 2026-09-29] */
+    cmp     r0, #2
+    bhi     codec_busy
 
     mov     r0, #3
     str     r0, [r4, #S_STAGE]

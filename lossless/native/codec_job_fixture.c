@@ -43,9 +43,10 @@ static uint32_t f_init(const uint32_t *p) {
 }
 static uint32_t f_flag(void) { rec(C_FLAG); return flag_id; }
 static uint32_t f_clr(uint32_t f, uint32_t p) { rec(C_CLR); (void)f; (void)p; return 0; }
+static uint32_t twai_want = 1;
 static uint32_t f_twai(uint32_t f, uint32_t w, uint32_t m, uint32_t *p, uint32_t t) {
     rec(C_TWAI);
-    if (f != flag_id || w != 5 || m != 1 || t != 1) return 0xDEAD;
+    if (f != flag_id || w != 5 || m != 1 || t != twai_want) return 0xDEAD;
     *p = twai_pattern;
     return twai_ret;
 }
@@ -114,6 +115,7 @@ uint32_t fpl_fixture_reset(uint32_t width, uint32_t height, uint32_t format) {
     input.source_capacity = 0xFFFFFFFFu;
     input.destination_capacity = sizeof dst;
     input.table_capacity = sizeof tbl;
+    input.tile_force = 0;
     return fpl_codec_job_init(&job);
 }
 void fpl_fixture_set(uint32_t knob, uint32_t value) {
@@ -135,10 +137,15 @@ void fpl_fixture_set(uint32_t knob, uint32_t value) {
     case 14: endpos = value; break;
     case 15: input.source = value; break;
     case 16: devregs[2] = value; break;          /* 300D0008 */
+    case 17: input.tile_force = value; break;
     }
 }
 uint32_t fpl_fixture_submit(void) { return fpl_codec_job_submit(&job, &input); }
-uint32_t fpl_fixture_poll(void) { return fpl_codec_job_poll(&job); }
+uint32_t fpl_fixture_poll(void) { twai_want = 1; return fpl_codec_job_poll(&job); }
+uint32_t fpl_fixture_wait(uint32_t ticks) {
+    twai_want = ticks ? ticks : 1;
+    return fpl_codec_job_wait(&job, ticks);
+}
 uint32_t fpl_fixture_abort(void) { return fpl_codec_job_abort(&job); }
 uint32_t fpl_fixture_source_bytes(uint32_t w, uint32_t h, uint32_t f) {
     return fpl_codec_source_bytes(w, h, f);
@@ -168,6 +175,8 @@ uint32_t fpl_fixture_get(uint32_t field) {
     case 114: return job.last_native;
     case 115: return job.stall_regs[2];
     case 116: return job.stall_regs[6];
+    case 117: return job.tile_width;
+    case 118: return job.tile_height;
     default: return 0xFFFFFFFFu;
     }
 }

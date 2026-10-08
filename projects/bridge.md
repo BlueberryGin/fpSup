@@ -35,7 +35,7 @@ surface, and two of its results are load-bearing for the rest of this repository
   [raw sup](raw-sup.md) and is why the HDMI RAW path matters
 - **focus-ai measured why host-side autofocus is hard**, and those measurements —
   no optical direction cue, a weak face-width signal, a two-part latency — are
-  summarised in [focus sup](focus-sup.md) alongside what the firmware offers that
+  summarised in [focus sup](../../projects/fp-af-assist/notes/firmware/FOCUS_SUP.md) alongside what the firmware offers that
   a host-side loop cannot reach
 
 ### What this project's firmware research adds
@@ -75,7 +75,7 @@ surface, and two of its results are load-bearing for the rest of this repository
 - **UHD 12-bit CinemaDNG 無法透過 USB 取得。** 那個限制屬於 [raw sup](raw-sup.md),
   也是 HDMI RAW 路徑之所以重要的原因
 - **focus-ai 量出了「主機端自動對焦為什麼難」** —— 沒有光學方向線索、臉寬是弱訊號、
-  延遲其實是兩件事 —— 那些量測整理在 [focus sup](focus-sup.md),
+  延遲其實是兩件事 —— 那些量測整理在 [focus sup](../../projects/fp-af-assist/notes/firmware/FOCUS_SUP.md),
   連同「韌體能提供而主機端迴圈拿不到」的對照
 
 ### 這個專案的韌體研究補上什麼

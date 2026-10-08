@@ -35,7 +35,10 @@ sys.path.insert(0, str(HERE))
 CFLAGS = ['--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb', '-mfloat-abi=soft',
           '-mfpu=none', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-jump-tables',
           '-fropi', '-fno-addrsig', '-O2', '-std=c11', '-Wall', '-Wextra', '-Werror',
-          '-Wno-unused-function']
+          '-Wno-unused-function',
+          # every frame 8-aligned, leaf functions too (clang leaves a leaf's frame
+          # 4-aligned otherwise; memory arm-stack-alignment, test_stack_alignment.py)
+          '-mstackrealign']
 UNITS = ['ui_pool.c', 'ui_apply.c']
 PUBLIC = re.compile(r'^((?:const\s+)?(?:struct\s+\w+|u?int\w*_t|void|uintptr_t)'
                     r'\s*\**\s*(?:uis|uia)_\w+\s*\()', re.M)
@@ -85,10 +88,15 @@ def compile_text(tmp):
 
 
 def sites(block):
-    """The firmware words a block may change at run time: (address, stock word)."""
-    from ui import fpui
-    _, ops, _ = fpui.decode(block)
-    return sorted({(a[0], a[1]) for code, a in ops if code == fpui.OP_HOOK_FV})
+    """The firmware words a block may change at run time: (address, stock word).
+    A block with any string that may need a layer hangs the three string sites
+    (NESTED_HOOKS.md)."""
+    from ui import fpui, chain
+    strings, ops, _ = fpui.decode(block)
+    out = {(a[0], a[1]) for code, a in ops if code == fpui.OP_HOOK_FV}
+    if any(at != fpui.NAME for _, at in strings):
+        out |= {(site, stock) for site, stock, _ in chain.SITES.values()}
+    return sorted(out)
 
 
 def section(block):

@@ -1,0 +1,180 @@
+{
+  "schema": "fp.geometry.offline-integration-validation/v1",
+  "date": "2026-09-27",
+  "offline_only": true,
+  "camera_io": false,
+  "deployment_ready": false,
+  "native_adapter_complete": false,
+  "motion_authorized": false,
+  "confirmation_authorized": false,
+  "checks": {
+    "geometry-suite": {
+      "passed": true,
+      "exit_code": 0,
+      "seconds": 11.231,
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".",
+        "-p",
+        "test_*.py",
+        "-v"
+      ],
+      "cwd": "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry",
+      "tests": 125
+    },
+    "af-research-suite": {
+      "passed": true,
+      "exit_code": 0,
+      "seconds": 0.703,
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        ".",
+        "-p",
+        "test_*.py",
+        "-v"
+      ],
+      "cwd": "/Users/dido/Developer.localized/SIGMAfp_re/research/autofocus",
+      "tests": 149
+    },
+    "join-sanitizer-build": {
+      "passed": true,
+      "exit_code": 0,
+      "seconds": 0.31,
+      "command": [
+        "clang",
+        "-std=c11",
+        "-O1",
+        "-g",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fsanitize=address,undefined",
+        "-fno-sanitize-recover=all",
+        "fuzz_confirm_join.c",
+        "confirm_join.c",
+        "-o",
+        "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry/artifacts/offline-20260927/integration-final/join-fuzz"
+      ],
+      "cwd": "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry"
+    },
+    "join-sanitizer": {
+      "passed": true,
+      "exit_code": 0,
+      "seconds": 0.258,
+      "command": [
+        "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry/artifacts/offline-20260927/integration-final/join-fuzz"
+      ],
+      "cwd": "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry"
+    }
+  },
+  "join_sanitizer": {
+    "schema": "sigma-fp-confirm-join-fuzz/v1",
+    "status": "passed",
+    "seed": "0x5f2ba84dfe1c9037",
+    "trials": 8192,
+    "api_calls": 192062,
+    "reset_calls": 8419,
+    "candidates": 17296,
+    "clean_episodes": 16384,
+    "mutated_episodes": 8192,
+    "mutation_modes": 36,
+    "long_consumed_tails": 16384,
+    "camera_io": false,
+    "confirmation_authorized": false,
+    "motion_authorized": false,
+    "reason_counts": [
+      17296,
+      15710,
+      0,
+      8648,
+      228,
+      228,
+      586,
+      8647,
+      228,
+      456,
+      92836,
+      456,
+      456,
+      455,
+      228,
+      613,
+      228,
+      1010,
+      1654,
+      33680,
+      8419
+    ]
+  },
+  "arm_object_text_bytes": {
+    "geometry": 5076,
+    "confirm_join": 3268
+  },
+  "observer_code_bytes": 1020,
+  "observer_code_sha256": "a9e9e41d267e45b8cdca9bb384ecc4a188d02b29a34dfb7aa438ab44747f77f9",
+  "observer_arm_emulation": {
+    "passed": true,
+    "tests": 13,
+    "negative_controls": 2,
+    "native_callees": "controlled BX-LR stubs, not real firmware",
+    "runtime": "Unicorn 2.1.4, /usr/bin/python3, tool-approved JIT environment"
+  },
+  "synthetic_replay": {
+    "events": 80,
+    "candidates": 2,
+    "simulated_confirmation_attempts": 2,
+    "simulated_confirmations_accepted": 2,
+    "simulated_confirmations_rejected": 0,
+    "directions": {
+      "unknown": 29,
+      "approach": 27,
+      "recede": 17
+    },
+    "join_state_bytes": 116,
+    "geometry_state_bytes": 396
+  },
+  "source_sha256": {
+    "build.py": "cbeb2bfee44ce1b901d3c997d0ab924b210d3a222c1fbb1c04a4e521c29d6de7",
+    "build_join.py": "ad1897e53a3d4f6eefa0deb20404aa218de6245e763d582ca4e693109d613dd3",
+    "build_observer.py": "a544e8805633f43d0218b59462349798026283c8746812ba205e439d1ea54dc2",
+    "confirm_join.c": "2b78c400548076d3b385858e870971802f3ea20bdce5b4e91f518b5bd9679c09",
+    "confirm_join.h": "d0c978a6e83b3cd78381e3d5ba59aaeede346a06ed9e65f51e5d42f77c9152be",
+    "fuzz_confirm_join.c": "6e440ed7e379146910e212506067b8c39c5525d7d2fe7424c4334133c93ffc94",
+    "fuzz_geometry.c": "1f06969f6ae322b162bd69545c2de4e21065f8e79040673993c2d6d32a86994a",
+    "geometry.c": "8f38d0bb10b93ab186519b3e759ddb9f9415769f55d07d8474adf0d0da352c83",
+    "geometry.h": "5cbfdbe8ba276a200f01a02646d1a25e93007677a058af2f7d38428be06c3abf",
+    "geometry.py": "f823f1f085ad887aaa9146257b5f12f73c06295737193b797dce2d967413d5ed",
+    "join.py": "3dd82125d58f2ab0ffea513ae37771777bed47df827c746b7d5311583a26fc36",
+    "join_replay.py": "2ec90234d2cbd237d0c6126edd4248c97d06bd6023596e6cb4e11fb34a5b175f",
+    "make_demo.py": "b3f2845d362564a0d65c5914677986f970c367ab4ec904c5c2f6c29d26bfac3a",
+    "make_join_demo.py": "291a965163c0bd32b27a1c3445bab958762462db253796bd3b1bfe335020bc9b",
+    "native_hook_sites.json": "b4c6ae6e96d6c98985809dbb20f394aad7454a4cdc315133b71c9fc4ac1d857b",
+    "native_observer.S": "48c4dfc3d77df1e74e88e5360fea77fbf96d7aa3114d878c2d3a045093cf98b0",
+    "observer_decode.py": "f109d228a68968e44633c70cdd7add0d3527c041ee3d0093e469b402bf9187e7",
+    "replay.py": "8caa01b882a7bff1813bb25b4f1768ecc67974bdc59264b3aa6eb3e73ef3728c",
+    "test_confirm_join.py": "5c309dd37972d03064ebf8b49cdd8adb15c786d6b179ab3dfcea006c0219e0df",
+    "test_geometry.py": "8e91d9fbd2dad28b02367512d866e964583e377c958987b5212bbf72429c2c01",
+    "test_hook_sites.py": "9326e2252fcccfa485c5463db03411f6d927c42c770d7b5c401aa0905fd09f42",
+    "test_join_replay.py": "347b5f0133eab6f99b54531aba6cdd6582eb8176068aea60484bb4a914e10327",
+    "test_native_observer.py": "99120f97995b79b2237f1a473fb15f8db2268a019c648865f34019d22eb8cedf",
+    "test_observer_decode.py": "04b9af4442001104f19239d3d53b9effe4382f57378c3e40ef0fe681afe2a28c",
+    "test_offline.py": "3e5c8c5dc9330fd47fc4fdb1a4d23af75c5095f13eafb7c6f87d2eefe74402f3",
+    "verify_hook_sites.py": "6761e3428a8d8a8a0b84e2d3c753dd4fc986ababb1b5e742f499200badc8b29a"
+  },
+  "artifact_directory": "/Users/dido/Developer.localized/SIGMAfp_re/fpSup/focus/geometry/artifacts/offline-20260927/integration-final",
+  "limits": [
+    "ARM C objects were cross-compiled and audited, not ARM-executed.",
+    "Observer stubs were ARM-emulated with controlled native callees; native firmware behavior, hardware timing, ownership, stack headroom, optical validity and physical AF improvement remain unverified.",
+    "No installable payload or card files were generated."
+  ]
+}

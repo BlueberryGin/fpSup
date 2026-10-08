@@ -139,6 +139,15 @@ body:not(.simple) .d-short{display:none}
 .remove-upload{align-self:flex-start;margin:0 15px 12px;font:inherit;font-size:.76rem;
   padding:0;border:0;background:none;color:var(--dim);cursor:pointer;text-decoration:underline}
 .remove-upload:hover{color:var(--bad)}
+/* A remembered upload: rename in place, delete, and a cross when it cannot go
+   with what is ticked (or cannot be read at all). */
+.up-actions{display:flex;gap:10px;align-items:center;margin:0 15px 12px}
+.up-actions .remove-upload{margin:0}
+.up-name{flex:1;min-width:0;font:inherit;font-size:.78rem;padding:3px 6px;color:var(--ink);
+  background:var(--panel);border:1px solid var(--line);border-radius:3px}
+.up-name:focus-visible{outline:2px solid var(--sig);outline-offset:1px}
+.up-x{display:block;color:var(--bad);font-size:.78rem;margin-top:4px}
+.up-x b{font-size:1rem;margin-right:4px}
 .catalogue-empty{grid-column:1/-1;color:var(--dim);font-size:.86rem;margin:0;padding:24px 0}
 /* Fast is a start-up setting, never a SUP tile or a selectable product. */
 .start-setting{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
@@ -302,7 +311,7 @@ footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);
         <span class="plus" aria-hidden="true">+</span>
         <b>Add a .BIN</b>
         <small class="d-short">A sup someone sent you</small>
-        <small class="d-full">Drop an fpSup.BIN here or click to choose one. Its sections are merged with whatever is ticked; bytes identical to one already taken are folded away, genuine collisions show up as a failed check.</small>
+        <small class="d-full">Drop an fpSup.BIN here or click to choose one. Its sections are merged with whatever is ticked; bytes identical to one already taken are folded away, genuine collisions show up as a failed check. Files you add are remembered in this browser, unticked, until you delete them; rename them on their tile. A ✗ says why one cannot go with what is ticked.</small>
       </div>
       <div id="startopt"></div>
       <button class="btn" id="dl-z">Download sup (.zip)</button>
@@ -687,6 +696,39 @@ function composeAutorun(banner, cap){
 const cmdCount = banner => composeAutorun(banner).split('\n')
   .filter(l => l.trim() && !l.trimStart().startsWith('#')).length;
 
+/* Every stage2 this page supersedes: its own two, each catalogued release's,
+   and a fast card's with a raised read cap (it carries its magic). */
+function knownStage2(){
+  const known = new Set([CAT.stage2.b, CAT.fast.stage2.b].concat(
+    CAT.cards.map(k => k.records.length && (k.records[0].a >>> 0) === 0
+                       ? k.records[0].b : null)));
+  for (let cap = CAT.read_cap + CP.step; cap <= CP.max; cap += CP.step)
+    known.add(b64enc(capStage2(b64(CAT.fast.stage2.b), cap)));
+  return known;
+}
+/* Why an uploaded card cannot go on the card being built, or '' -- the tile's
+   cross.  The same rules the checks apply, asked one upload at a time, so the
+   reason is shown on the file instead of only in a failed check. */
+function uploadProblem(c){
+  if (c.broken) return 'This file cannot be read: ' + c.broken;
+  const others = sel().filter(k => k.id !== c.id);
+  if (!others.length && !fastOn) return '';
+  const first = c.records[0];
+  if (first && (first.a >>> 0) === 0 && !knownStage2().has(first.b))
+    return 'Built with a stage2 this page does not know: it can only be used on its own, without Fast Start 3';
+  const span = r => [r.a >>> 0, (r.a >>> 0) + b64(r.b).length];
+  for (const r of c.records){
+    if (!(r.a >>> 0)) continue;
+    const [lo, hi] = span(r);
+    for (const k of others) for (const q of k.records){
+      if (!(q.a >>> 0) || (q.a === r.a && q.b === r.b)) continue;
+      const [l2, h2] = span(q);
+      if (lo < h2 && l2 < hi) return 'Overlaps ' + bare(k.name) + ' at ' + hex(Math.max(lo, l2));
+    }
+  }
+  return '';
+}
+
 function runChecks(recs, vshl, banner, entry, entriesNow){
   /* Destination zero is not a placement -- the section is left where the file
      landed and run there -- so it has no span to overlap with.  A card can carry
@@ -856,12 +898,7 @@ function runChecks(recs, vshl, banner, entry, entriesNow){
      seen, and the answer is a newer page -- or the card on its own, which
      keeps its helper untouched. */
   const replaced = sel().length > 1 || fastOn;
-  const known = new Set([CAT.stage2.b, CAT.fast.stage2.b].concat(
-    CAT.cards.map(k => k.records.length && (k.records[0].a >>> 0) === 0
-                       ? k.records[0].b : null)));
-  // A fast card this page made with a raised read cap carries its magic.
-  for (let cap = CAT.read_cap + CP.step; replaced && cap <= CP.max; cap += CP.step)
-    known.add(b64enc(capStage2(b64(CAT.fast.stage2.b), cap)));
+  const known = knownStage2();
   const strangers = !replaced ? [] : sel().filter(k => k.upload
     && k.records.length && (k.records[0].a >>> 0) === 0
     && !known.has(k.records[0].b));
@@ -1018,7 +1055,9 @@ function categoryOptions(){
   return [{id:'all', label:'All', count:all().length},
     ...ids.map(id => ({id, label:CATEGORY_LABELS[id] || id, count:counts.get(id)}))];
 }
-const visibleCards = () => all().filter(c => activeCategory === 'all' || categoryOf(c) === activeCategory);
+/* Your own uploads show under every filter, beside the add tile: a remembered
+   file that only appeared under "Uploaded" looked like it had not been kept. */
+const visibleCards = () => all().filter(c => activeCategory === 'all' || c.upload || categoryOf(c) === activeCategory);
 
 let addTileEl = null;   // the "+ Add a .BIN" tile; kept, because resetting the
                         // grid's innerHTML detaches it and getElementById loses it
@@ -1058,21 +1097,25 @@ function renderCatalogue(){
         <input type="checkbox" id="push" ${pushOn ? 'checked' : ''}>
         <span><b>EP 0x83 push patches</b><small>Include six descriptor patches for host frame transfer.</small>
         <span class="sz">6 BIN sections · AutoRun unchanged</span></span></label>`;
+    const problem = c.upload ? uploadProblem(c) : '';
+    const cross = problem ? `<span class="up-x" data-x="${escapeHTML(c.id)}"><b aria-hidden="true">✗</b>${escapeHTML(problem)}</span>` : '';
     return `<article class="sup-card ${selected ? 'selected' : ''}">
       <label class="mod sup-choice">
-        <input type="checkbox" data-c="${escapeHTML(c.id)}" ${selected ? 'checked' : ''}>
+        <input type="checkbox" data-c="${escapeHTML(c.id)}" ${selected ? 'checked' : ''} ${c.broken ? 'disabled' : ''}>
         <span class="sup-copy">
           <span class="sup-kicker">${escapeHTML(CATEGORY_LABELS[categoryOf(c)] || categoryOf(c))}</span>
           <b>${escapeHTML(bare(c.name))}</b>
           <span class="sup-version">${c.upload ? 'Local BIN' : version ? 'v' + escapeHTML(version[1]) : 'SUP'}</span>
           <small class="d-short">${md(c.desc.split(/(?<=[.!?])\s+/)[0])}</small>
-          <small class="d-full">${md(c.desc)}</small>${excl}
+          <small class="d-full">${md(c.desc)}</small>${excl}${cross}
           <span class="sz adv">${c.records.length} sections · ${by.toLocaleString()} B · entry ${c.entry ? hex(c.entry) : 'none'}</span>
           ${legacy}
         </span>
       </label>${push}
       ${c.guide ? `<a class="sup-guide" href="${escapeHTML(guideHref(c.guide))}">How to use &amp; details &rarr;</a>` : ''}
-      ${c.upload ? `<button type="button" class="remove-upload" data-rm="${escapeHTML(c.id)}">Remove uploaded file</button>` : ''}
+      ${c.upload ? `<div class="up-actions">
+        <input type="text" class="up-name" data-rename="${escapeHTML(c.id)}" value="${escapeHTML(c.name)}" maxlength="80" aria-label="Rename ${escapeHTML(c.name)}">
+        <button type="button" class="remove-upload" data-rm="${escapeHTML(c.id)}">Delete</button></div>` : ''}
     </article>`;
   }).join('') || '<p class="catalogue-empty">No SUPs in this category.</p>';
   // The add tile closes the grid.  Moving the node keeps its listeners.
@@ -1096,10 +1139,16 @@ function renderCatalogue(){
   document.querySelectorAll('[data-unselect]').forEach(button => button.onclick = () => {
     on.delete(button.dataset.unselect); render();
   });
+  document.querySelectorAll('[data-rename]').forEach(input => input.onchange = e => {
+    const card = uploads.find(c => c.id === e.target.dataset.rename);
+    const name = String(e.target.value).trim();
+    if (card && name) card.name = name;
+    saveUploads(); render();
+  });
   document.querySelectorAll('[data-rm]').forEach(button => button.onclick = () => {
     const id = button.dataset.rm;
     uploads.splice(uploads.findIndex(c => c.id === id), 1);
-    on.delete(id); render();
+    on.delete(id); saveUploads(); render();
   });
   const pb = document.getElementById('push');
   if (pb) pb.onchange = e => { pushOn = e.target.checked; render(); };
@@ -1248,19 +1297,62 @@ function parseVshl(buf){
      This convention does not add BIN-version or loader-pair validation. */
   return {entry, recs};
 }
+/* Uploaded BINs are remembered in this browser (2026-10-04, user request), so a
+   sup someone sent you is still there next time.  localStorage is per viewer and
+   can be empty or throw (private window, cleared site data): then the page works
+   exactly as before, files just are not remembered.  A remembered file comes
+   back unticked -- it never joins a card without being chosen again. */
+const UP_KEY = 'fpsup-merge-uploads';
+let upSeq = 0;
+function bufB64(buf){
+  const u8 = new Uint8Array(buf); let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function saveUploads(){
+  try { localStorage.setItem(UP_KEY, JSON.stringify(uploads.map(c => ({name:c.name, file:c.file})))); }
+  catch (e) {}
+}
+function addUpload(name, buf, select){
+  const file = bufB64(buf);
+  const known = uploads.find(c => c.file === file);
+  if (known){ if (select) on.add(known.id); return known; }
+  const {entry, recs} = parseVshl(buf);
+  const id = 'up' + (++upSeq);
+  const card = {id, name, entry, records:recs, upload:true, file,
+    banner:'fpSup-Merged!',
+    desc:'Uploaded. Its sections are merged with whatever else is ticked; '
+        +'bytes identical to one already taken are folded away.'};
+  uploads.push(card);
+  if (select) on.add(id);
+  return card;
+}
+function restoreUploads(){
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(UP_KEY) || '[]'); } catch (e) { return; }
+  if (!Array.isArray(saved)) return;
+  for (const f of saved){
+    try {
+      const bin = atob(f.file), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      addUpload(String(f.name), u8.buffer, false);
+    } catch (e) {
+      // Kept, crossed and unselectable, so it can be deleted rather than
+      // silently vanishing (or silently coming back).
+      uploads.push({id: 'up' + (++upSeq), name: String(f && f.name || 'file'), file: f && f.file,
+        entry: 0, records: [], upload: true, broken: e.message || String(e),
+        banner: 'fpSup-Merged!', desc: 'Remembered upload that this page cannot read.'});
+    }
+  }
+}
 function addFiles(list){
   const note = document.getElementById('dlnote');
   [...list].forEach(f => {
     const rd = new FileReader();
     rd.onload = () => {
       try {
-        const {entry, recs} = parseVshl(rd.result);
-        const id = 'up' + (uploads.length + 1);
-        uploads.push({id, name:f.name, entry, records:recs, upload:true,
-          banner:'fpSup-Merged!',
-          desc:'Uploaded. Its sections are merged with whatever else is ticked; '
-              +'bytes identical to one already taken are folded away.'});
-        on.add(id); note.hidden = true; render();
+        addUpload(f.name, rd.result, true);
+        saveUploads(); note.hidden = true; render();
       } catch (err) {
         note.hidden = false;
         note.innerHTML = '<b>' + f.name + ' could not be read.</b> ' + err.message;
@@ -1321,6 +1413,8 @@ document.getElementById('dl-z').onclick = async () => {
   const stem = banner.replace(/[^A-Za-z0-9._-]+/g, '').replace(/^[.-]+|[.-]+$/g, '') || 'fpSup-card';
   dl.save({filename: stem + '.zip', data: zip});
 };
+
+restoreUploads();
 
 /* ?pick=og3k, or ?pick=gyro,og3k: each product's how-to page links here with
    its product ticked.  Unknown ids are ignored, and a pick naming nothing known

@@ -51,7 +51,7 @@
 
 /* ------------------------------------------------------------------ digits */
 
-/* Two decimal digits an entry, little-endian, so one strh emits both. */
+/* Two decimal digits per aligned entry; text stores remain byte-safe. */
     .balign 2
 dec_pairs:
     .ascii  "0001020304050607080910111213141516171819"
@@ -68,62 +68,85 @@ dec_pairs_at:
     adr     r0, dec_pairs
     bx      lr
 
+/* Decimal length from floor(log2(value)).  Each binary interval crosses at
+ * most one decimal boundary.  Entries 30 and 31 deliberately start at nine:
+ * comparing against 10^9 then gives ten without needing a 10^10 constant. */
+u32_digits_by_bit:
+    .byte   1,1,1,1,2,2,2,3,3,3,4,4,4,4,5,5
+    .byte   5,6,6,6,7,7,7,7,8,8,8,9,9,9,9,9
+    .balign 4
+u32_powers_of_ten:
+    .word   1,10,100,1000,10000,100000,1000000,10000000,100000000,1000000000
+
 /* put_u32 -- r0 = value, r1 = destination.  Returns the destination advanced.
  *
- * No hardware divide on this core, so /100 is the exact reciprocal multiply
- * (n * 0x51EB851F) >> 37, two digits a turn.  Digits arrive least significant
- * first, so they are built backwards in a stack scratch and copied forward.
- *
- * v1.4 spends forty kilobytes on a 0000..9999 table to avoid this.  It had
- * reason to: it formats a whole take in one pass and counted 620,000 calls.
- * This formats about four numbers per sample, spread across the take, and the
- * table would buy a few microseconds a second for forty kilobytes.
- *
- * The arithmetic was checked against Python over every value from 0 to 19999,
- * every power of ten, every 2^k-1, and sixty thousand random 32-bit values.
+ * Determine the length, then fill backwards directly in the final output.
+ * No digit scratch or subsequent copy is needed.  /100 remains the exact
+ * reciprocal multiply (n * 0x51EB851F) >> 37, two digits a turn.  Text can
+ * start at any byte, so only byte stores are used even for decimal pairs.
+ * One- and two-digit values bypass length lookup and the saved registers.
  */
     .global put_u32
 put_u32:
-    push    {r4, r5, r6, lr}
-    sub     sp, sp, #16
-    add     r4, sp, #12                 @ one past the end; digits grow down
-    adr     r5, dec_pairs
+    cmp     r0, #10
+    addlo   r0, r0, #'0'
+    strblo  r0, [r1], #1
+    movlo   r0, r1
+    bxlo    lr
+    cmp     r0, #100
+    bhs     1f
+    adr     r2, dec_pairs
+    add     r2, r2, r0, lsl #1
+    ldrh    r2, [r2]
+    strb    r2, [r1], #1
+    lsr     r2, r2, #8
+    strb    r2, [r1], #1
+    mov     r0, r1
+    bx      lr
 
-1:  cmp     r0, #100
-    blo     2f
+1:
+    push    {r4, r5, r6, lr}
+    clz     r2, r0
+    rsb     r2, r2, #31
+    adr     r3, u32_digits_by_bit
+    ldrb    r2, [r3, r2]
+    adr     r3, u32_powers_of_ten
+    ldr     r3, [r3, r2, lsl #2]
+    cmp     r0, r3
+    addhs   r2, r2, #1
+    add     r1, r1, r2                 @ returned end of text
+    mov     r4, r1                     @ digits grow down from that end
+    adr     r5, dec_pairs
     movw    r6, #0x851F
     movt    r6, #0x51EB
-    umull   ip, r6, r0, r6
-    lsr     r6, r6, #5                  @ r6 = value / 100
-    add     ip, r6, r6, lsl #2          @ 5q
+
+2:  cmp     r0, #100
+    blo     3f
+    umull   r2, r3, r0, r6
+    lsr     r3, r3, #5                  @ r3 = value / 100
+    add     ip, r3, r3, lsl #2          @ 5q
     sub     r0, r0, ip, lsl #4          @ -80q  } value - 100q, no multiply
     sub     r0, r0, ip, lsl #2          @ -20q  }
     add     ip, r5, r0, lsl #1
     ldrh    ip, [ip]
-    sub     r4, r4, #2
-    strh    ip, [r4]
-    mov     r0, r6
-    b       1b
+    strb    ip, [r4, #-2]!
+    lsr     ip, ip, #8
+    strb    ip, [r4, #1]
+    mov     r0, r3
+    b       2b
 
-2:  cmp     r0, #10
-    blo     3f
+3:  cmp     r0, #10
+    blo     4f
     add     ip, r5, r0, lsl #1
     ldrh    ip, [ip]
-    sub     r4, r4, #2
-    strh    ip, [r4]
-    b       4f
-3:  add     ip, r0, #'0'
-    sub     r4, r4, #1
-    strb    ip, [r4]
+    strb    ip, [r4, #-2]!
+    lsr     ip, ip, #8
+    strb    ip, [r4, #1]
+    b       5f
+4:  add     ip, r0, #'0'
+    strb    ip, [r4, #-1]
 
-4:  add     r5, sp, #12                 @ copy forward into the row
-5:  ldrb    ip, [r4], #1
-    strb    ip, [r1], #1
-    cmp     r4, r5
-    blo     5b
-
-    mov     r0, r1
-    add     sp, sp, #16
+5:  mov     r0, r1
     pop     {r4, r5, r6, lr}
     bx      lr
 
@@ -276,28 +299,34 @@ gcsv_emit:
  *                r3 = one past the last byte that may be written.
  *
  * Returns r0 = the destination advanced, r1 = how many records are LEFT --
- * the caller subtracts, which costs it one instruction and costs this a
- * register it does not have.
+ * the caller subtracts to find how many were consumed.
  * One pass, in order, holding one row back so a reading can land on the sample
  * it followed; whatever is still held when the records run out stays held for
  * the next call, block boundary or not.
  *
+ * The current block remains owned by the writer throughout this call.  Keep
+ * the held sample as a pointer into that block, and copy only the final pending
+ * sample to G_HELD before returning.
+ * No pointer into a block survives the call that can release it.
+ *
  * It stops when fewer than ROW_MAX bytes are left rather than when the buffer
  * is exactly full, so a row is never cut in half.  The caller writes what it
- * got, moves along by what was consumed, and comes back -- which is how a
- * 16 KiB block of records becomes three 16 KiB writes of text without the
- * write size, the one number audio and eleven minutes of camera agree on,
- * changing at all.
+ * got and can resume at the first unconsumed record.  The shipping writer's
+ * text budget holds the entire block, so it still makes one write per block.
  */
     .global gcsv_format
 gcsv_format:
-    push    {r4, r5, r6, r7, r8, lr}
+    push    {r4, r5, r6, r7, r8, r9, r10, lr}
     mov     r4, r0
     mov     r5, r1
     mov     r6, r2
     mov     r7, r3
     sub     r7, r7, #ROW_MAX            @ the last place a row may start
     SHAREDAT    r8, O_G_HELD
+    ldr     r0, [r8, #8]               @ G_HELD_OK from the preceding call
+    cmp     r0, #0
+    moveq   r10, #0
+    movne   r10, r8
 
 1:  cmp     r5, #0
     beq     9f
@@ -309,50 +338,46 @@ gcsv_format:
 
     /* A sample.  Whatever was held had no reading after it, so it goes out
      * plain, and this one takes its place. */
-    bl      2f
-    ldr     r0, [r4]
-    ldr     r1, [r4, #4]
-    str     r0, [r8]
-    str     r1, [r8, #4]
-    mov     r0, #1
-    str     r0, [r8, #8]                @ G_HELD_OK
-    b       4f
-
-3:  /* A reading.  It came after the held sample, so that row carries it. */
-    ldr     r0, [r8, #8]
-    cmp     r0, #0
-    beq     4f                          @ nothing held: the row it belongs to
-                                        @ went out with the previous block
-    mov     r0, r8
-    mov     r1, r4
-    mov     r2, r6
-    bl      gcsv_emit
-    mov     r6, r0
-    mov     r0, #0
-    str     r0, [r8, #8]
-
-4:  add     r4, r4, #8
-    sub     r5, r5, #1
-    b       1b
-
-2:  /* Send the held row out with no reading, if there is one. */
-    push    {r0, r1, r2, lr}
-    ldr     r0, [r8, #8]
-    cmp     r0, #0
-    beq     8f
-    mov     r0, r8
+    cmp     r10, #0
+    beq     2f
+    mov     r0, r10
     mov     r1, #0
     mov     r2, r6
     bl      gcsv_emit
     mov     r6, r0
-    mov     r0, #0
-    str     r0, [r8, #8]
-8:  pop     {r0, r1, r2, lr}
-    bx      lr
+2:  mov     r10, r4
+    b       4f
 
-9:  mov     r0, r6
+3:  /* A reading.  It came after the held sample, so that row carries it. */
+    cmp     r10, #0
+    beq     4f                          @ nothing held: the row it belongs to
+                                        @ went out with the previous block
+    mov     r0, r10
+    mov     r1, r4
+    mov     r2, r6
+    bl      gcsv_emit
+    mov     r6, r0
+    mov     r10, #0
+
+4:  add     r4, r4, #8
+gcsv_record_consumed:
+    sub     r5, r5, #1
+    b       1b
+
+9:  /* Retain only the sample that must outlive this call. */
+    cmp     r10, #0
+    beq     8f
+    cmp     r10, r8
+    ldmiane r10, {r0, r1}
+gcsv_hold_store:
+    stmiane r8, {r0, r1}
+    mov     r0, #1
+    b       7f
+8:  mov     r0, #0
+7:  str     r0, [r8, #8]                @ G_HELD_OK
+    mov     r0, r6
     mov     r1, r5                      @ what is left, not what was taken
-    pop     {r4, r5, r6, r7, r8, lr}
+    pop     {r4, r5, r6, r7, r8, r9, r10, lr}
     bx      lr
 
 /* gcsv_last -- r0 = destination.  Returns it advanced.

@@ -59,7 +59,7 @@ def main():
     # the size of `boot`, and `load` sits after it. A swap that jumps to the
     # wrong offset lands in the middle of the loader.
     ldef = (f'LOADER_BASE={CAVE_LOW}', f'HOOK_RESTORE=0x{WORKER_BL:08X}')
-    where = CAVE_LOW + symbols(HERE / 'templates' / 'loader.S', ldef)['load']
+    where = CAVE_LOW + symbols(HERE / 'asm' / 'loader.S', ldef)['load']
     print(f'  loader load at 0x{where:08X}')
 
     # Address first, magic second. The worker checks the magic and only then

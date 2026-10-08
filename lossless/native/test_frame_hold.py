@@ -63,15 +63,18 @@ def build(directory, replace=None, name='hold.dylib'):
                    check=True, capture_output=True, text=True, timeout=60)
     lib = ct.CDLL(str(out))
     for fn, count, ret in (('reset', 3, True), ('mode', 1, False), ('open_fails', 1, False),
+                           ('close_fails', 1, False), ('enqueue_result', 1, False),
+                           ('present', 2, False),
                            ('frame', 2, False), ('frame_field', 3, False),
                            ('arrive', 1, True), ('arrive_arg', 2, True), ('stop', 0, True),
                            ('finish', 0, True), ('break', 0, False), ('flush', 2, True),
-                           ('commit_tiles', 2, True), ('get', 1, True),
+                           ('commit_tiles', 2, True), ('tile_force', 1, False), ('get', 1, True),
                            ('header', 1, False), ('writer_flush', 2, True),
                            ('writer_shape', 1, False), ('flush_get', 1, True),
                            ('file_word', 2, True), ('file_poke', 3, False),
                            ('use_spare', 1, False), ('no_output', 1, False),
                            ('lanes', 1, True), ('lane_arrive', 1, True), ('task', 0, True),
+                           ('task_wait', 1, True), ('twai', 1, True),
                            ('lane_stop', 0, True), ('lane_abandon', 1, True),
                            ('lane_finish', 1, True), ('lane_get', 2, True),
                            ('kick', 1, True), ('reenter', 1, False),
@@ -186,9 +189,22 @@ class HoldTests(unittest.TestCase):
         self.assertEqual(self.lib.fpl_fixture_flush(1, 0), SMALL_PAYLOAD)
         self.assertEqual(self.lib.fpl_fixture_flush(2, 0), NONE)    # still held
         tiles = self.lib.fpl_fixture_commit_tiles(1, 0xFFFF)
-        self.assertEqual(tiles, 2)                 # 520x368: two tiles across
+        self.assertEqual(tiles, 2)                 # 520x368: two 288x368 tiles across
         self.assertEqual(sum(self.lib.fpl_fixture_commit_tiles(1, t) for t in range(tiles)),
                          SMALL_PAYLOAD)
+
+    def test_the_promise_carries_the_grid_the_frame_was_compressed_with(self):
+        self.frames(1, 2)
+        self.lib.fpl_fixture_arrive(1)
+        self.lib.fpl_fixture_tile_force(256 << 16 | 368)     # from the next frame on
+        self.lib.fpl_fixture_arrive(2)
+        self.lib.fpl_fixture_stop()
+        self.assertEqual(self.lib.fpl_fixture_flush(1, 0), SMALL_PAYLOAD)
+        # tile_grid.h's default for 520x368 (test_tile_grid.reference)
+        self.assertEqual(self.lib.fpl_fixture_commit_tiles(1, 0xFFFE), 288 << 16 | 368)
+        self.assertEqual(self.lib.fpl_fixture_flush(2, 0), SMALL_PAYLOAD)
+        self.assertEqual(self.lib.fpl_fixture_commit_tiles(2, 0xFFFE), 256 << 16 | 368)
+        self.assertEqual(self.lib.fpl_fixture_commit_tiles(2, 0xFFFF), 3)   # 520 = 3 x 256
 
     def test_promises_are_independent_of_order(self):
         self.frames(1, 2, 3)
@@ -666,6 +682,10 @@ class SwapFlushSiteTests(FlushSiteTests):
 
 class HoldMutationTests(unittest.TestCase):
     MUTATIONS = {
+        'the promise keeps the default grid': (
+            '        c->tile_width = h->job.tile_width;', '        c->tile_width = FPL_TILE_WIDTH;'),
+        'the force never reaches the engine': (
+            '    in->tile_force = h->tile_force;', '    in->tile_force = 0;'),
         'services after the new frame instead of before': (
             '    service(h, 0);\n    if (!admit(h, creator',
             '    if (!admit(h, creator'),
@@ -804,6 +824,7 @@ class FlushMutationTests(unittest.TestCase):
 
 IDLE_L, HELD_L, RUNNING_L, FINISHED_L, FAULT_L = range(5)
 L_STALLS = 18
+ENQ_CALLS = 19
 (L_STATE, L_COMPRESSED, L_HELD, L_CHAINED, L_FAULTS, L_PHASE, L_ORDER, L_FULL,
  IRQ_DEPTH, IRQ_OFFS, IRQ_BAD, SLEEPS, L_DRAINED, L_SWAPPED, ENGINE_RUNNING) = range(15)
 
@@ -887,6 +908,46 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(self.queued(), [(i, packed(i)) for i in (1, 2, 3)])
         self.assert_clean()
 
+    def test_a_waiting_pass_waits_on_the_running_job_and_starts_the_next_at_once(self):
+        self.reset(latency=3)
+        self.frames(1, 2)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 2)        # started; nothing to wait on
+        self.assertEqual(self.lib.fpl_fixture_twai(0), 0)
+        self.lib.fpl_fixture_lane_arrive(2)
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 4 | 2 | 1)  # waited, 1 done, 2 started
+        self.assertEqual(self.lib.fpl_fixture_twai(0), 1, 'one wait, not a poll loop')
+        self.assertEqual(self.lib.fpl_fixture_twai(1), 10)
+        self.assertEqual(self.state(), (FINISHED_L, RUNNING_L))
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assertEqual(self.queued(), [(1, packed(1)), (2, packed(2))])
+        self.assert_clean()
+
+    def test_a_wait_that_ends_before_the_job_says_it_waited_and_finishes_nothing(self):
+        self.reset(latency=25)
+        self.frames(1)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.lib.fpl_fixture_task_wait(10)                             # started
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 4)        # 10 of 25
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 4)        # 20 of 25
+        self.assertEqual(self.state(), (RUNNING_L, IDLE_L))
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 4 | 1)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assert_clean()
+
+    def test_with_nothing_running_a_waiting_pass_does_not_wait(self):
+        self.assertEqual(self.lib.fpl_fixture_task_wait(10), 0)
+        self.assertEqual(self.lib.fpl_fixture_twai(0), 0)
+
+    def test_the_plain_pass_still_polls_one_tick(self):
+        self.reset(latency=3)
+        self.frames(1)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.lib.fpl_fixture_task()
+        self.assertEqual(self.lib.fpl_fixture_task() & 4, 0)
+        self.assertEqual(self.lib.fpl_fixture_twai(1), 1)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+
     def test_a_long_take_queues_every_frame_once_and_keeps_the_engine_busy(self):
         self.reset(latency=3)
         ids = list(range(1, 21))
@@ -928,10 +989,10 @@ class LaneTests(unittest.TestCase):
         self.lib.fpl_fixture_lane_arrive(1)
         self.lib.fpl_fixture_task()
         self.lib.fpl_fixture_lane_arrive(2)              # waits behind the stuck job
-        for _ in range(100):
+        for _ in range(40):                               # 40 ms: under the 50 ms floor
             self.lib.fpl_fixture_task()
         self.assertEqual(self.state(), (RUNNING_L, HELD_L), 'given up too early')
-        for _ in range(300):
+        for _ in range(20):                               # past it: given up, not 0.5 s later
             self.lib.fpl_fixture_task()
         self.assertEqual(self.lane(0, L_STALLS), 1)
         self.lib.fpl_fixture_lane_arrive(3)              # collects 1 (as it was)
@@ -1007,6 +1068,127 @@ class LaneTests(unittest.TestCase):
         self.lib.fpl_fixture_task()
         self.assertEqual(self.get(STARTS), 0)
         self.assertEqual(self.lane(0, L_STATE), IDLE_L)
+        self.assertEqual(self.lane(0, L_PHASE), FREE)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assertEqual(self.lib.fpl_fixture_lane_finish(0), OK)
+        self.assertEqual(self.queued(), [(1, raw(1))])
+        self.assert_clean()
+
+    def test_starved_worker_stop_cancels_both_never_started_leases(self):
+        self.frames(1, 2)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.lib.fpl_fixture_lane_arrive(2)
+        self.lib.fpl_fixture_task_in_sleep(0)
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), OK)
+        self.assertEqual(self.queued(), [(1, raw(1)), (2, raw(2))])
+        self.assertEqual(self.state(), (IDLE_L, IDLE_L))
+        for n in (0, 1):
+            self.assertEqual(self.lane(n, L_PHASE), FREE)
+            self.assertEqual(self.lib.fpl_fixture_lane_finish(n), OK)
+        self.lib.fpl_fixture_task()
+        self.lib.fpl_fixture_lane_stop()
+        self.assertEqual(self.get(STARTS), 0)
+        self.assertEqual(self.get(ENQ_N), 2)
+        self.assert_clean()
+
+    def test_cancel_does_not_claim_transfer_on_a_refused_enqueue(self):
+        for native_result in (0, 2):
+            with self.subTest(native_result=native_result):
+                self.reset()
+                self.frames(1)
+                self.lib.fpl_fixture_lane_arrive(1)
+                self.lib.fpl_fixture_enqueue_result(native_result)
+                self.assertEqual(self.lib.fpl_fixture_lane_abandon(0), FAULT)
+                self.assertEqual((self.lane(0, L_STATE), self.lane(0, L_PHASE)),
+                                 (FAULT_L, HELD))
+                self.assertEqual(self.lib.fpl_fixture_lane_finish(0), BUSY)
+                self.assertEqual(self.lane(0, ENQ_CALLS), 1)
+                self.lib.fpl_fixture_enqueue_result(1)
+                self.lib.fpl_fixture_lane_stop()
+                self.lib.fpl_fixture_task()
+                self.assertEqual(self.lane(0, ENQ_CALLS), 1, 'uncertain enqueue retried')
+                self.assertEqual(self.get(ENQ_N), 0)
+                self.assertEqual(self.get(STARTS), 0)
+                self.assert_clean()
+
+    def test_cancel_requires_the_same_queueable_pending_native_frame(self):
+        for field, value in ((0, 0), (4, 9), (0x1104, 0xD), (None, 0)):
+            with self.subTest(field=field):
+                self.reset()
+                self.frames(1)
+                self.lib.fpl_fixture_lane_arrive(1)
+                if field is None:
+                    self.lib.fpl_fixture_present(1, 0)
+                else:
+                    self.lib.fpl_fixture_frame_field(1, field, value)
+                self.assertEqual(self.lib.fpl_fixture_lane_abandon(0), FAULT)
+                self.assertEqual(self.lane(0, L_PHASE), HELD)
+                self.assertEqual(self.lib.fpl_fixture_lane_finish(0), BUSY)
+                self.assertEqual(self.lane(0, ENQ_CALLS), 0)
+                self.assert_clean()
+
+    def test_unknown_engine_failure_fences_both_lanes_before_the_next_kick(self):
+        for failure in ('wait', 'close'):
+            for return_at in ('arrival', 'stop'):
+                with self.subTest(failure=failure, return_at=return_at):
+                    self.reset()
+                    self.frames(1, 2, 3, 4)
+                    self.lib.fpl_fixture_lane_arrive(1)
+                    self.lib.fpl_fixture_task()
+                    self.lib.fpl_fixture_lane_arrive(2)
+                    if failure == 'wait':
+                        self.lib.fpl_fixture_mode(MODE_WAIT_ERROR)
+                    else:
+                        self.lib.fpl_fixture_close_fails(1)
+                    self.lib.fpl_fixture_task()
+                    self.assertEqual(self.state(), (FINISHED_L, HELD_L))
+                    self.assertEqual(self.get(STARTS), 1)
+                    self.assertEqual(self.get(CLOSES), 0 if failure == 'wait' else 1)
+                    self.assertEqual(self.get(ENQ_N), 0, 'worker called native enqueue')
+                    self.assert_clean()
+                    if return_at == 'arrival':
+                        self.lib.fpl_fixture_lane_arrive(3)
+                        self.assertEqual(self.queued(), [(i, raw(i)) for i in (1, 2, 3)])
+                        self.assertEqual(self.state(), (FAULT_L, IDLE_L))
+                        self.lib.fpl_fixture_lane_arrive(4)
+                        self.assertEqual(self.lane(1, L_STATE), IDLE_L, 'new work admitted')
+                    self.assertEqual(self.lib.fpl_fixture_lane_stop(), FAULT)
+                    self.assertEqual(self.lane(0, SLEEPS), 0, 'waited for a fenced HELD job')
+                    self.assertEqual(self.lane(0, L_PHASE), ENCODING)
+                    self.assertEqual(self.lane(1, L_PHASE), FREE)
+                    self.assertEqual(self.lib.fpl_fixture_lane_finish(0), BUSY)
+                    self.assertEqual(self.lib.fpl_fixture_lane_finish(1), OK)
+                    before = self.queued()
+                    self.lib.fpl_fixture_task()
+                    self.lib.fpl_fixture_lane_stop()
+                    self.assertEqual(self.queued(), before)
+                    self.assertEqual([i for i, _ in before].count(1), 1)
+                    self.assertEqual([i for i, _ in before].count(2), 1)
+                    self.assertEqual(self.get(STARTS), 1)
+                    self.assert_clean()
+
+    def test_a_failed_second_lane_also_fences_the_first_lane(self):
+        self.frames(1, 2, 3, 4)
+        self.lib.fpl_fixture_lane_arrive(1)
+        self.lib.fpl_fixture_task()                        # A running
+        self.lib.fpl_fixture_lane_arrive(2)
+        self.lib.fpl_fixture_task()                        # A finished, B running
+        self.lib.fpl_fixture_lane_arrive(3)                 # A holds 3, 1 queued
+        self.assertEqual(self.queued(), [(1, packed(1))])
+        self.lib.fpl_fixture_mode(MODE_WAIT_ERROR)
+        self.lib.fpl_fixture_task()
+        self.assertEqual(self.state(), (HELD_L, FINISHED_L))
+        self.assertEqual(self.get(STARTS), 2)
+        self.assertEqual(self.get(ENQ_N), 1, 'worker performed the transfer')
+        self.assert_clean()
+        self.lib.fpl_fixture_lane_arrive(4)
+        self.assertEqual(self.queued(), [(1, packed(1)), (2, raw(2)), (3, raw(3)), (4, raw(4))])
+        self.assertEqual(self.state(), (IDLE_L, FAULT_L))
+        self.assertEqual(self.lib.fpl_fixture_lane_stop(), FAULT)
+        self.assertEqual(self.lane(0, L_PHASE), FREE)
+        self.assertEqual(self.lane(1, L_PHASE), ENCODING)
+        self.lib.fpl_fixture_task()
+        self.assertEqual(self.get(STARTS), 2)
         self.assert_clean()
 
     def test_a_start_the_engine_refuses_gives_the_frame_back_at_the_next_arrival(self):
@@ -1107,10 +1289,41 @@ class LaneMutationTests(unittest.TestCase):
         'stop does not wait for the task': (
             '        sleep_ms(1);\n', '        break;\n'),
         'abandons a held frame without giving it back': (
-            '        native_enqueue(h->creator, h->native_id, 1);\n        h->frame = 0;\n'
-            '        h->swapping = 0;\n        fpl_pipeline_reap(h->pipeline, &h->token, 1, 1);',
-            '        h->frame = 0;\n'
-            '        h->swapping = 0;\n        fpl_pipeline_reap(h->pipeline, &h->token, 1, 1);'),
+            '            native_enqueue(h->creator, h->native_id, 1) != 1)',
+            '            0)'),
+        'held cancellation uses retained-only reap': (
+            'result = fpl_pipeline_cancel_held(h->pipeline, &h->token, 1);',
+            'result = fpl_pipeline_reap(h->pipeline, &h->token, 1, 1);'),
+        'cancel assumes a refused enqueue succeeded': (
+            'native_enqueue(h->creator, h->native_id, 1) != 1)',
+            '(native_enqueue(h->creator, h->native_id, 1), 0))'),
+        'cancel ignores native queueable flag': (
+            '            !(peek(h->frame) & 0xffu) ||\n', ''),
+        'cancel ignores native frame identity': (
+            'native_frame(h->native_id) != h->frame ||', '0 ||'),
+        'restarts unknown shared hardware': (
+            '    if (engine_failed(lane)) return moved;  /* unknown hardware is not idle */\n', ''),
+        'checks only the first codec job for failure': (
+            '        if (hold_valid(lane[n]) && lane[n]->job.phase == FPL_CODEC_FAILED) return 1;',
+            '        if (n == 0 && hold_valid(lane[n]) && lane[n]->job.phase == FPL_CODEC_FAILED) return 1;'),
+        'stop waits for work the failed engine cannot start': (
+            '        if (engine_failed(lane)) {\n'
+            '            if (first->lane == FPL_LANE_HELD) fpl_hold_abandon(first);\n'
+            '            if (second && second->lane == FPL_LANE_HELD) fpl_hold_abandon(second);\n'
+            '        }\n', ''),
+        'the task polls instead of waiting': (
+            '    result = fpl_codec_job_wait(&h->job, ticks);', '    result = fpl_codec_job_wait(&h->job, 0);'),
+        'a wait is not reported': ('waited = ticks ? 4u : 0u;', 'waited = 0u;'),
+        'a pass reports a wait it never made': (
+            '    if (!hold_valid(h) || h->lane != FPL_LANE_RUNNING) return 0;\n    uint32_t took, polled',
+            '    if (!hold_valid(h) || h->lane != FPL_LANE_RUNNING) return ticks ? 4u : 0u;\n    uint32_t took, polled'),
+        'checks engine failure only before polling': (
+            '    moved |= check(first, ticks);\n'
+            '    if (second) moved |= check(second, ticks);\n'
+            '    if (engine_failed(lane)) return moved;  /* unknown hardware is not idle */',
+            '    if (engine_failed(lane)) return moved;\n'
+            '    moved |= check(first, ticks);\n'
+            '    if (second) moved |= check(second, ticks);'),
         'collects without claiming': (
             '    if (h->lane != FPL_LANE_FINISHED) { irq_restore(mask); return FPL_BUSY; }\n'
             '    h->lane = FPL_LANE_COLLECTING;\n',
@@ -1124,8 +1337,11 @@ class LaneMutationTests(unittest.TestCase):
             '        if (h->frame) {\n            native_enqueue(h->creator, h->native_id, 1);\n'
             '            h->frame = 0;\n        }\n        saturate(&h->faults);\n        return result;',
             '        saturate(&h->faults);\n        return result;'),
-        'never gives up on a job': ('        if (h->job.polls < STALL_POLLS) return 0;',
-                                    '        return 0;'),
+        'never gives up on a job': ('        if (took < h->stall_limit_us) return waited;',
+                                    '        return waited;'),
+        'gives up only after the old 250 checks': (
+            '        if (took < h->stall_limit_us) return waited;',
+            '        if (h->job.polls < 250u) return waited;'),
         'gives up and calls it a fault': (
             '        result = fpl_codec_job_abort(&h->job) == FPL_OK ? FPL_UNSUPPORTED : FPL_FAULT;',
             '        result = fpl_codec_job_abort(&h->job) == FPL_OK ? FPL_FAULT : FPL_FAULT;'),

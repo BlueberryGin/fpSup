@@ -13,7 +13,8 @@ page back into what was ADDED to the stock page:
   - the allocation header: object count, component counts and the three
     budget arrays (entries appended at the end of each);
   - the parent's child count;
-  - the page's ModeChange root list (one {root, 1} appended).
+  - the page's ModeChange root list (one {root, root_clip} appended; 1 unless
+    the cloned root's mode clip has another id).
 
 Nothing else may differ from stock; build() proves it by applying the ops to
 the stock page with the reference applier and comparing with the builder's
@@ -61,7 +62,7 @@ def PAGE_BASE(manifest):
 
 def row_block(name, entry_offset, stock_page, page, manifest, pool_stock, stock_at,
               insert_at, parent_at, mode_change_at, y_role='cine_row_y_162_to_243',
-              row_base_y=243, counter='rows'):
+              row_base_y=243, counter='rows', root_clip=1):
     """FPUI ops adding the row in `page` (the builder's whole page) to
     `stock_page`. Offsets are page-relative. Returns (Block, info)."""
     clone_locs = [r for r in manifest['record_locations']
@@ -163,7 +164,7 @@ def row_block(name, entry_offset, stock_page, page, manifest, pool_stock, stock_
         args += [kind << 24 | arg, at]
     blk.op(fpui.OP_INSERT, insert_at, off, length, *args)
     blk.op(fpui.OP_ADD32, pchild, 1)
-    root = blk.fragment(struct.pack('>II', 0, 1))
+    root = blk.fragment(struct.pack('>II', 0, root_clip))     # {root, its mode clip}
     blk.op(fpui.OP_INSERT, mc_list_end, root, 8, fpui.R_LOCAL_ID << 24 | (new_root - first), 0)
     blk.op(fpui.OP_ADD32, mc_count, 1)
     blk.op(fpui.OP_ADD32, mode_change_at + 4, 8)
@@ -176,9 +177,10 @@ def row_block(name, entry_offset, stock_page, page, manifest, pool_stock, stock_
 
 def prove_same(blob, name, stock_page, page, manifest, pool_stock, stock_at):
     """Apply blob to the stock page; it must be the builder's page, with each
-    private string field holding the offset the shared pool gives its text."""
+    private string field holding the offset its text was given (stock place or
+    the block's string layer)."""
     pages = {name: fpui.PageCopy(stock_page, len(stock_page), 1)}
-    pool = fpui.Pool(pool_stock)
+    pool = fpui.Strings(pool_stock)
     fpui.apply(blob, pages, pool)
     got = bytes(pages[name].data)
     want = bytearray(page)
@@ -187,7 +189,7 @@ def prove_same(blob, name, stock_page, page, manifest, pool_stock, stock_at):
     for f in manifest['typed_string_fields']:
         if f['source_record'] in locs and f['pool_offset'] >= len(pool_stock):
             at = locs[f['source_record']] + f['field_offset']
-            struct.pack_into('>I', want, at, pool.intern(f['text'], stock_at(f['text'])))
+            struct.pack_into('>I', want, at, pool.offset(f['text'], stock_at(f['text'])))
     fpui.check(len(got) == len(want), 'length %d, builder %d' % (len(got), len(want)))
     diff = [i for i in range(len(got)) if got[i] != want[i]]
     fpui.check(not diff, 'differs from the builder page at %s' % [hex(i) for i in diff[:8]])

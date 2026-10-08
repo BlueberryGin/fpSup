@@ -163,7 +163,10 @@ def restore_echo(out):
 
 
 class FourBoxBar:
-    def __init__(self):
+    def __init__(self, asset_dir=ASSET_NAME):
+        # Where the frames are on the card, without the leading backslash.
+        # Loader v3 keeps them in fpSup\UI (LOADER_V3.md).
+        self.asset_dir = asset_dir
         self.frame = -1
 
     def start(self, out):
@@ -182,7 +185,7 @@ class FourBoxBar:
             return
         for value in range(self.frame + 1, filled + 1):
             out.append(f'# four-box frame {value}/4')
-            out.extend([f'display osdfile \\{ASSET_NAME}\\{value}.BIN 0 0 {frame_width(value)} {HEIGHT} 0'] * 3)
+            out.extend([f'display osdfile \\{self.asset_dir}\\{value}.BIN 0 0 {frame_width(value)} {HEIGHT} 0'] * 3)
         self.frame = filled
 
     def fallback(self, out):

@@ -111,7 +111,7 @@ static uint32_t refuse(struct fpl_codec_job *j, uint32_t result) {
 }
 
 uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_input *in) {
-    uint32_t init[9], tiles_x, tiles_y, tiles, source_bytes, native;
+    uint32_t init[9], tiles_x, tiles_y, tiles, source_bytes, native, tw, th;
     uint32_t engine[6];
     uintptr_t band_table;
 
@@ -120,10 +120,22 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
     if (j->phase == FPL_CODEC_FAILED) return FPL_FAULT;
     source_bytes = fpl_codec_source_bytes(in->width, in->height, in->format);
     if (!source_bytes) return refuse(j, FPL_UNSUPPORTED);
-    tiles_x = ceil_div(in->width, FPL_TILE_WIDTH);
-    tiles_y = ceil_div(in->height, FPL_TILE_HEIGHT);
+    if (!j->grid[0] || j->grid_for[0] != in->width || j->grid_for[1] != in->height ||
+        j->grid_for[2] != in->tile_force) {
+        fpl_tile_grid(in->width, in->height, in->tile_force, &j->grid[0], &j->grid[1]);
+        j->grid_for[0] = in->width;
+        j->grid_for[1] = in->height;
+        j->grid_for[2] = in->tile_force;
+    }
+    tw = j->grid[0];
+    th = j->grid[1];
+    tiles_x = ceil_div(in->width, tw);
+    tiles_y = ceil_div(in->height, th);
     tiles = tiles_x * tiles_y;
     if (tiles > FPL_CODEC_TILE_MAX) return refuse(j, FPL_UNSUPPORTED);
+    /* C062F478's one-band rule for this grid's tile row */
+    if ((uint64_t)(depth_bits(in->format) * in->width * th / 8u) * tiles_y > BAND_LIMIT)
+        return refuse(j, FPL_UNSUPPORTED);
     if (!in->source || !in->destination || !in->table ||
         ((in->source | in->destination | in->table) & 0x3ffu))
         return refuse(j, FPL_INVALID);
@@ -134,8 +146,8 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
     init[0] = in->width;
     init[1] = in->height;
     init[2] = in->format;
-    init[3] = FPL_TILE_WIDTH;
-    init[4] = FPL_TILE_HEIGHT;
+    init[3] = tw;
+    init[4] = th;
     init[5] = (uint32_t)in->source;
     init[6] = (uint32_t)in->destination;
     init[7] = (uint32_t)in->table;
@@ -167,8 +179,8 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
      * real height is the frame's height; that is what is passed. */
     j->request[1] = in->height;
     j->request[2] = in->format;          /* C03D9668: 0..3 map to themselves */
-    j->request[3] = FPL_TILE_WIDTH;
-    j->request[4] = FPL_TILE_HEIGHT;
+    j->request[3] = tw;
+    j->request[4] = th;
     j->request[5] = engine[0];
     j->request[6] = source_bytes;
     j->request[7] = engine[2];
@@ -196,6 +208,8 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *j, const struct fpl_codec_in
     j->format = in->format;
     j->depth = depth_bits(in->format);
     j->tiles = tiles;
+    j->tile_width = tw;
+    j->tile_height = th;
     j->band_height = in->height;
     j->source = in->source;
     j->destination = in->destination;
@@ -228,6 +242,10 @@ uint32_t fpl_codec_job_abort(struct fpl_codec_job *j) {
 }
 
 uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
+    return fpl_codec_job_wait(j, WAIT_POLL);
+}
+
+uint32_t fpl_codec_job_wait(struct fpl_codec_job *j, uint32_t ticks) {
     uint32_t pattern = 0, native, total, aligned, pad;
     uintptr_t last;
 
@@ -237,7 +255,8 @@ uint32_t fpl_codec_job_poll(struct fpl_codec_job *j) {
     if (j->phase != FPL_CODEC_RUNNING) return FPL_INVALID;
     j->polls++;
 
-    native = native_twai_flg(j->flag, WAIT_PATTERN, WAIT_OR, &pattern, WAIT_POLL);
+    native = native_twai_flg(j->flag, WAIT_PATTERN, WAIT_OR, &pattern,
+                             ticks ? ticks : WAIT_POLL);
     if (native == E_TMOUT) return FPL_BUSY;          /* still encoding */
     native_clr_flg(j->flag, 0);                      /* as C062F8F0 does */
     j->pattern = pattern;

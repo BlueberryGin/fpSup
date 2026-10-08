@@ -10,8 +10,8 @@ boot, so a bad write costs nothing as long as it is caught before the next one.
 import argparse, pathlib, struct, sys, time
 
 from armasm import assemble
-from putfile import (sh, mem_set, mem_get, staging_area, put, read_bulk, read_direct, check_fits,
-                     CODE, CODE_END, P, ECHO_SLOT, ECHO_ORIG, HERE)
+from putfile import (sh, mem_set, mem_get, staging_area, put, read_bulk, read_direct,
+                     check_fits, set_echo_handler, ECHO_SLOT, ECHO_ORIG, HERE)
 
 P_ACTUAL, P_STATUS, P_OPENR, P_READR = 0x04, 0x08, 0x0C, 0x10
 P_BUF, P_LEN, P_FOBJ, P_MODE, P_PATH = 0x14, 0x18, 0x1C, 0x20, 0x24
@@ -22,6 +22,14 @@ STATUS = {0: 'never ran', 1: 'started but did not finish', 2: 'read',
 POISON = 0xDEADBEEF
 
 
+def checked_length(actual, expected, partial=False):
+    """Never return a matching prefix as proof of an exact card file."""
+    if not partial and actual != expected:
+        raise ValueError(f'file length is {actual}, expected {expected}; '
+                         'mode 7 may have left an old tail on the card')
+    return min(expected, actual) if partial else expected
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('remote', help=r'camera path, e.g. \AutoRun.txt')
@@ -29,11 +37,18 @@ def main():
     ap.add_argument('--size', type=lambda s: int(s, 0), default=None,
                     help='bytes to read; default comes from dir')
     ap.add_argument('--mode', type=lambda s: int(s, 0), default=1)
-    ap.add_argument('--buf', type=lambda s: int(s, 0), default=None)
+    ap.add_argument('--buf', type=lambda s: int(s, 0), default=None,
+                    help='caller-provided buffer; requires --partial')
     ap.add_argument('--partial', action='store_true',
                     help='keep a read that filled the buffer -- for fetching '
                          'just the head of a file whose size is not known')
     a = ap.parse_args()
+    if a.buf is not None and not a.partial:
+        ap.error('--buf requires --partial: an exact read needs extra buffer '
+                 'space to detect an old file tail')
+    # The named cave claims are live camera operations. Resolve them only
+    # after argument parsing so import and --help remain offline.
+    from putfile import CODE, CODE_END, P
 
     name = a.remote.lstrip('\\').split('\\')[-1]
     size = a.size
@@ -88,50 +103,54 @@ def main():
     for i, w in enumerate(struct.unpack(f'<{len(pw)//4}I', pw)):
         mem_set(P + P_PATH + i * 4, w)
 
-    code = assemble(HERE / 'templates' / 'getfile.S', [f'P=0x{P:08X}'])
+    code = assemble(HERE / 'asm' / 'getfile.S', [f'P=0x{P:08X}'])
     if CODE + len(code) > CODE_END:
-        raise SystemExit('template does not fit')
+        raise SystemExit('assembly source does not fit')
+    owner = mem_get(ECHO_SLOT)
+    if not owner or owner[0] not in (ECHO_ORIG, CODE):
+        raise SystemExit(f'echo handler is {owner}, not free to borrow')
     put(CODE, code, 'code  ')
 
-    mem_set(ECHO_SLOT, CODE)
     try:
+        set_echo_handler(CODE)
         reply = sh('echo')
     finally:
-        mem_set(ECHO_SLOT, ECHO_ORIG)
-        back = mem_get(ECHO_SLOT)
-        if not back or back[0] != ECHO_ORIG:
-            print(f'  WARNING echo handler did not restore: {back}')
+        set_echo_handler(ECHO_ORIG)
 
     print(f'  reply   {reply.strip()}')
+    if reply.lstrip().startswith('ERR'):
+        raise SystemExit('getfile echo reply failed; read outcome is unknown')
     if heap:
         got = mem_get(P + P_BUF)
         if not got or not got[0]:
             raise SystemExit('  the allocator refused; nothing was read')
         buf = got[0]
         print(f'  buffer  0x{buf:08X} ({ask} bytes asked for)')
-    st = mem_get(P, 5)
-    status = st[P_STATUS // 4]
-    print(f'  status  {status} — {STATUS.get(status, "unknown")}')
-    print(f'  open    {st[P_OPENR//4]}   read {st[P_READR//4]}   '
-          f'actual {st[P_ACTUAL//4]} of {size}')
-    if status != 2:
-        return 1
+    try:
+        st = mem_get(P, 5)
+        if len(st) < 5 or any(word is None for word in st):
+            raise SystemExit('  could not verify file read status')
+        status = st[P_STATUS // 4]
+        print(f'  status  {status} — {STATUS.get(status, "unknown")}')
+        print(f'  open    {st[P_OPENR//4]}   read {st[P_READR//4]}   '
+              f'actual {st[P_ACTUAL//4]} of {size}')
+        if status != 2:
+            return 1
 
-    actual = st[P_ACTUAL // 4]
-    if heap and actual >= ask:
-        if not a.partial:
-            raise SystemExit(f'  read filled the whole buffer ({actual}); the file '
-                             f'is longer than it was thought to be')
-        print(f'  partial read of the head: {actual} bytes')
-        size = min(size, actual)
-    # The buffer came from the firmware's allocator, which the controller can
-    # reach directly -- so there is no reason to copy it through a 16 KiB
-    # staging buffer sixteen kilobytes at a time.
-    data = (read_direct(buf, size) if heap else read_bulk(buf, size, 'fetch '))
-    if heap:
-        from callfn import call
-        call(0xC001D7A0, r0=P + 0xE0, r1=2, verbose=False)   # free
-        print('  buffer  handed back')
+        actual = st[P_ACTUAL // 4]
+        try:
+            size = checked_length(actual, size, a.partial)
+        except ValueError as exc:
+            raise SystemExit(f'  {exc}')
+        # The buffer came from the firmware's allocator, which the controller
+        # can reach directly -- so there is no reason to copy it through a
+        # 16 KiB staging buffer sixteen kilobytes at a time.
+        data = (read_direct(buf, size) if heap else read_bulk(buf, size, 'fetch '))
+    finally:
+        if heap:
+            from callfn import call
+            call(0xC001D7A0, r0=P + 0xE0, r1=2, verbose=False)   # free
+            print('  buffer  handed back')
     left = sum(1 for i in marks if i * 4 + 4 <= len(data)
                and struct.unpack_from('<I', data, i * 4)[0] == POISON)
     if left:

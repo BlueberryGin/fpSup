@@ -2,6 +2,7 @@
 #define FPLOSSLESS_CODEC_JOB_H
 #include <stdint.h>
 #include "../control.h"
+#include "tile_grid.h"
 
 #define FPL_CODEC_JOB_MAGIC 0x424f4a43u
 #define FPL_CODEC_TILE_MAX 160u
@@ -30,6 +31,8 @@ enum fpl_codec_phase {
 struct fpl_codec_job {
     uint32_t magic, phase, last_native, polls;
     uint32_t width, height, format, depth, tiles, band_height;
+    uint32_t tile_width, tile_height;   /* this job's grid (tile_grid.h) */
+    uint32_t grid_for[3], grid[2];      /* {w, h, force} -> {tw, th}: one search a take */
     uintptr_t source, destination, table, band_table;
     uint32_t source_bytes, destination_bytes, table_bytes;
     uint32_t source_capacity;           /* what the caller vouched readable */
@@ -51,6 +54,7 @@ struct fpl_codec_input {
     uint32_t width, height, format;          /* Sigpro format 0..3 */
     uintptr_t source, destination, table;
     uint32_t source_capacity, destination_capacity, table_capacity;
+    uint32_t tile_force;                     /* tile_grid.h; 0 = the default */
 };
 
 #if defined(FPL_CODEC_JOB_HOST_TEST)
@@ -85,6 +89,9 @@ uint32_t fpl_codec_job_submit(struct fpl_codec_job *, const struct fpl_codec_inp
  * FPL_FAULT when the wait failed any other way or a close failed -- state
  * unknown, so the job and its buffers stay held. */
 uint32_t fpl_codec_job_poll(struct fpl_codec_job *);
+/* The same, waiting up to `ticks` for the engine's flag instead of one tick
+ * (0 = one tick). Only one task may wait on the flag: the codec task. */
+uint32_t fpl_codec_job_wait(struct fpl_codec_job *, uint32_t ticks);
 /* A job the engine never finished (2026-10-02: on the camera one job in a long
  * take never signalled, and everything after it went out uncompressed). Its
  * registers are kept in stall_regs, then CLOSE -- power off, the block reset,

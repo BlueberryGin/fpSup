@@ -31,6 +31,7 @@ static uint8_t mem[MEM_SIZE];
 static uint32_t engine[6], tilecount, endpos, uncached_hits, barriers, oob;
 static uint32_t devregs[0x40];         /* the engine's register window */
 static uint32_t enq_ids[256], enq_payload[256], enq_state[256], enq_n;
+static uint32_t enq_result, enq_calls;
 static uint32_t barrier_log[1024], barrier_n;
 static uint32_t published(void);
 static uint32_t frame_present[MAX_ID];
@@ -82,9 +83,13 @@ static uintptr_t n_frame(uint32_t id) {
 static uint32_t reenter;
 static void collect_both(void);
 static uint32_t n_enqueue(uintptr_t creator, uint32_t id, uint32_t argument) {
+    enq_calls++;
     /* another context collecting while this one is inside a collect */
     if (reenter) { reenter = 0; collect_both(); }
     if (creator != CREATOR || argument != 1) oob++;
+    if (enq_result != 1) return enq_result;
+    /* C037DD50's busy no-insert branch still returns 1. */
+    if (id < MAX_ID && frame_present[id] && !(rd_quiet(frame_at(id)) & 0xffu)) return 1;
     if (enq_n < 256) {
         enq_ids[enq_n] = id;
         enq_payload[enq_n] = id < MAX_ID && frame_present[id] ? rd_quiet(raster_of(id)) : 0;
@@ -109,8 +114,12 @@ static void n_irq_restore(uint32_t m) {
 /* The codec task runs while stop sleeps: each millisecond is one pass. */
 static uint32_t sleeps, task_in_sleep;
 static void task_pass(void);
+/* The clock: each sleep and each codec-task pass is that many ms. */
+static uint32_t clock_us;
+static uint32_t n_tick_us(void) { return clock_us; }
 static void n_sleep_ms(uint32_t n) {
     sleeps += n;
+    clock_us += 1000u * n;
     if (task_in_sleep) task_pass();
 }
 /* The header DMA: copies through the cached (plain) addresses, counted. */
@@ -125,12 +134,12 @@ static uint32_t n_dma(uintptr_t to, uintptr_t from, uint32_t bytes) {
 void fpl_fixture_dma_fails(uint32_t v) { dma_fail = v; }
 const struct fpl_hold_natives fpl_hold_test_natives = {
     n_frame, n_enqueue, rd, wr, n_uncached, n_barrier, n_irq_off, n_irq_restore, n_sleep_ms,
-    n_dma
+    n_dma, n_tick_us
 };
 
 /* ---- the fake engine ---------------------------------------------------- */
 enum { MODE_OK, MODE_REFUSE, MODE_WAIT_ERROR, MODE_NEVER, MODE_NEVER_ONCE };
-static uint32_t mode, latency, left, running, payload_bytes, open_ret, stuck;
+static uint32_t mode, latency, left, running, payload_bytes, open_ret, close_ret, stuck;
 static uintptr_t started_source, started_dest, band_table;
 static uint32_t starts, closes;
 
@@ -157,12 +166,23 @@ static uint32_t c_start(void) {
     if (mode == MODE_NEVER_ONCE) { stuck = 1; mode = MODE_OK; }   /* this job only */
     running = 1; left = latency; starts++; return 0;
 }
-static uint32_t c_close(void) { running = 0; stuck = 0; closes++; return 0; }
+static uint32_t c_close(void) {
+    closes++;
+    if (close_ret) return close_ret;  /* failure leaves hardware ownership unknown */
+    running = 0; stuck = 0; return 0;
+}
+static uint32_t twai_calls, twai_last_ticks;
 static uint32_t c_twai(uint32_t f, uint32_t w, uint32_t m, uint32_t *p, uint32_t t) {
-    (void)f; (void)w; (void)m; (void)t;
+    (void)f; (void)w; (void)m;
+    twai_calls++;
+    twai_last_ticks = t;
     if (mode == MODE_WAIT_ERROR) return 0xffffffefu;
     if (mode == MODE_NEVER || stuck) return E_TMOUT;
-    if (left) { left--; return E_TMOUT; }
+    /* `left` ticks of work remain: a wait of t ticks covers t of them */
+    if (left) {
+        if (t <= 1u || left > t) { left -= t > 1u ? t : 1u; return E_TMOUT; }
+        left = 0;
+    }
     if (mode == MODE_REFUSE) { *p = 5; return 0; }
     /* "encode": the source's marker, then filler, into our output */
     /* compressed marker 0xC00000id, carrying the SOURCE frame's id */
@@ -252,13 +272,15 @@ uint32_t fpl_fixture_reset(uint32_t latency_polls, uint32_t payload, uint32_t lo
     memset(&facts, 0, sizeof facts); memset(&hold, 0, sizeof hold);
     memset(&pipeline_b, 0, sizeof pipeline_b); memset(&hold_b, 0, sizeof hold_b);
     irq_depth = irq_offs = irq_bad = sleeps = task_in_sleep = reenter = 0;
+    twai_calls = twai_last_ticks = 0;
     dmas = dma_fail = dma_bad = 0;
     memset(frame_present, 0, sizeof frame_present);
     enq_n = uncached_hits = barriers = oob = tilecount = endpos = barrier_n = 0;
+    enq_result = 1; enq_calls = 0;
     memset(&flush_stats, 0, sizeof flush_stats);
     writer_count = 1;
     mode = MODE_OK; latency = latency_polls; left = running = stuck = 0;
-    payload_bytes = payload; open_ret = 0; starts = closes = 0;
+    payload_bytes = payload; open_ret = close_ret = 0; starts = closes = 0;
     width = 520; height = 368; format = 0;
     for (uint32_t n = 0; n < 18; ++n) descriptor[n] = 0x2000u + n;
     descriptor[0] = width; descriptor[1] = height; descriptor[8] = format;
@@ -283,11 +305,17 @@ uint32_t fpl_fixture_reset(uint32_t latency_polls, uint32_t payload, uint32_t lo
 }
 void fpl_fixture_mode(uint32_t m) { mode = m; }
 void fpl_fixture_open_fails(uint32_t v) { open_ret = v; }
+void fpl_fixture_close_fails(uint32_t v) { close_ret = v; }
+void fpl_fixture_enqueue_result(uint32_t v) { enq_result = v; }
+void fpl_fixture_present(uint32_t id, uint32_t v) {
+    if (id < MAX_ID) frame_present[id] = v;
+}
 /* A frame as the creator leaves it: kind 1, descriptor, allocation, reserve,
  * and a marker as the first pixel word so its picture can be recognised. */
 void fpl_fixture_frame(uint32_t id, uint32_t spare_capacity) {
     uintptr_t f = frame_at(id), handle = allocate(id);
     frame_present[id] = 1;
+    wr_quiet(f, 1);                         /* a new submission, not FIFO re-entry */
     wr_quiet(f + 0x04, 1);
     for (uint32_t n = 0; n < 18; ++n) wr_quiet(f + 0x10 + 4 * n, descriptor[n]);
     wr_quiet(f + 0x68, (uint32_t)handle);
@@ -323,7 +351,13 @@ uint32_t fpl_fixture_lanes(uint32_t second) {
     return fpl_hold_init(&hold_b, &pipeline_b, &facts, &w);
 }
 uint32_t fpl_fixture_lane_arrive(uint32_t id) { return fpl_lanes_arrive(lanes, CREATOR, id, 1); }
-uint32_t fpl_fixture_task(void) { return fpl_lanes_task(lanes); }
+uint32_t fpl_fixture_task_wait(uint32_t ticks) { return fpl_lanes_task_wait(lanes, ticks); }
+uint32_t fpl_fixture_twai(uint32_t which) { return which ? twai_last_ticks : twai_calls; }
+uint32_t fpl_fixture_task(void) {           /* one pass, then its 1 ms sleep */
+    uint32_t r = fpl_lanes_task(lanes);
+    clock_us += 1000u;
+    return r;
+}
 uint32_t fpl_fixture_kick(uint32_t n) { return fpl_hold_kick(lanes[n & 1u]); }
 uint32_t fpl_fixture_lane_stop(void) { return fpl_lanes_stop(lanes); }
 uint32_t fpl_fixture_lane_abandon(uint32_t n) { return fpl_hold_abandon(lanes[n & 1u]); }
@@ -351,6 +385,7 @@ uint32_t fpl_fixture_lane_get(uint32_t n, uint32_t field) {
     case 16: { uint32_t m = 0; for (uint32_t i = 0; i < 8; ++i) m |= (h->refused_by[i] != 0) << i; return m; }
     case 17: return h->arrivals;
     case 18: return h->stalls;
+    case 19: return enq_calls;
     default: return 0xFFFFFFFFu;
     }
 }
@@ -377,8 +412,10 @@ uint32_t fpl_fixture_flush(uint32_t id, uint32_t consume) {
 uint32_t fpl_fixture_commit_tiles(uint32_t id, uint32_t index) {
     const struct fpl_hold_commit *c = fpl_hold_peek(&hold, current_handle(id) + 0x2000u);
     if (!c) return 0xFFFFFFFFu;
+    if (index == 0xFFFEu) return c->tile_width << 16 | c->tile_height;
     return index == 0xFFFFu ? c->tiles : c->tile_bytes[index];
 }
+void fpl_fixture_tile_force(uint32_t force) { hold.tile_force = hold_b.tile_force = force; }
 uint32_t fpl_fixture_get(uint32_t field) {
     if (field >= 1000 && field < 1256) return enq_ids[field - 1000];
     if (field >= 2000 && field < 2256) return enq_payload[field - 2000];

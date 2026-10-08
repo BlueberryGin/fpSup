@@ -1,0 +1,17 @@
+{
+  "schema": "sigma-fp-confirm-join-fuzz/v1",
+  "status": "passed",
+  "seed": "0x5f2ba84dfe1c9037",
+  "trials": 8192,
+  "api_calls": 192062,
+  "reset_calls": 8419,
+  "candidates": 17296,
+  "clean_episodes": 16384,
+  "mutated_episodes": 8192,
+  "mutation_modes": 36,
+  "long_consumed_tails": 16384,
+  "camera_io": false,
+  "confirmation_authorized": false,
+  "motion_authorized": false,
+  "reason_counts": [17296, 15710, 0, 8648, 228, 228, 586, 8647, 228, 456, 92836, 456, 456, 455, 228, 613, 228, 1010, 1654, 33680, 8419]
+}

@@ -5,7 +5,7 @@
     ./warm_gate_card.py check               # over the shell, after a boot
 
 The card is an ordinary --loader USB-shell card whose AutoRun, after the shell
-is up, also writes templates/gate.S into the loader's own 0x200 block and points
+is up, also writes asm/gate.S into the loader's own 0x200 block and points
 the firmware's one AutoRun call (0xC03DA420) at it.  Nothing happens on that
 boot.  The power switch is a warm restart and keeps both, so on the NEXT boot the
 gate runs before the AutoRun: it restores 0xC03DA420 first, calls the loader that
@@ -42,7 +42,7 @@ PAD_TO = 32768
 
 
 def gate_code(one_shot=False):
-    code = assemble(HERE / 'templates' / 'gate.S',
+    code = assemble(HERE / 'asm' / 'gate.S',
                     [f'LOADER=0x{CAVE_LOW:08X}', f'LOAD_DONE=0x{LOAD_DONE:08X}',
                      f'MARK=0x{MARK:08X}'] + (['ONE_SHOT=1'] if one_shot else []))
     if GATE_AT + len(code) > MARK:

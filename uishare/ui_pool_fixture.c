@@ -49,7 +49,8 @@ static uintptr_t al(uint32_t n) {
     return a;
 }
 static void pub(void) { publishes++; }
-const struct uis_natives uis_test_natives = { rd, wr, rd8, wr8, al, pub };
+static void ic(void) {}
+const struct uis_natives uis_test_natives = { rd, wr, rd8, wr8, al, pub, ic };
 
 static void raw32(uintptr_t a, uint32_t v) { if (at(a)) memcpy(at(a), &v, 4); }
 

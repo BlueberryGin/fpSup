@@ -3,6 +3,14 @@ name: fp-merged-card
 description: Building a SIGMA fp card to test with — one product or several (open gate, the gyro logger, the USB shell), with or without Fast Start 3, where a power-switch restart loads through the loader hook without the AutoRun and a cold start runs the short AutoRun from the settings block — and getting it onto the camera and reading back which boot path it took. Use when a change needs verifying on the camera, when a card should boot fast or instantly, when a page-composed card has to be reproduced offline, or when a test result has to be attached to specific bytes. Covers what a script-built card shares with the ones fpSup-Merge hands out, and where they differ.
 ---
 
+> **設定區風險（2026-10-04 更新）**：原廠在 loader 前讀取持久設定；
+> 不支援的值可能使開機或選單失效，拔卡本身不會清除該值。使用者已指出現在有還原手段，
+> 因此不再把這類故障描述成不可恢復。上機前確認會保存的值、可能症狀及適用的還原流程；
+> 未確認還原條件時，優先把自訂狀態留在 RAM。240 fps 與 14-bit 的處理不同，
+> 詳見 `research/SETTINGS_AREA_FIRST_RULE.md`。
+> *(Stock firmware reads persistent settings before the loader. A recovery
+> method now exists; check its applicability before a live trial.)*
+
 # A card to test with
 
 Build any combination here, Fast Start 3 included. The cards people download
@@ -137,27 +145,36 @@ differs because `build_autorun.py` appends the worker *before* `--also-bin` and 
 
 ## Putting it on the camera
 
-The camera has to be running a card with the USB shell (`fpshd` up, `fpsh ping`
-answers). Then **hot-update, never the Desktop**:
+For an authorized hot update, first confirm the camera is running a card with
+the USB shell (`fpshd` up, `fpsh ping` answers). Use the verified pair updater
+for the two root files:
 
 ```sh
 cd fpSup/fp_usb_shell
-python3 -B putfile.py DIR/fpSup.BIN '\fpSup.BIN'          # BIN first
-python3 -B putfile.py DIR/AutoRun.txt '\AutoRun.txt'
-python3 -B putfile.py DIR/FPSUPUI/0.BIN '\FPSUPUI\0.BIN'   # ...4.BIN
-python3 -B getfile.py '\fpSup.BIN' OUT --size 61440        # read back, compare sha
+python3 -B deploy.py DIR                               # BIN first, then AutoRun; full readback
 ```
 
-- **Read everything back.** A write is not a write until the bytes compare.
+- **Read every required file back in full before rebooting.** `deploy.py`
+  verifies the two root files and checks that candidate `FPSUPUI/*.BIN` files
+  already match the card. If a sidecar differs, update it separately and
+  compare its complete remote length and bytes **before** running `deploy.py`.
+  Do not reuse a previous sidecar merely because the root pair matches.
 - **`getfile` needs `--size` for a file in a subfolder**: it looks names up in
   the root listing only, so `\FPSUPUI\n.BIN` reads as "not in dir" when it is
   there. `putfile` prints the same false warning.
-- **`putfile` does not truncate.** A shorter file leaves the old tail; the
-  builders pad with comment lines, so a leftover `###` line is harmless.
-  Compare the first N bytes, where N is the new file's length.
+- **`putfile` does not truncate.** A shorter file leaves an old tail. A prefix
+  comparison is not sufficient; use the deploy tool's length handling for the
+  root pair. For a shorter sidecar, use a verified replacement method before
+  rebooting rather than assuming the tail is harmless.
 - The `FPSUPUI` folder has to exist; `putfile` does not create folders.
-- The next boot after a hot update runs the **old** loader hook (if one is
-  armed) on the **new** BIN — expected; judge from the boot after that.
+- **Reboot once.** The boot after a hot update runs the loader hook already in
+  the settings block on the new BIN. When `AutoRun.txt` is verified compatible
+  with the one that armed it (a BIN-only deploy, including an inert comment tail),
+  that *is* the new card -- judge from
+  that first boot. Only when the AutoRun/loader itself changed does the first
+  boot still run the old loader; then judge from the boot after that.
+  (2026-10-01, user: 「一次就夠了」 -- the old wording cost every BIN-only deploy
+  two reboots.)
 
 To see the instant path, power off with the **USB cable unplugged**; plug in
 only after the boot to read. Read the state with

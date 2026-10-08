@@ -23,6 +23,40 @@ IFACE = [
      "shell daemon can."),
 ]
 
+# SuperSpeed endpoint companions of the shell's two bulk pipes: bMaxBurst 3 ->
+# 15 (byte 2 of each word).  At burst 3 a single EP82 transfer measured
+# ~240 MB/s whatever its length (2026-10-06); 16-packet bursts are what a
+# 5 Gb/s bulk pipe needs to go further.  Loader v3 shell sup only; untested.
+BURST15 = [
+    (0xC0CF3748, 0x000F3006, "EP 0x01 OUT SuperSpeed companion: bMaxBurst 3 -> 15"),
+    (0xC0CF3750, 0x000F3006, "EP 0x82 IN SuperSpeed companion: bMaxBurst 3 -> 15"),
+]
+
+# The firmware's own PTP receiver, off.  usbTask (FUN_c0033b80) answers every
+# USB event in mode 5 by calling FUN_c04db778(5) from FUN_c0033ad0 -- one PTP
+# container in, 4 bytes then the rest -- and that arms EP 0x01 OUT on its own
+# buffer.  When it wins the race with the worker, a shell command lands in PTP's
+# parser (answer: 12-byte 0x2003 Session Not Open, txid = our sequence) and the
+# worker waits out its 50 s.  Seen 1 in 20-60 UP01 chunks; with MEM1 on the third
+# transfer (camera, 2026-10-06).  The interface is vendor class, so no host ever
+# speaks PTP to it: nothing is lost.  This is the only call site; the other mode
+# branches beside it are untouched.  Shell sup only (v3), restored at power-off.
+NOPTP = [
+    (0xC0033B3C, 0xE3A00000,
+     "FUN_c0033ad0 mode 5: BL FUN_c04db778 (PTP receive) -> mov r0, #0"),
+    # The driver half of the same receiver.  On an XferNotReady for a bulk OUT
+    # (the host sending before anything is armed), whoever waits on "any event"
+    # -- usbTask, which keeps running with PTP off -- calls FUN_c01e76b8, and
+    # unless OUT_BUSY (0xC31E3974) is 1 it arms OUT on the firmware's buffer
+    # [0xC3025744].  The worker sets OUT_BUSY after every transfer, but usbTask
+    # handling the same completion can clear it again behind it: 1 lost command
+    # in ~300 MEM1 round trips, found whole in that buffer (camera, 2026-10-06).
+    # Thumb `beq` (skip when busy) -> `b` (always skip); the next halfword,
+    # `mov r0, r5`, is unchanged.  EP0 and IN branches are elsewhere.
+    (0xC01E7704, 0x4628E01E,
+     "FUN_c01e76b8: beq (OUT_BUSY) -> b, never auto-arm bulk OUT on [0xC3025744]"),
+]
+
 PUSH = [
     (0xC0CF3780, 0x02830507, "EP 0x83, SuperSpeed: interrupt -> bulk"),
     (0xC0CF3784, 0x00000400, "EP 0x83, SuperSpeed: wMaxPacketSize 64 -> 1024, bInterval 11 -> 0"),

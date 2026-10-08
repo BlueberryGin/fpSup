@@ -27,6 +27,12 @@
 #define OP_FILE_DONE   13u
 #define OP_EXPECT      14u
 #define OP_SETSTR_SLOT 15u
+#define OP_STRBASE     16u
+/* 2026-10-06, QS_SHARE.md §9 (ui/fpui.py has the same numbers in one place) */
+#define OP_QS_OPTION   17u
+#define OP_IF_SLOT     18u
+#define QS_OPTION_ARGS 16u
+#define MAX_STRBASE    8u
 #define R_LOCAL_ID 1u
 #define R_STRING   2u
 #define R_SLOT_F32 3u
@@ -67,6 +73,40 @@ static void icache(void) { typedef void (*fn)(void); ((fn)0xC000EABCu)(); }
 #else
 #error "ARM32 native UI ABI required; host tests must explicitly substitute it"
 #endif
+
+/* ---- QS_OPTION (QS_SHARE.md §9) ---------------------------------------------
+ * The Quick Set layers are code in the sup's own FPUI fragment (qs_build.py
+ * layer_blob); this file calls them through their offsets, so a sup without a
+ * QS_OPTION needs none of it compiled in. They need Loader v3's table. */
+struct qs_opt { uint32_t table, k, ids[4], enum_value, flags, pack, pack_len, n; };  /* qs_layer.h */
+#define QS_OK 0u
+#define QS_HOOK 1u
+#define QS_NMAX 2u
+#define QS_ROOM 4u
+#define QS_ENUM_TAKEN 5u
+#define QS_TABLE 6u
+static uintptr_t qs_svc(void) {                 /* sloader.h SL_SVC_AT, as ui_pool.c reads it */
+    uintptr_t svc = peek(0xC072F6FCu);
+    if (!svc || (svc & 3u) || peek(svc) < 3u || peek(svc + 40u) != peek(0xC072F6F8u)) return 0;
+    return svc;
+}
+#if defined(UIA_HOST_TEST)
+/* The layers are ARM code; a host fixture stands in for them (0: QS_OPTION fails). */
+__attribute__((weak)) uint32_t (*uia_test_qs_call)(uintptr_t fn, uintptr_t a, uintptr_t b,
+                                                   uintptr_t c, uintptr_t d) = 0;
+static uint32_t qs_call(uintptr_t fn, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d) {
+    return uia_test_qs_call ? uia_test_qs_call(fn, a, b, c, d) : 0xFFFFFFFFu;
+}
+#else
+static uint32_t qs_call(uintptr_t fn, uintptr_t a, uintptr_t b, uintptr_t c, uintptr_t d) {
+    typedef uint32_t (*f4)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    return ((f4)fn)(a, b, c, d);
+}
+#endif
+static uint32_t qs_result(uint32_t c) {
+    return c == QS_OK ? UIA_OK : c == QS_HOOK || c == QS_TABLE ? UIA_HOOK :
+           c == QS_NMAX || c == QS_ENUM_TAKEN ? UIA_GUARD : c == QS_ROOM ? UIA_FULL : UIA_OP;
+}
 
 /* ---- small helpers ------------------------------------------------------ */
 static uint32_t le(uintptr_t a) {
@@ -380,10 +420,17 @@ static uint32_t csv_cell(struct uia_file *f, uint32_t row, uint32_t col, uintptr
 /* ---- the block ------------------------------------------------------------ */
 uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
     uintptr_t str_at[MAX_STRINGS], ops, frag, table = 0;
-    uint32_t str_n[MAX_STRINGS], str_hint[MAX_STRINGS];
+    uint32_t str_n[MAX_STRINGS], str_hint[MAX_STRINGS], str_off[MAX_STRINGS];
+    uintptr_t priv_s[MAX_STRINGS];
+    uint32_t priv_n[MAX_STRINGS], n_priv = 0, base = 0;
+    uint32_t sb_at[MAX_STRBASE], sb_off[MAX_STRBASE], n_sb = 0;
     uint32_t total, ns, nw, nf, cur, i, n_pages = 0, n_files = 0;
     struct uia_work w, pages[MAX_PAGES];
     struct uia_file f, files[MAX_FILES];
+    struct qs_opt qs;
+    uintptr_t qs_layer = 0, qs_hang = 0, qs_svc_at = 0;
+    uint32_t qs_shared = 0, qs_own = 0;
+    uint32_t skip = 0;
     w.active = 0; f.active = 0;
     out->result = UIA_BLOCK; out->op = 0; out->first_id = 0; out->n_slots = 0; out->page = 0;
     if (!b || bytes < 0x20u || le(b) != 0x49555046u || le(b + 4) != 1u || le(b + 28) != 0)
@@ -407,6 +454,27 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
     frag = ops + 4u * nw;
     if (nf > total - cur - 4u * nw) return UIA_BLOCK;
 
+    /* Every string's offset, before any op: a stock string where the builder
+     * says the stock pool has it (checked), every other one in this sup's own
+     * layer of the nested string hooks (NESTED_HOOKS.md) -- never a scan of
+     * the pool, never a copy of it. The layer goes up at commit. */
+    for (i = 0; i < ns; ++i) {
+        if (str_hint[i] == NAME_STRING) { str_off[i] = 0xFFFFFFFFu; continue; }
+        if (str_hint[i] != UIS_NOT_STOCK && uis_stock_has(str_at[i], str_n[i], str_hint[i])) {
+            str_off[i] = str_hint[i];
+            continue;
+        }
+        str_off[i] = n_priv;                            /* + base, below */
+        priv_s[n_priv] = str_at[i]; priv_n[n_priv] = str_n[i];
+        str_hint[i] = UIS_NOT_STOCK;
+        n_priv++;
+    }
+    if (n_priv) {
+        if (uis_layer_base(&base) != UIS_OK) return out->result = UIA_STRING;
+        for (i = 0; i < ns; ++i)
+            if (str_hint[i] == UIS_NOT_STOCK) str_off[i] += base;
+    }
+
     for (uint32_t k = 0, index = 0; k < nw; ++index) {
         uint32_t head = le(ops + 4u * k), code = head >> 24, n = head & 0xFFFFFFu, r = UIA_OK;
         uintptr_t a = ops + 4u * (k + 1u);
@@ -414,6 +482,7 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
         out->op = index;
         if (n > nw - k - 1u) return out->result = UIA_BLOCK;
         for (i = 0; i < n && i < MAX_ARGS; ++i) args[i] = le(a + 4u * i);
+        if (skip) { skip--; k += 1u + n; continue; }
         if (code == OP_PAGE) {
             if (w.active || f.active || n != 7u || args[0] >= ns || str_hint[args[0]] != NAME_STRING ||
                 n_pages >= MAX_PAGES)
@@ -459,6 +528,51 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
                 copy_words(&files[n_files++], &f, sizeof f);
                 f.active = 0;
             }
+        } else if (code == OP_STRBASE) {                /* written at commit */
+            if (n != 2u || args[0] >= ns || str_hint[args[0]] == NAME_STRING ||
+                n_sb >= MAX_STRBASE || (args[1] & 3u)) { r = UIA_OP; goto done; }
+            sb_at[n_sb] = args[1]; sb_off[n_sb] = str_off[args[0]]; n_sb++;
+        } else if (code == OP_IF_SLOT) {
+            if (n != 3u || args[0] >= out->n_slots) r = UIA_OP;
+            else if (out->slots[args[0]] != args[1]) skip = args[2];
+        } else if (code == OP_QS_OPTION) {
+            uint32_t fi = n_files, c;
+            if (n != QS_OPTION_ARGS || qs_layer || args[0] >= out->n_slots || args[3] > nf ||
+                !args[4] || args[4] > nf - args[3] || args[12] > nf || args[14] > nf - args[12] ||
+                (args[13] && args[13] + 63u > args[14]) || ((frag + args[3]) & 3u))
+                { r = UIA_OP; goto done; }
+            for (i = 9; i < 12; ++i)
+                if (args[i] >= ns || str_hint[args[i]] == NAME_STRING) { r = UIA_OP; goto done; }
+            for (i = 0; i < n_files; ++i) if (files[i].stock == args[15]) fi = i;
+            if (fi == n_files || !(qs_svc_at = qs_svc())) { r = UIA_OP; goto done; }
+            qs_layer = frag + args[3];
+            qs.table = qs_layer + args[5];
+            qs.k = out->slots[args[0]];
+            /* the three images: this sup's own strings, in a row (its layer answers
+             * the shared ids with them); the shared ids are the first QS sup's */
+            if (str_hint[args[9]] != UIS_NOT_STOCK || str_off[args[10]] != str_off[args[9]] + 1u ||
+                str_off[args[11]] != str_off[args[9]] + 2u) { r = UIA_OP; goto done; }
+            {
+                uint32_t sh, issuer, rq = uis_qs_shared(&sh, &issuer);
+                if (rq != UIS_OK) {
+                    if (!issuer) { r = UIA_HOOK; goto done; }
+                    sh = str_off[args[9]];
+                }
+                qs_shared = sh;
+            }
+            qs_own = str_off[args[9]] - base;
+            qs.ids[0] = qs_shared; qs.ids[1] = qs_shared + 1u;
+            qs.ids[2] = qs_shared + 2u; qs.ids[3] = str_off[args[10]];
+            qs.enum_value = args[1]; qs.flags = args[2];
+            qs.pack = 0; qs.pack_len = args[13];
+            qs.n = csv_rows(&files[fi]);
+            if (args[13] && !(qs.pack = qs_call(qs_layer + args[8], frag + args[12], args[13],
+                                                 frag + args[12], args[14])))
+                { r = UIA_OP; goto done; }
+            /* every way the layers could fail, now; commit only hangs them */
+            if ((c = qs_call(qs_layer + args[6], qs_layer, qs_svc_at, (uintptr_t)&qs, 0)) != QS_OK)
+                { r = qs_result(c); goto done; }
+            qs_hang = qs_layer + args[7];
         } else if (code == OP_EXPECT) {
             if (n != 2u || args[0] >= out->n_slots) r = UIA_OP;
             else if (out->slots[args[0]] != args[1]) r = UIA_GUARD;
@@ -487,17 +601,13 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
                      !int_to_f32(x + (int32_t)args[1], &v)) r = UIA_OP;
             else put_be(w.page + at, v);
         } else if (code == OP_SETSTR_SLOT) {
-            uint32_t at, idx, v;
-            char text[64];
+            uint32_t at, idx;
             if (n < 4u || n > MAX_ARGS || args[0] >= out->n_slots || args[3] >= ns ||
                 str_hint[args[3]] == NAME_STRING) { r = UIA_OP; goto done; }
             idx = out->slots[args[0]] - args[1];
             if (idx >= args[2] || idx >= n - 4u || !current(&w, args[4 + idx], &at) ||
                 at + 4u > w.len) { r = UIA_OP; goto done; }
-            for (uint32_t c = 0; c <= str_n[args[3]]; ++c) text[c] = (char)peek8(str_at[args[3]] + c);
-            if (uis_intern_hinted(text, str_n[args[3]], str_hint[args[3]], &v) != UIS_OK)
-                { r = UIA_STRING; goto done; }
-            put_be(w.page + at, v);
+            put_be(w.page + at, str_off[args[3]]);
         } else if (code == OP_INSERT) {
             uint32_t pos = args[0], off, len, at;
             if (n < 3u || (n - 3u) % 2u) { r = UIA_OP; goto done; }
@@ -513,10 +623,7 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
                 if (kind == R_LOCAL_ID) v = w.first_id + arg;
                 else if (kind == R_STRING) {
                     if (arg >= ns || str_hint[arg] == NAME_STRING) { r = UIA_OP; goto done; }
-                    char text[64];               /* uis_intern wants a C string */
-                    for (uint32_t c = 0; c <= str_n[arg]; ++c) text[c] = (char)peek8(str_at[arg] + c);
-                    if (uis_intern_hinted(text, str_n[arg], str_hint[arg], &v) != UIS_OK)
-                        { r = UIA_STRING; goto done; }
+                    v = str_off[arg];
                 } else if (kind == R_SLOT_U32 || kind == R_SLOT_F32) {
                     if (arg >= out->n_slots) { r = UIA_OP; goto done; }
                     v = out->slots[arg];
@@ -541,7 +648,7 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
         if (r != UIA_OK) return out->result = r;
         k += 1u + n;
     }
-    if (w.active || f.active) return out->result = UIA_OP;
+    if (w.active || f.active || skip) return out->result = UIA_OP;
 
     /* ---- commit: every copy exists before anyone is pointed at it -------- */
     if (n_files) {
@@ -553,6 +660,13 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
         }
         if (cnt + fresh > peek(table + 12)) return out->result = UIA_FULL;
     }
+    if (n_priv) {                                       /* nothing below can fail */
+        uint32_t got;
+        if ((qs_hang ? uis_layer_add_qs(priv_s, priv_n, n_priv, &got, qs_shared, qs.enum_value, qs_own)
+                     : uis_layer_add(priv_s, priv_n, n_priv, &got)) != UIS_OK || got != base)
+            return out->result = UIA_STRING;
+    }
+    for (i = 0; i < n_sb; ++i) poke(sb_at[i], sb_off[i]);   /* the sup's own data, in order */
     publish();
     for (i = 0; i < n_files; ++i) {
         uint32_t cnt = peek(table + 8), at = cnt;
@@ -572,5 +686,9 @@ uint32_t uia_apply(uintptr_t b, uint32_t bytes, struct uia_outcome *out) {
     if (n_files) publish();                             /* the table, before any page */
     for (i = 0; i < n_pages; ++i) poke(pages[i].entry + ENTRY_OFFSET, pages[i].page - NBU_BASE);
     publish();
+    if (qs_hang) {                                      /* last: the strings and the CSV are in */
+        qs_call(qs_hang, qs_layer, qs_svc_at, (uintptr_t)&qs, 0);
+        publish();
+    }
     return out->result = UIA_OK;
 }

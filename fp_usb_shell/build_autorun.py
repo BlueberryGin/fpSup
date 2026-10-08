@@ -115,6 +115,9 @@ ap.add_argument('--read-cap', type=lambda s: int(s, 0), default=None,
                 help='how much of the BIN the loader reads (default: loader.S '
                      'MAXLEN, 0xF000). 0x1F000 at most: the loader asks for '
                      'this plus 0x1000 for its file object')
+ap.add_argument('--splash-dir', default=None,
+                help='folder of the four-box frames on the card, no leading backslash '
+                     '(default FPSUPUI; Loader v3 uses fpSup\\UI)')
 ap.add_argument('--bin-name', default='fpSup.BIN',
                 help='the payload container this card carries and the loader '
                      'opens. Every line writes fpSup.BIN; the option exists '
@@ -166,7 +169,7 @@ if args.four_box_bar and args.boot_call:
 from boot_splash import (FourBoxBar, frames as splash_frames, publish as publish_code,
                          ASSET_NAME, WIDTH as SPLASH_WIDTH, HEIGHT as SPLASH_HEIGHT,
                          HOLD_MS as SPLASH_HOLD_MS)
-splash = FourBoxBar() if args.four_box_bar else None
+splash = FourBoxBar(args.splash_dir or ASSET_NAME) if args.four_box_bar else None
 # The loader's path string, as the C preprocessor wants it: one backslash in
 # the file means two here.  Assembled into the loader rather than written in
 # loader.S, so the two build lines are one file.
@@ -180,7 +183,7 @@ STORE = 0xC3075264           # XC_CommonSaveData + 0x28: past the u16 the
                              # +0x200 -- see PERSISTENT_STORE_COMMONSAVE.md
 STORE_MAX = (0xC307523C + 0x200) - (STORE + 4)     # what the body may occupy;
                              # the header is one word (the magic) -- see
-                             # templates/store_boot.S for where the other three
+                             # asm/store_boot.S for where the other three
                              # fields went
 CAVE_END = 0xC0730000        # the cave's top; sections above this are the
                              # payload's own business, not the loader's
@@ -609,12 +612,12 @@ if args.store_boot:
     # has to be bumped by hand, and in one night the loader changed four times
     # while the string sat still.  Any of those builds would have found a store
     # whose magic matched and branched into the wrong bytes.
-    sbytes = assemble(HERE / 'templates' / 'loader.S', LOADER_DEFINES)
+    sbytes = assemble(HERE / 'asm' / 'loader.S', LOADER_DEFINES)
     slen = len(sbytes)
     smagic = int(hashlib.sha256(sbytes).hexdigest()[:8], 16)
     if slen > STORE_MAX:
         sys.exit(f'loader is {slen} bytes; the store holds {STORE_MAX}.')
-    ssrc = HERE / 'templates' / 'store_boot.S'
+    ssrc = HERE / 'asm' / 'store_boot.S'
     scode = assemble(ssrc, [f'STORE_LEN=0x{slen:X}',
                             f'STORE_MAGIC=0x{smagic:08X}'])
     swords = to_words(scode)
@@ -715,7 +718,7 @@ if args.loader:
     # There is no `mem load`. The shell can save memory to a file and not the
     # other way, so the AutoRun cannot ask for this directly -- only spell out
     # something small that asks on its behalf.
-    lsrc = HERE / 'templates' / 'loader.S'
+    lsrc = HERE / 'asm' / 'loader.S'
     # The release build has no worker to become, so the loader does not need a
     # task: it reads the file straight from the gyro callback and returns. That
     # is 31 fewer words to spell out, which is 31 fewer `mem set` commands --
@@ -735,8 +738,8 @@ if args.loader:
         # STORE_LEN has to be the assembled length, which is not known until it
         # is assembled.  Both constants are movw/movt pairs, so their VALUE
         # cannot change the size: assemble once to measure, then again for real.
-        n = len(assemble(HERE / 'templates' / 'loader.S', ldef))
-        verify_loader_saves_lr_first(assemble(HERE / 'templates' / 'loader.S', ldef))
+        n = len(assemble(HERE / 'asm' / 'loader.S', ldef))
+        verify_loader_saves_lr_first(assemble(HERE / 'asm' / 'loader.S', ldef))
         # The store's body is the loader itself, so its ceiling is the space
         # measured safe in XC_CommonSaveData: +0x024..+0x200 of the block, less
         # the one-word header.  Checked here rather than assumed, because a
@@ -941,7 +944,7 @@ if args.loader:
         # it arms anything, so the word has to come from the loader this build
         # actually wrote.
         _lh_at = CAVE_LOW + 4
-        _lh_word = to_words(assemble(HERE / 'templates' / 'loader.S', LOADER_DEFINES))[1]
+        _lh_word = to_words(assemble(HERE / 'asm' / 'loader.S', LOADER_DEFINES))[1]
         if _lh_word >> 24 != 0xEA:
             sys.exit(f'loader +4 is 0x{_lh_word:08X}, not a branch to the hook')
         _lh_site = 0xC03DA420
@@ -962,7 +965,7 @@ if args.loader:
         _sd += ['SPLASH_FINISH=1', f'SPLASH_HOLD_MS={SPLASH_HOLD_MS}',
                 f'SPLASH_WIDTH_TEXT="{SPLASH_WIDTH}"',
                 f'SPLASH_HEIGHT_TEXT="{SPLASH_HEIGHT}"', 'SPLASH_OFFSET_TEXT="0"']
-    stage2 = assemble(HERE / 'templates' / 'stage2.S', _sd)
+    stage2 = assemble(HERE / 'asm' / 'stage2.S', _sd)
     verify_stage2_cache_publish(stage2)
     secs = [(0, stage2)]
     # The routine stage2 points the echo handler at.  A section like any other,
@@ -973,7 +976,7 @@ if args.loader:
     # 152 bytes in the cave plus a window where the echo slot points at code
     # the script is about to point away from again.  See stage2.S.
     if args.store_boot:
-        secs.append((ABORT_AT, assemble(HERE / 'templates' / 'abort.S',
+        secs.append((ABORT_AT, assemble(HERE / 'asm' / 'abort.S',
                                         [f'ECHO_SLOT=0x{ECHO_SLOT:08X}',
                                          f'ECHO_ORIG=0x{ECHO_ORIG:08X}'])))
     worker_sec = None
@@ -1029,7 +1032,7 @@ if args.loader:
         gdisp = (gentry - HOOK - 8) >> 2
         secs.append((HOOK, struct.pack('<I', 0xEB000000 | (gdisp & 0xFFFFFF))))
     # More than one entry, and a VBIN header has one word for it.  The card
-    # carries a trampoline that calls them all -- see templates/entries.S for
+    # carries a trampoline that calls them all -- see asm/entries.S for
     # why that is out here rather than each payload calling the next.  Added
     # before the offsets are computed because it is a section like any other
     # and moves everything after it; its length is known without its contents
@@ -1039,8 +1042,8 @@ if args.loader:
                    + (args.vshl_entry is not None))
     tramp_sec = None
     if entry_count > 1:
-        tramp = assemble(HERE / 'templates' / 'entries.S', [])
-        tramp_tbl = symbols(HERE / 'templates' / 'entries.S', [])['table']
+        tramp = assemble(HERE / 'asm' / 'entries.S', [])
+        tramp_tbl = symbols(HERE / 'asm' / 'entries.S', [])['table']
         tramp_sec = len(secs)
         secs.append((0, tramp + b'\x00' * (4 * (entry_count + 1))))
     if splash:
@@ -1097,7 +1100,7 @@ if args.loader:
     # The loader now owns a separate staging buffer, not a shared-pool window.
     # putfile cannot truncate; descriptor lengths exclude any old padded tail.
     BIN_PAD = 32768
-    read_cap = args.read_cap or _equ(HERE / 'templates/loader.S', 'MAXLEN')
+    read_cap = args.read_cap or _equ(HERE / 'asm/loader.S', 'MAXLEN')
     if read_cap is None or read_cap < BIN_PAD:
         sys.exit('loader MAXLEN is missing or smaller than the default BIN padding')
     if len(binblob) > read_cap:
@@ -1106,8 +1109,8 @@ if args.loader:
     binblob += b'\x00' * (padded - len(binblob))
     binpath.write_bytes(binblob)
     if splash:
-        asset_path = DEST.parent / ASSET_NAME
-        asset_path.mkdir(exist_ok=True)
+        asset_path = DEST.parent / (args.splash_dir or ASSET_NAME).replace('\\', '/')
+        asset_path.mkdir(parents=True, exist_ok=True)
         artwork = splash_frames()
         for frame, pixels in enumerate(artwork):
             (asset_path / f'{frame}.BIN').write_bytes(pixels)

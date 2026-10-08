@@ -52,8 +52,14 @@
 .equ CREATOR_ENQ,  0xC037DD50
 .equ STOP_RESUME,  0xC0398D8C
 .equ REAL_FLUSH,   0xC069ADE0
+.equ SITE_EVENT,   0xC038BD08    /* dispatcher, after its frame lookup        */
+.equ STOCK_EVENT,  0xE594300C    /* ldr r3, [r4, #0xc]                        */
+.equ EVENT_RESUME, 0xC038BD0C
+.equ SITE_DISCARD, 0xC037DEF8    /* each frame popped by C037DEE0             */
+.equ STOCK_DISCARD,0xEB000042    /* bl C037E008                               */
+.equ REAL_DISCARD, 0xC037E008
 
-/* Passed in by the builder: BLOB_LEN, BLOCK_BYTES, STATE_OFF and the five C
+/* Passed in by the builder: BLOB_LEN, BLOCK_BYTES, STATE_OFF and the C
  * entry offsets from c_base (Thumb, bit 0 set). */
 
 .macro LDA reg, value
@@ -74,7 +80,121 @@
 7:
 .endm
 
+#if V3
+.equ SVC_CLAIM,    8             /* struct sl_svc (fp_usb_shell/v3/sloader.h) */
+.equ SVC_RES,      12
+.equ SVC_NEXT,     16
+.equ SVC_CAVE,     20
+.equ SL_CHAIN,     1
+.equ SL_EXCL,      2
+.equ SL_SHARED_UI, 3
+.equ ENGINE,       0x300D0000    /* the lossless engine: claim_res id         */
+.equ CAVE_BYTES,   96
+.equ REAL_PREPARE, 0xC03A2438
+
+/* An insertion site with a layer below: the site must already branch the
+ * way ours would (`form`: b or bl), and then our shim ends in that layer
+ * instead of replaying the stock instruction. Stock: nothing to do. */
+.macro LAYER site, stock, form, resume, replay, alt
+    LDA     r0, \site
+    ldr     r1, [r0]
+    LDA     r2, \stock
+    cmp     r1, r2
+    beq     3f
+    and     r2, r1, #0xFF000000
+    cmp     r2, #\form
+    bne     out
+    mov     r1, r0
+    bl      below
+    cmp     r0, #0
+    beq     out
+    RESIDENT r1, \resume
+    str     r0, [r1]
+    RESIDENT r1, \replay
+    RESIDENT r2, \alt
+    ldr     r2, [r2]
+    str     r2, [r1]
+3:
+.endm
+#endif
+
 entry:
+#if V3
+    /* Loader v3 (projects/usb-shell-sup/notes/LOADER_V3.md §4): the 加載器
+     * read this file into a block of its own and zeroed the rest of it, so
+     * the code already runs where it stays: no allocation, no copy. r0 = the
+     * block (its FSB1 header), r1 = the service table. Every decision is
+     * made before anything is written -- claims, the layers below, the
+     * cave -- and a refusal returns SL_RELEASE having written nothing. */
+    push    {r3, r4, r5, r6, r7, r8, r9, r10, r11, lr}   @ ten: 8-aligned
+    mov     r10, r1                     @ r10 = the service table
+    mov     r9, r2                      @ r9 = this sup's own path (service v2)
+    adr     r5, entry                   @ r5 = the resident base
+    mov     r11, #0                     @ RESIDENT: resident = here
+    tst     r5, #7
+    bne     out
+
+    /* 1. claim every site, then the engine */
+    RESIDENT r6, claims
+    ldr     r7, [r6], #4
+1:  ldr     r1, [r6]                    @ address
+    mov     r2, #4
+    add     r3, r6, #4                  @ its stock word, from this table
+    ldr     r0, [r6, #8]                @ kind: the fifth argument
+    sub     sp, sp, #8
+    str     r0, [sp]
+    mov     r0, r10
+    ldr     ip, [r10, #SVC_CLAIM]
+    blx     ip
+    add     sp, sp, #8
+    cmp     r0, #0
+    bne     out
+    add     r6, r6, #12
+    subs    r7, r7, #1
+    bne     1b
+    mov     r0, r10
+    LDA     r1, ENGINE
+    mov     r2, #SL_EXCL
+    ldr     ip, [r10, #SVC_RES]
+    blx     ip
+    cmp     r0, #0
+    bne     out
+
+    /* 2. the layers below. A claim put every first-claimed site back to
+     * stock, so a site that is not stock now was written by a sup loaded
+     * before this one, this boot. REC: the C calls C03A2438 itself, so only
+     * stock may be below it. The two call sites call whatever is below. */
+    LDA     r1, SITE_REC
+    bl      below
+    LDA     r1, REAL_PREPARE
+    cmp     r0, r1
+    bne     out
+    LDA     r1, SITE_FLUSH
+    bl      below
+    cmp     r0, #0
+    beq     out
+    RESIDENT r1, flush_real
+    str     r0, [r1]
+    LDA     r1, SITE_DISCARD
+    bl      below
+    cmp     r0, #0
+    beq     out
+    RESIDENT r1, discard_real
+    str     r0, [r1]
+    LAYER   SITE_STOP,  STOCK_STOP,  0xEA000000, stop_resume,  stop_replay,  alt_stop
+    LAYER   SITE_END,   STOCK_END,   0xEA000000, end_resume,   end_replay,   alt_end
+    LAYER   SITE_POOL,  STOCK_POOL,  0xEA000000, pool_resume,  pool_replay,  alt_pool
+    LAYER   SITE_EVENT, STOCK_EVENT, 0xEA000000, event_resume, event_replay, alt_event
+    LAYER   SITE_PLAY,  STOCK_PLAY,  0xEB000000, play_next,    play_replay,  alt_play
+
+    /* 3. the veneers' cave block: the host record stays at +32 */
+    mov     r0, r10
+    mov     r1, #CAVE_BYTES
+    ldr     ip, [r10, #SVC_CAVE]
+    blx     ip
+    movs    r8, r0                      @ r8 = our cave block
+    beq     out
+#else
     push    {r3, r4, r5, r6, r7, r8, r9, r10, r11, lr}   @ ten: 8-aligned
     sub     sp, sp, #16                 @ the allocator descriptor, kept:
                                         @ this block is never freed
@@ -109,6 +229,7 @@ entry:
 2:  cmp     r7, r8
     strlo   ip, [r7], #4
     blo     2b
+#endif
 
     /* the resident words the shims read: the state, and each C entry */
     LDA     r6, STATE_OFF
@@ -152,13 +273,33 @@ entry:
     LDA     ip, OFF_POOL
     add     ip, r4, ip
     str     ip, [r0]
+    RESIDENT r0, w_written
+    LDA     ip, OFF_WRITTEN
+    add     ip, r4, ip
+    str     ip, [r0]
+    RESIDENT r0, w_event
+    LDA     ip, OFF_EVENT
+    add     ip, r4, ip
+    str     ip, [r0]
+    RESIDENT r0, w_discard
+    LDA     ip, OFF_DISCARD
+    add     ip, r4, ip
+    str     ip, [r0]
 
     LDA     ip, F_DCACHE
     blx     ip
     LDA     ip, F_ICACHE
     blx     ip
 
-    /* the resident init, in the resident copy */
+    /* the resident init, in the resident copy; the fifth argument, the path
+     * of this sup's file (0 on a v2 card), on the stack */
+    sub     sp, sp, #8
+#if V3
+    str     r9, [sp]
+#else
+    mov     ip, #0
+    str     ip, [sp]
+#endif
     mov     r0, r6
     mov     r1, r5
     LDA     r2, BLOCK_BYTES
@@ -166,9 +307,11 @@ entry:
     LDA     ip, OFF_INIT
     add     ip, r4, ip
     blx     ip
+    add     sp, sp, #8
     cmp     r0, #0
     bne     out
 
+#if !V3
     /* ---- arm: every site stock, or none ---------------------------- */
     LDA     r0, SITE_REC
     LDA     r1, STOCK_REC
@@ -210,20 +353,32 @@ entry:
     ldr     r2, [r0]
     cmp     r2, r1
     bne     out
+    LDA     r0, SITE_EVENT
+    LDA     r1, STOCK_EVENT
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
+    LDA     r0, SITE_DISCARD
+    LDA     r1, STOCK_DISCARD
+    ldr     r2, [r0]
+    cmp     r2, r1
+    bne     out
 
-    /* 80 bytes off the bump: four veneers, the state record (+32, where a
-     * host looks for it), and the player's four veneers after it (+48) */
+    /* The host record stays at +32. Player veneers at +48, diagnostics at
+     * +80; all are owned by this launcher's single 96-byte cave block. */
     LDA     r7, CAVE_BUMP
     ldr     r8, [r7]                    @ r8 = our cave block
     tst     r8, #3
     bne     out
-    add     r9, r8, #80
+    add     r9, r8, #96
     LDA     r10, CAVE_END
     cmp     r9, r10
     bhi     out                         @ the cave is full: arm nothing
     cmp     r8, #0xC0000000
     blo     out
     str     r9, [r7]
+
+#endif
 
     LDA     r0, VENEER_LDR
     str     r0, [r8, #0]
@@ -257,13 +412,19 @@ entry:
     str     r0, [r8, #72]
     RESIDENT r1, pool_shim
     str     r1, [r8, #76]
+    str     r0, [r8, #80]
+    RESIDENT r1, event_shim
+    str     r1, [r8, #84]
+    str     r0, [r8, #88]
+    RESIDENT r1, discard_shim
+    str     r1, [r8, #92]
 
     LDA     ip, F_DCACHE
     blx     ip
     LDA     ip, F_ICACHE
     blx     ip
 
-    /* the four site words, last */
+    /* the site words, last */
     LDA     r0, SITE_REC
     add     r1, r8, #0
     mov     r2, #0xEB000000             @ bl
@@ -296,16 +457,42 @@ entry:
     add     r1, r8, #72
     mov     r2, #0xEA000000             @ b: the caller's lr must survive
     bl      encode
+    LDA     r0, SITE_EVENT
+    add     r1, r8, #80
+    mov     r2, #0xEA000000             @ b: a displaced load, preserve lr
+    bl      encode
+    LDA     r0, SITE_DISCARD
+    add     r1, r8, #88
+    mov     r2, #0xEB000000             @ bl: continue into the real cleanup
+    bl      encode
 
     LDA     ip, F_DCACHE
     blx     ip
     LDA     ip, F_ICACHE
     blx     ip
 
+#if V3
+    mov     r0, #0                      @ SL_KEEP
+    pop     {r3, r4, r5, r6, r7, r8, r9, r10, r11, pc}
+out:                                    @ nothing written: SL_RELEASE
+    mov     r0, #1
+    pop     {r3, r4, r5, r6, r7, r8, r9, r10, r11, pc}
+
+/* below: r0 = chain_next(svc, r1 = site, ARM) -- where the site's branch goes
+ * now, 0 when it is not a branch. */
+below:
+    push    {r4, lr}
+    mov     r0, r10
+    mov     r2, #0
+    ldr     ip, [r10, #SVC_NEXT]
+    blx     ip
+    pop     {r4, pc}
+#else
 out:
     add     sp, sp, #16
     mov     r0, #0
     pop     {r3, r4, r5, r6, r7, r8, r9, r10, r11, pc}
+#endif
 
 /* encode: [r0] = r2 | ((r1 - r0 - 8) >> 2 & 0xFFFFFF). Signed: the veneer
  * may lie below the site. */
@@ -320,12 +507,18 @@ encode:
 
 /* ---- the shims, reached through the veneers ------------------------------ */
 
-/* C03A33C8: bl C03A2438(camera, request). Tail call with the state third;
- * lr is the firmware's, so the body returns straight to C03A3398. */
+/* C03A33C8: bl C03A2438(camera, request). The Movie task's internal stack
+ * can be 4 mod 8 here. Align the C entry and preserve the incoming SP/LR. */
 rec_shim:
+    push    {r4, lr}
+    mov     r4, sp
+rec_align:
+    bic     sp, sp, #7
     ldr     r2, g_card
     ldr     ip, w_rec
-    bx      ip
+    blx     ip
+    mov     sp, r4
+    pop     {r4, pc}
 
 /* C038BFF0: blx r3 with r3 = creator->vtable[0x10]. Only the creator enqueue
  * we know is ours to take; anything else is called exactly as it would have
@@ -347,18 +540,74 @@ stop_shim:
     ldr     ip, w_stop
     blx     ip
     pop     {r0, r1, r2, r3, ip, lr}
+stop_replay:
     push    {r4, r5, r6, r7, r8, fp, lr}   @ STOCK_STOP, executed here
     ldr     pc, stop_resume
 
-/* C03A5490: bl C069ADE0(writer, ...). Our flush first, every argument kept,
- * then the real flush with the firmware's lr. */
+/* C03A5490: C069ADE0(writer, frame) returns a 64-bit byte count in r0:r1.
+ * Keep all four incoming argument registers for the real call, then observe
+ * the result. The native function has two arguments and no stack arguments.
+ * This internal site can arrive with SP%8=4: explicitly align every new C
+ * call, and return with the exact incoming SP and native r0:r1/flags. */
 flush_shim:
-    push    {r0, r1, r2, r3, ip, lr}
+    push    {r0, r1, r2, r3, r4, r5, ip, lr}
+    mov     r5, sp
+    bic     sp, sp, #7
     ldr     r1, g_card
     ldr     ip, w_flush
     blx     ip
-    pop     {r0, r1, r2, r3, ip, lr}
-    ldr     pc, flush_real
+    ldmia   r5, {r0, r1, r2, r3}
+    ldr     ip, flush_real
+    blx     ip
+    stmia   r5, {r0, r1, r2, r3}
+    mrs     r4, cpsr
+written_high:
+    mov     r2, r1
+    mov     r1, r0
+    ldr     r0, g_card
+    ldr     ip, w_written
+    blx     ip
+    msr     cpsr_f, r4
+    mov     sp, r5
+    pop     {r0, r1, r2, r3, r4, r5, ip, pc}
+
+/* C038BD08: r4=message, r6=the dispatcher's already-looked-up frame or 0.
+ * Replay the load and preserve the flags and LR of this non-call site. */
+event_shim:
+    push    {r0, r1, r2, r3, r4, r5, ip, lr}
+    mov     r5, sp
+event_align:
+    bic     sp, sp, #7
+    sub     sp, sp, #8
+    mrs     ip, cpsr
+    str     ip, [sp]
+    mov     r0, r4
+    mov     r1, r6
+    ldr     r2, g_card
+    ldr     ip, w_event
+    blx     ip
+    ldr     ip, [sp]
+    msr     cpsr_f, ip
+    mov     sp, r5
+    pop     {r0, r1, r2, r3, r4, r5, ip, lr}
+event_replay:
+    ldr     r3, [r4, #0xc]             @ STOCK_EVENT
+    ldr     pc, event_resume
+
+/* C037DEF8: r0=creator, r1=one popped frame. C037DEE0 pushed four words;
+ * its caller's LR is at the ORIGINAL SP+12, not this site's own LR. */
+discard_shim:
+    push    {r0, r1, r2, r3, r4, r5, ip, lr}
+    mov     r5, sp
+    bic     sp, sp, #7
+discard_caller:
+    ldr     r2, [r5, #44]              @ original SP+12
+    ldr     r3, g_card
+    ldr     ip, w_discard
+    blx     ip
+    mov     sp, r5
+    pop     {r0, r1, r2, r3, r4, r5, ip, lr}
+    ldr     pc, discard_real          @ original cleanup, exactly once
 
 /* C05C0EA4, right after the player's f_read of a frame file: r5 is its slot
  * (+0x14 buffer, +0x18 capacity, +0x1c bytes read). Ours first, then the
@@ -370,6 +619,7 @@ play_shim:
     ldr     ip, w_play
     blx     ip
     pop     {r0, r1, r2, r3, ip, lr}
+play_replay:
     ldr     r2, [r5, #0x1c]             @ STOCK_PLAY, executed here
     bx      lr
 
@@ -395,6 +645,7 @@ end_shim:
     ldr     ip, w_end
     blx     ip
     pop     {r0, r1, r2, r3, ip, lr}
+end_replay:
     push    {r4, r5, r6, lr}            @ STOCK_END, executed here
     ldr     pc, end_resume
 
@@ -407,6 +658,7 @@ pool_shim:
     ldr     ip, w_pool
     blx     ip
     pop     {r0, r1, r2, r3, ip, lr}
+pool_replay:
     push    {r4, r5, r6, r7, sl, lr}    @ STOCK_POOL, executed here
     ldr     pc, pool_resume
 
@@ -428,10 +680,48 @@ w_play:      .word 0
 w_clip:      .word 0
 w_end:       .word 0
 w_pool:      .word 0
+w_written:   .word 0
+w_event:     .word 0
+w_discard:   .word 0
 stop_resume: .word STOP_RESUME
 flush_real:  .word REAL_FLUSH
 end_resume:  .word END_RESUME
 pool_resume: .word POOL_RESUME
+event_resume:.word EVENT_RESUME
+discard_real:.word REAL_DISCARD
+#if V3
+play_next:   .word 0
+/* A layer below an insertion site: the stock instruction we would replay is
+ * already replayed by that layer, so ours becomes `ldr pc, <its target>`. */
+alt_stop:    .word 0xE59FF000 | (stop_resume - stop_replay - 8)
+alt_end:     .word 0xE59FF000 | (end_resume - end_replay - 8)
+alt_pool:    .word 0xE59FF000 | (pool_resume - pool_replay - 8)
+alt_event:   .word 0xE59FF000 | (event_resume - event_replay - 8)
+alt_play:    .word 0xE59FF000 | (play_next - play_replay - 8)
+/* Lossless RAW ON/OFF as saved in this file (card.c FPL_SETTINGS_OFF): the
+ * codec task rewrites these 16 bytes in place on the card. Built OFF. */
+    .align 2
+settings:
+    .word 0x54534C46, 1, 0, 0x54534C46 ^ 1 ^ 0 ^ 0xFFFFFFFF
+/* What this sup changes: { address, stock word, kind }. The stock words are
+ * checked against the reference image by build_v3_lossless.py. */
+claims:
+    .word 14
+    .word SITE_REC,     STOCK_REC,     SL_CHAIN
+    .word SITE_ARRIVE,  STOCK_ARRIVE,  SL_EXCL     @ replaces blx r3: not a branch
+    .word SITE_STOP,    STOCK_STOP,    SL_CHAIN
+    .word SITE_FLUSH,   STOCK_FLUSH,   SL_CHAIN
+    .word SITE_PLAY,    STOCK_PLAY,    SL_CHAIN
+    .word SITE_CLIP,    STOCK_CLIP,    SL_EXCL     @ the size stored is ours to say
+    .word SITE_END,     STOCK_END,     SL_CHAIN
+    .word SITE_POOL,    STOCK_POOL,    SL_CHAIN
+    .word SITE_EVENT,   STOCK_EVENT,   SL_CHAIN
+    .word SITE_DISCARD, STOCK_DISCARD, SL_CHAIN
+    .word 0xC05E5B58,   0x3FFFF1B1,    SL_SHARED_UI   @ uishare string layers
+    .word 0xC05E61C8,   0x428A6942,    SL_SHARED_UI
+    .word 0xC05E61E0,   0x69406902,    SL_SHARED_UI
+    .word 0xC0B9E5D8,   0x04000000,    SL_EXCL        @ file-layer bulk size (card.c)
+#endif
     .align  3
 c_base:
     /* the compiled C is appended here by build_card.py */

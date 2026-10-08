@@ -3,6 +3,14 @@ name: fp-release
 description: Packaging and shipping an fpGyroSup card — building the archive, verifying the build that actually ships, writing the release notes, and pushing. Use when cutting a release or touching anything under gyro/release/.
 ---
 
+> **設定區風險（2026-10-04 更新）**：原廠在 loader 前讀取持久設定；
+> 不支援的值可能使開機或選單失效，拔卡本身不會清除該值。使用者已指出現在有還原手段，
+> 因此不再把這類故障描述成不可恢復。上機前確認會保存的值、可能症狀及適用的還原流程；
+> 未確認還原條件時，優先把自訂狀態留在 RAM。240 fps 與 14-bit 的處理不同，
+> 詳見 `research/SETTINGS_AREA_FIRST_RULE.md`。
+> *(Stock firmware reads persistent settings before the loader. A recovery
+> method now exists; check its applicability before a live trial.)*
+
 # Shipping a card
 
 ## Build it with the script, never by hand
@@ -66,11 +74,10 @@ written next to it — people do find old links.
 | `origin` | `git@github.com:ijigen/fpSup.git` | public. Serves the download links and Pages |
 | `local` | `git@git:bei/sigma_fp_re_usbshell.git` | Forgejo on `git.lan`, SSH key auth as `bei` |
 
-**Standing (the user's): every test build gets committed and pushed to
-`local`.** Not only releases -- a card that goes into the camera exists on the
-server before it is tested, so a result can be attached to a commit rather than
-to a working tree nobody else can see. This exists because the newest shell was
-local-only for weeks while the public tag stood at an older version.
+Historically, test cards were committed and pushed to `local` before camera
+trials, so a result could be tied to a commit. This records why that workflow
+was used; it is not authorization to commit or push during a new task. Follow
+the user's current request and any authorization already given in this session.
 
 ```sh
 git push local HEAD:main
@@ -80,9 +87,9 @@ Its history is unrelated to this repo's (it began as a separate USB-shell repo
 and its old `main` was `29d207e`, kept locally as `refs/remotes/probe/main`), so
 the first push was forced. Ordinary pushes after that.
 
-Commit the build **before** the card goes in, and say in the message what is
-verified and what is not -- "offline checks pass, untested on the camera" is a
-useful thing for a commit to say, and a later commit can say it ran.
+When a commit is requested, say what is verified and what is not -- "offline
+checks pass, untested on the camera" is useful, and a later result can name
+the exact built bytes.
 
 ## Push a release
 

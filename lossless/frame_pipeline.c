@@ -130,6 +130,13 @@ uint32_t fpl_pipeline_stop(struct fpl_pipeline *p) {
     p->stopping = 1;
     return FPL_OK;
 }
+uint32_t fpl_pipeline_cancel_held(struct fpl_pipeline *p, const struct fpl_frame_token *t,
+                                  uint32_t resolved) {
+    if (!ours(p, t) || p->phase != FPL_SLOT_HELD) return FPL_INVALID;
+    if (resolved != 1) return FPL_BUSY;
+    clear_slot(p);
+    return FPL_OK;
+}
 uint32_t fpl_pipeline_reap(struct fpl_pipeline *p, const struct fpl_frame_token *t,
                            uint32_t quiescent, uint32_t resolved) {
     if (!ours(p, t) || p->phase != FPL_SLOT_RETAINED) return FPL_INVALID;

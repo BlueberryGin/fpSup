@@ -18,7 +18,7 @@ Seven words of firmware are changed. Everything else is our code.
 ## What you get
 
 ```
-EP 0x01 OUT  bulk 1024, burst 3    commands
+EP 0x01 OUT  bulk 1024, burst 3    commands and UP01 binary staging
 EP 0x82 IN   bulk 1024, burst 3    replies
 EP 0x83 IN   bulk 1024, burst 3    streaming, for a hook to arm directly
 ```
@@ -27,20 +27,21 @@ All three are firmware-owned. The third one is PTP's unused interrupt endpoint,
 turned into a second bulk IN so a stream and the command channel do not block
 each other.
 
-One command: **`shl <line>`** runs `<line>` in the firmware's own shell and
-returns what it printed. `mem set` and `mem save` come along for free, so the
-worker needs no memory commands of its own.
+**`shl <line>`** runs `<line>` in the firmware's own shell and returns what it
+printed. `mem set` and `mem save` come along for free. UP01 adds a bounded
+binary upload command for the worker's file-staging region, with a capability
+probe so older workers continue using the checked text uploader.
 
 ### Built on that
 
 | | |
 |---|---|
-| **Update the AutoRun in place** | The card stays in the camera. `putfile.py` writes it, `getfile.py` reads it back, and it is compared byte for byte before anything reboots -- writing a file does not run it, so a bad write costs nothing if it is caught |
-| **Files both ways** | `putfile.py` / `getfile.py`. Nothing in the shell writes arbitrary content to a path, so that part is code; the rest is `mem set` and `dir` |
+| **Update the card in place** | The card stays in the camera. `deploy.py` handles mode 7's non-truncating writes and verifies the complete BIN and AutoRun before a separate reboot; `putfile.py` and `getfile.py` are the lower-level transfer tools |
+| **Files both ways** | `putfile.py` / `getfile.py`. The UP01 worker accepts CRC-checked binary staging blocks on EP 0x01; older workers use the checked `echo` uploader. A separate file routine writes the verified staging bytes to a path |
 | **Swap resident code without a battery pull** | A task started from the injection region runs from it, and the firmware cannot stop one. `park.S` gives it somewhere to wait while its code is replaced. A logger swap takes about a second |
 | **Prove memory is yours** | `memprobe.py`. Memory that takes a write while the camera is idle can still be reinitialised the moment recording starts, and no amount of reading the code says so |
-| **Eight templates** | `shellcmd` for task context, `oneshot` for the callback, `callfn` to bring code up a routine at a time, `taskcreate`, `park`, `bulkload`, `putfile`, `getfile`, `dump` |
-| **Transfers that finish** | 14 KB went from 448 seconds to 0.6. None of it was the wire; see [docs/TRANSFER.md](docs/TRANSFER.md) |
+| **ARM sources and skill** | Maintained executable sources live in `asm/`; the `fp-usb-shell` skill explains their context, ownership and safe use |
+| **Transfers that finish** | 14 KB went from 448 seconds to 0.6. Binary upload is implemented offline and awaits camera measurement; see [docs/TRANSFER.md](docs/TRANSFER.md) |
 
 ## The patches
 
@@ -75,14 +76,15 @@ reading a state that earlier experiments had already disturbed.
 
 ```
 camera/worker.S      camera side, loaded at 0xC072F050
-templates/           pieces to copy and change; see templates/README.md
+asm/                 maintained ARM sources; usage: ../.claude/skills/fp-usb-shell/SKILL.md
 armasm.py            assembles ARM source and resolves its internal calls
 build_autorun.py     assembles worker.S and emits the card script
 inject.py            writes a one-shot routine, arms it, waits for it
 load.py              writes a resident routine, verifies it, arms its hook
 putfile.py           writes a local file onto the card -- including AutoRun.txt
-deploy.py            writes a card's two files and refuses to believe putfile:
-                     a write is not a write until it reads back identical
+deploy.py            writes a card's two root files or a compatible BIN-only update;
+                     handles old file tails, verifies readback, and requires
+                     candidate FPSUPUI sidecars to match before writing
 runprobe.py          runs a candidate routine ONCE on a live camera through the
                      echo handler.  A loader change goes through this before it
                      goes anywhere near a card -- a loader that hangs leaves no
@@ -94,7 +96,7 @@ test_loader_hook.py  the loader and stage2 under unicorn against the firmware
                      boot, four-box on the hook path (skill fp-unicorn-emulation)
 loader_hook_check.py reads a --loader-hook-mark card's state off the camera and
                      checks the live journal against the stock image
-warm_gate_card.py    the first minimal warm-boot gate test (templates/gate.S)
+warm_gate_card.py    the first minimal warm-boot gate test (asm/gate.S)
 host/fpshd.c         daemon, listens on /tmp/fpshd.sock
 host/fpsh            client
 host/lsdesc.c        prints the descriptor the host actually received
@@ -168,12 +170,12 @@ restores the camera completely — nothing is written to non-volatile storage.
 The shell can write memory but nothing can call it, so there is no `call`
 command and no need for one. To run something, point an address the firmware
 already calls at your routine, let it fire once, and put the original word back.
-`templates/oneshot.S` is that plumbing with a payload slot; `inject.py` writes it,
+`asm/oneshot.S` is that plumbing with a payload slot; `inject.py` writes it,
 arms the call site and waits for it to report back. Neither the AutoRun nor the
 daemon is involved.
 
 ```sh
-./inject.py templates/oneshot.S
+./inject.py asm/oneshot.S
 ./host/fpsh mem get 0xC072F700,,0x20
 ```
 
@@ -211,7 +213,7 @@ v2 put the code on the camera by spelling it out, and moved data by copying it
 through a staging buffer. v3 changes both, and what follows from them.
 
 **The AutoRun no longer carries the code.** It writes a 512-byte loader
-(`templates/loader.S`) which reads `\fpSup.BIN` off the card, places what the
+(`asm/loader.S`) which reads `\fpSup.BIN` off the card, places what the
 file says, and becomes the worker. 503 commands became 248, and the count no
 longer grows with what is being loaded — a worker change costs nothing in the
 script. There is no `mem load`; the shell can save memory to a file and not the
@@ -270,7 +272,7 @@ cable" always was. EP 0x83 is enabled, is bulk, and accepted 100 out of 100.
 ### 得到什麼
 
 ```
-EP 0x01 OUT  bulk 1024, burst 3    指令
+EP 0x01 OUT  bulk 1024, burst 3    指令與 UP01 二進位暫存
 EP 0x82 IN   bulk 1024, burst 3    回覆
 EP 0x83 IN   bulk 1024, burst 3    串流,給 hook 直接武裝
 ```
@@ -278,19 +280,20 @@ EP 0x83 IN   bulk 1024, burst 3    串流,給 hook 直接武裝
 三條都由韌體擁有。第三條原本是 PTP 沒人用的 interrupt 端點,改成第二條 bulk IN,
 讓串流和指令通道不互相擋。
 
-指令只有一個:**`shl <line>`** 把整行丟給韌體自己的 shell 並回傳輸出。
-`mem set` 和 `mem save` 因此免費取得,worker 不需要自己實作記憶體指令。
+**`shl <line>`** 把整行丟給韌體自己的 shell 並回傳輸出，`mem set` 和
+`mem save` 因此可直接使用。UP01 另加一個只寫 worker 檔案暫存區的二進位上傳指令；
+主機會先查目前 worker 是否支援，舊版仍沿用核對過的文字上傳。
 
 ### 在這之上做出來的
 
 | | |
 |---|---|
-| **AutoRun 線上更新** | 卡不用拔。`putfile.py` 寫、`getfile.py` 讀回、逐位元組比對之後才重開機 —— **寫進去不等於執行**,所以只要在重開機前抓到,寫壞不用付代價 |
-| **檔案雙向讀寫** | `putfile.py` / `getfile.py`。shell 裡沒有任何指令能把任意內容寫進指定路徑,所以那一小塊是程式碼,其餘都是 `mem set` 和 `dir` |
+| **卡片線上更新** | 卡不用拔。`deploy.py` 處理 mode 7 不截短舊檔的情況，完整讀回驗證 BIN 與 AutoRun；驗證完成後才另行重開。`putfile.py`／`getfile.py` 是底層傳輸工具 |
+| **檔案雙向讀寫** | `putfile.py` / `getfile.py`。UP01 worker 可在 EP 0x01 接收帶 CRC 的二進位暫存區塊；舊版仍使用核對過的 `echo` 上傳。獨立的檔案程式才會把驗證後的暫存內容寫到路徑 |
 | **常駐程式碼線上抽換** | 從注入區建的 task 就在注入區執行,而韌體**沒有辦法終止 task**。`park.S` 讓它在程式碼被換掉時有地方等。換一次 logger 約一秒 |
 | **驗證記憶體是不是你的** | `memprobe.py`。閒置時能寫的記憶體,錄影一開始可能就被擁有者重新初始化 —— **讀程式碼永遠看不出這件事** |
-| **八個範本** | `shellcmd`(task 環境)、`oneshot`(回呼)、`callfn`(一次一個常式帶起來)、`taskcreate`、`park`、`bulkload`、`putfile`、`getfile`、`dump` |
-| **傳輸會結束** | 14 KB 從 448 秒變成 0.6 秒,而**沒有一分是線路造成的** —— 見 [docs/TRANSFER.md](docs/TRANSFER.md) |
+| **ARM 原始碼與 skill** | 持續維護的可執行原始碼在 `asm/`；`fp-usb-shell` skill 說明執行環境、記憶體歸屬及使用條件 |
+| **傳輸會結束** | 14 KB 從 448 秒變成 0.6 秒。二進位上傳已完成離線實作，尚待實機測速 —— 見 [docs/TRANSFER.md](docs/TRANSFER.md) |
 
 ### 那七個字
 
@@ -322,14 +325,14 @@ worker 的閘門是 `(DALEPENA & 0x24) == 0x24`。
 
 ```
 camera/worker.S      相機端,載入到 0xC072F050
-templates/           拿去改的範本,見 templates/README.md
+asm/                 持續維護的 ARM 原始碼;用法見 ../.claude/skills/fp-usb-shell/SKILL.md
 armasm.py            ARM 組譯並解析內部呼叫
 build_autorun.py     組譯 worker.S 並產生卡片腳本
 inject.py            寫入一次性常式、武裝、等它回報
 load.py              寫入常駐常式、逐字驗證、掛上 hook
 putfile.py           把本機檔案寫進卡裡 —— 包含 AutoRun.txt 本身
-deploy.py            寫一張卡的兩個檔,而且不相信 putfile 的回報:
-                     逐位元組回讀相同才算寫進去
+deploy.py            寫卡片根目錄兩檔或相容的 BIN-only 更新;
+                     處理舊檔尾端、完整讀回,並在寫入前核對候選 FPSUPUI 檔
 runprobe.py          借 echo 在活著的相機上把候選常式跑一次。loader 的改動
                      要先過這一關才准靠近卡 —— loader 一掛就沒有 shell 能救,
                      卡只能從卡槽拔出來
@@ -338,7 +341,7 @@ bootmeasure.py       重開並等 shell 回話;真正該引用的數字是相機
 test_loader_hook.py  用 unicorn 對著韌體映像跑 loader 與 stage2:hook 路徑、journal、
                      關機寫回、三段式開機、hook 路徑上的四格畫面(技能 fp-unicorn-emulation)
 loader_hook_check.py 從相機讀 --loader-hook-mark 卡的狀態,並拿現場 journal 比對原廠映像
-warm_gate_card.py    第一個暖開機閘門最小測試(templates/gate.S)
+warm_gate_card.py    第一個暖開機閘門最小測試(asm/gate.S)
 host/fpshd.c         daemon,監聽 /tmp/fpshd.sock
 host/fpsh            客戶端
 host/lsdesc.c        印出主機實際列舉到的描述元
@@ -406,12 +409,12 @@ make card CARD=/Volumes/<卡片名稱>
 ### 在相機上執行程式碼
 
 shell 能寫記憶體但不能呼叫,所以**沒有 `call` 指令,也不需要**。做法是把韌體本來就會
-呼叫的位址指向我們的常式,讓它跑一次,再自己把原值寫回去。`templates/oneshot.S` 就是
+呼叫的位址指向我們的常式,讓它跑一次,再自己把原值寫回去。`asm/oneshot.S` 就是
 那套外框加一個 payload 空位;`inject.py` 負責寫入、武裝、等它回報。
 AutoRun 和 daemon 都不用動。
 
 ```sh
-./inject.py templates/oneshot.S
+./inject.py asm/oneshot.S
 ./host/fpsh mem get 0xC072F700,,0x20
 ```
 
@@ -464,7 +467,7 @@ journal;關機時回呼寫回。執行期才裝 hook 的 payload 把每個 hook 
 v2 把程式碼「一個字一個命令」寫進相機,把資料複製過暫存區再逐塊拉回來。
 v3 改掉這兩件事,以及由它們衍生的一切。
 
-**AutoRun 不再帶程式碼。** 它只寫一個 512 位元組的載入器(`templates/loader.S`),
+**AutoRun 不再帶程式碼。** 它只寫一個 512 位元組的載入器(`asm/loader.S`),
 載入器去讀卡上的 `\fpSup.BIN`、把每個 section 放到指定位址,然後自己變成 worker。
 503 個命令變成 248,而且**不再隨載入的東西增加** —— 改 worker 對腳本長度毫無影響。
 shell 有 `mem save`(記憶體→檔案)但沒有反向的,所以 AutoRun 拼出來的是「去讀檔的那個東西」。

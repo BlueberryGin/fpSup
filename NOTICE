@@ -1,0 +1,70 @@
+fpSup
+Copyright (C) 2026 bei (ijigen)
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.  See LICENSE for the full text.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+
+
+== Supplemental terms (GPL-3.0 section 7) ==
+
+As permitted by section 7 of the GNU General Public License version 3, the
+following supplemental terms apply:
+
+  (c) A modified version of this work must carry a name that is clearly
+      different from "fpSup", and must not present itself as the original
+      project.
+
+  (e) This licence grants no rights in the trade names, trademarks, service
+      marks or product names of the copyright holder, except as required for
+      the reasonable and customary description of the work's origin.  In
+      particular, "fpSup" may not be used to endorse or promote a modified
+      version or any derived product.
+
+If you find these supplemental terms unacceptable, section 7 permits you to
+remove them from any copy you convey.
+
+
+== Scope of this licence ==
+
+This licence covers only the material authored by the copyright holder: the
+card loader, stage2, payload sources, hooks, host-side tools, build scripts,
+tests and documentation contained in this repository.
+
+It does NOT cover, and the copyright holder makes no licence grant to:
+
+  * SIGMA Corporation's camera firmware, or any part of it.  Memory addresses,
+    register values and behavioural descriptions in this repository are factual
+    observations, not a licence to SIGMA's work.  No SIGMA firmware image is
+    redistributed here.
+
+  * "SIGMA" and "fp", which are trade names of SIGMA Corporation.  This project
+    is not affiliated with, endorsed by, or supported by SIGMA Corporation.
+
+  * Proprietary components that are distributed only in encrypted or binary
+    form and whose sources are not published in this repository.  Such
+    components are separately licensed and are not covered by the GPL grant
+    above; each carries its own terms.  Nothing in the GPL grant obliges the
+    copyright holder to publish their sources.
+
+
+== Other licences ==
+
+The copyright holder retains all rights in their own work and may license it
+to anyone under different terms, including proprietary terms, at their sole
+discretion.  The GPL grant above binds recipients of this distribution; it
+does not bind the copyright holder.
+
+For a commercial or proprietary licence, contact the copyright holder.
+
+
+== No warranty, and what this software does ==
+
+This software modifies the running state of camera firmware.  It is provided
+with absolutely no warranty, to the extent permitted by applicable law.  You
+alone are responsible for deciding whether to run it on your equipment.

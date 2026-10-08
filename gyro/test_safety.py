@@ -284,7 +284,7 @@ class ImageLayoutTests(unittest.TestCase):
         m = re.search(r"^ENTRY_AT = (0x[0-9A-Fa-f]+)", card, re.M)
         self.assertIsNotNone(m)
         entry_at = int(m.group(1), 0)
-        loader = assemble(ROOT / "fp_usb_shell" / "templates" / "loader.S",
+        loader = assemble(ROOT / "fp_usb_shell" / "asm" / "loader.S",
                           ("LOADER_BASE=0x%X" % self._cave_base(),
                            "POOL_DESC=0xC072F6D8",
                            'BIN_PATH="\\\\fpSup.BIN"'))
@@ -440,7 +440,7 @@ class CaveTemplateTests(unittest.TestCase):
     template that takes one of these names must guard it, and every assemble()
     of that template anywhere in the tree must pass it.  It lives in the gyro
     suite because that is the suite that runs, and it already reaches into
-    fp_usb_shell/templates for park.S and loader.S.
+    fp_usb_shell/asm for park.S and loader.S.
     """
 
     # Names the HOST decides and the template must be told.
@@ -455,7 +455,7 @@ class CaveTemplateTests(unittest.TestCase):
     # host's parameter block for months; the host moving out is what ends that,
     # not store_boot moving.
     HOST_NAMED = ('P', 'SCRATCH')
-    TEMPLATES = ROOT / 'fp_usb_shell' / 'templates'
+    TEMPLATES = ROOT / 'fp_usb_shell' / 'asm'
 
     def guarded(self):
         """{template stem: {names it takes from the caller}}."""

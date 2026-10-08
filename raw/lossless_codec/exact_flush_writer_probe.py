@@ -108,6 +108,18 @@ STATE_FIELDS = {
     0x50: "return_high",
     0x54: "entered",
     0x58: "done",
+    # The frame the writer is called with. Copy-back writes into frame[0x68],
+    # so these say how many holders that buffer has at this moment. A clone
+    # shares the pointer rather than getting its own allocation.
+    0x5C: "frame_kind",
+    0x60: "frame_buffer",
+    0x64: "frame_header_bytes",
+    0x68: "frame_id",
+    0x6C: "frame_clones_made",
+    0x70: "frame_refcount",
+    0x74: "frame_owner_id",
+    0x78: "frame_clones_requested",
+    0x7C: "frame_buffer_is_seg0",
 }
 
 SHAPE_REQUIRED_INDICES = (
@@ -141,15 +153,74 @@ if base.arm_bl(HOOK_SITE, REAL_FLUSH) != HOOK_ORIG:
     raise AssertionError("recorded V5.02 call instruction does not target REAL_FLUSH")
 
 
-def build_probe(fpsup: pathlib.Path) -> bytes:
+CLAIM_NAMES = {"code": "lossless.flush.code", "state": "lossless.flush.state"}
+
+
+def publish_before_arm(shell: base.CameraShell) -> list:
+    """ROM D-cache then I-cache, before the hook is written, never after.
+
+    A read-back proves the data cache holds the image; it says nothing about
+    what the fetch path will run. A failure here raises, so the hook is not
+    armed: a half-published hook is the one state with no safe recovery.
+    """
+    import probe_placement as placement
+    call = None
+    try:
+        import sys
+        if str(placement.SHELL_DIR) not in sys.path:
+            sys.path.insert(0, str(placement.SHELL_DIR))
+        import callfn
+        call = lambda fn: callfn.call(fn, verbose=False)
+    except ImportError as exc:
+        raise ProbeError(f"cache publication needs callfn: {exc}") from exc
+    published = placement.publish(call)
+    for entry in published:
+        print(f"published {entry['function']} -> {entry['result']}")
+    return published
+
+
+def place_probe(fpsup: pathlib.Path, claim=None):
+    """Claim cave blocks for this probe and rebuild it there.
+
+    The fixed 0xC0730000/0xC0730600 pair sits above the shell's reserved block
+    and nothing declares ownership of it, which is exactly the undeclared
+    fixed ownership ROADMAP G1 rules out. Two passes, as in the codec probe:
+    the default build sizes the claim, the second bakes the address in.
+    """
+    import probe_placement as placement
+    sized = build_probe(fpsup)
+    placed = placement.claim_regions(
+        [(CLAIM_NAMES["code"], len(sized)),
+         (CLAIM_NAMES["state"], STATE_WORDS * 4)], claim=claim)
+    code = build_probe(fpsup, placed=placed)
+    if len(code) != len(sized):
+        raise ProbeError("placed image size changed; the claim would be wrong")
+    global CODE, CODE_LIMIT, STATE, STATE_LIMIT, HOOK_ARMED
+    CODE = placed[CLAIM_NAMES["code"]]
+    STATE = placed[CLAIM_NAMES["state"]]
+    # The limits bound the install survey. Leaving them at the fixed defaults
+    # made that survey span the claimed base to the old fixed limit -- 9 KB
+    # in one `mem get`,
+    # which the shell cannot answer, so every word came back "omitted" and the
+    # arm failed after the caches had already been published.
+    CODE_LIMIT = CODE + len(code)
+    STATE_LIMIT = STATE + STATE_WORDS * 4
+    HOOK_ARMED = placement.armed_word(HOOK_SITE, CODE)
+    return code, placed
+
+
+def build_probe(fpsup: pathlib.Path, placed: dict = None) -> bytes:
     assemble, symbols = base.load_assembler(fpsup)
-    code = assemble(SOURCE)
-    syms = symbols(SOURCE)
+    defines = ()
+    if placed:
+        defines = (f"STATE=0x{placed[CLAIM_NAMES['state']]:08X}",)
+    code = assemble(SOURCE, defines=defines)
+    syms = symbols(SOURCE, defines=defines)
     if syms.get("probe_entry") != 0:
         raise ProbeError(f"probe_entry is not at offset zero: {syms.get('probe_entry')}")
     if not code or len(code) & 3:
         raise ProbeError("assembled probe is empty or not word aligned")
-    if CODE + len(code) > CODE_LIMIT:
+    if not placed and CODE + len(code) > CODE_LIMIT:
         raise ProbeError(
             f"probe 0x{CODE:08X}..0x{CODE + len(code):08X} exceeds "
             f"0x{CODE_LIMIT:08X}"
@@ -287,7 +358,7 @@ def arm_site(shell: base.CameraShell, attempts: int = 8) -> bool:
     raise ProbeError("could not verify a stable arm; restored the original word")
 
 
-def arm_probe(shell: base.CameraShell, code: bytes) -> None:
+def arm_probe(shell: base.CameraShell, code: bytes, publish=None) -> None:
     # All refusal checks precede the first write.
     verify_call_context(shell)
     require_clear_install_regions(shell)
@@ -296,6 +367,11 @@ def arm_probe(shell: base.CameraShell, code: bytes) -> None:
     shell.write_words_verified(CODE, base.words_from(code))
     print("clearing and verifying final-flush state")
     shell.write_words_verified(STATE, [0] * STATE_WORDS)
+
+    if publish is not None:
+        # Between the writes and the hook, never before the writes: publishing
+        # an empty region proves nothing about the image that follows it.
+        publish(shell)
 
     verify_call_context(shell)
     print("arming exact final-flush call (final write)")
@@ -461,13 +537,25 @@ def main() -> int:
         else fpsup / "fp_usb_shell" / "host" / "fpsh"
     )
     try:
+        if not getattr(args, "dry_run", False) and args.action != "arm":
+            # Re-derive the same claim: stable by name for this boot, so the
+            # armed word and state address match what arm installed.
+            place_probe(fpsup)
         if args.action == "arm":
+            if not args.dry_run:
+                # Claiming talks to the camera, so it cannot happen in a dry run.
+                code, placed = place_probe(fpsup)
+                describe_build(code)
+                for name, at in sorted(placed.items(), key=lambda kv: kv[1]):
+                    print(f"claimed {name:22s} 0x{at:08X}")
+                print(f"armed word 0x{HOOK_ARMED:08X} (BL 0x{CODE:08X})")
+                shell = base.CameraShell(fpsh)
+                arm_probe(shell, code, publish=publish_before_arm)
+                return 0
             code = build_probe(fpsup)
             describe_build(code, show_words=args.dry_run)
-            if args.dry_run:
-                print("dry-run: no camera or USB reads/writes performed")
-                return 0
-            arm_probe(base.CameraShell(fpsh), code)
+            print("placed : would claim cave blocks and publish caches")
+            print("dry-run: no camera or USB reads/writes performed")
             return 0
 
         if args.dry_run:

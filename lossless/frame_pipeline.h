@@ -98,6 +98,11 @@ uint32_t fpl_pipeline_handoff(struct fpl_pipeline *, const struct fpl_frame_toke
 /* Stop is idempotent while active: no new selected frames, but an existing
  * job may still complete and hand off. Incoming drain-time frames stay RAW. */
 uint32_t fpl_pipeline_stop(struct fpl_pipeline *);
+/* Cancel only a never-submitted HELD lease. The adapter must serialize against
+ * submit and establish native ownership transfer/cleanup before resolving it.
+ * This cannot recover ENCODING or RETAINED; existing faults stay unchanged. */
+uint32_t fpl_pipeline_cancel_held(struct fpl_pipeline *, const struct fpl_frame_token *,
+                                  uint32_t ownership_resolved);
 /* On failure the adapter must establish complete ownership resolution and
  * codec/IRQ/output quiescence, including a possibly partial handoff. This only
  * records that external cleanup; it does not free/return/write a buffer. */

@@ -20,6 +20,78 @@ host sends nothing but data.
 
 Use `mem set` only for repairs and for loading the bulk loader itself.
 
+For live card updates, `putfile.py` now sends 32-chunk batches with no blind
+retry of `echo`. After a lost reply, it checks the camera-side byte counter:
+an accepted chunk is not sent twice, while a missing chunk is retried at its
+known address. It also checkpoints each batch and resends a silently failed
+batch at its original address. This prevents
+one lost command from shifting the rest of a large BIN and turning verification
+into thousands of slow word writes. `deploy.py` shows each phase's elapsed time
+and sends only a shorter BIN prefix when a fresh full read proves that the old
+tail is already zero; it still reads back the complete on-card file. A failed
+two-word cursor read falls back to separate single-word reads, then stops
+before card file I/O if the cursor still cannot be proven.
+
+## Binary upload on the existing OUT endpoint
+
+The UP01 worker arms a 16 KiB EP 0x01 OUT transfer. Each upload command carries
+an absolute destination in the worker's file-staging region, a byte count and
+a CRC-32, followed by up to 16,320 binary bytes. The worker checks the frame,
+bounds and data CRC before copying, then records the last accepted address,
+length and CRC before replying. On a lost reply, the host queries that record;
+it sends the same absolute chunk again only after the worker responds to that
+query. The ordinary shell commands still use the same endpoint.
+
+The daemon probes the current worker with a small capability command before
+every large OUT. An older worker answers without UP01, so `putfile.py` uses the
+existing checked `echo` path. A new worker requires a new BIN and a reboot; a
+new daemon must also be built and started before the fast path is used. The
+first update from an older worker therefore uses the existing uploader. The
+staging memory is read back before any card file write, and `deploy.py` still
+reads back the complete card file. USB DMA timing and throughput remain to be
+measured on the camera.
+
+## MEM1: both directions at the link's speed (2026-10-06, camera)
+
+CMD 6 (MEMW), 7 (MEMR), 8 (WIN), 9 (MEMCAPS). Each transfer is one TRB pointed
+at the caller's bytes, up to 16 MiB - 1 KiB; the camera never copies or CRCs
+the data. Measured on a 16 MiB allocator block: **write 398 MB/s, read
+382 MB/s**, readback identical; 5000 random write+readback round trips in the
+pool with no failure. `put()` and `read_direct()` use it when the worker has it
+(`FPSUP_NO_MEM1=1` forces the old checked paths); `mem_write` reads the whole
+thing back by default. A camera-side CRC (option 2) runs at 2.7 MB/s -- the
+CPU touching every byte -- so integrity is the host readback, not that.
+
+Protection is the camera's window table, not the host: every byte of a
+transfer must sit in one window with the permission; the worker's pool is
+implicit (read all, write past +0x10000); granted windows must be in
+0x40000000..0x80000000, writable ones from 0x44000000 and clear of the pool
+header and the worker's code; a write is checked at its 1 KiB-rounded length;
+data that never arrives is ended before anything else; windows are cleared
+when a worker starts. MEMW is two-phase (READY before the host sends a byte);
+after any failure past the command, the host waits out the camera's data
+timeout before sending again, or its next frame would land as data.
+
+Three things made the shell lose commands, all fixed in this build:
+
+1. **The firmware's PTP receiver** (usbTask -> `FUN_c0033ad0` mode 5 ->
+   `FUN_c04db778`) armed EP01 OUT on its own buffer and answered our frames
+   with 0x2003. Off: patch `0xC0033B3C` (`patches.NOPTP`, shell sup, restored
+   at power-off).
+2. **The driver's auto-arm**: on an XferNotReady for bulk OUT, whoever waits
+   on "any event" calls `FUN_c01e76b8`, which arms OUT on `[0xC3025744]`
+   unless `0xC31E3974` (OUT busy) is 1. Lost frames were found whole in that
+   buffer. The worker sets the flag after every OUT, and `0xC01E7704`
+   (`beq` -> `b`) removes the auto-arm (`patches.NOPTP`).
+3. **Shared completion bits**: usbTask's dispatcher can consume our
+   endpoint's completion bit, so `Wait` ran out 50 s with the frame already in
+   our buffer. Every wait now asks the TRB (`wait_done`: HWO clear = done) and
+   uses `Wait` only to sleep in 20 ms slices. `arm_out` zeroes the frame head
+   first, so a spurious wake can never re-run the last command.
+
+Faults are logged at pool+0x6C00 (count, then 16 x {rounds, phase, command,
+sequence, arm_out, wait_out, arm_in, wait_in}).
+
 ## Never stage past the allocation
 
 This is the one that cost the most. Staging 247 KB into the 64 KiB that was left
@@ -99,6 +171,17 @@ end. Check the size in `dir` against what was written.
 的十六進位 —— 六十倍。`bulkload.S` 把目的指標留在相機上自己推進,主機只送資料。
 
 `mem set` 只用在補寫,以及載入 bulkload 自己。
+
+熱更新以每 32 個資料塊為一批核對相機端游標。回覆遺失時先讀游標，確認資料已收下才繼續；
+游標回覆缺字會分別補讀。仍無法確認就停在寫卡之前，避免把未知的暫存內容寫成檔案。
+`deploy.py` 會顯示各階段時間；只有重新讀回舊檔並確認尾端全為零時，才縮短 BIN 上傳，
+最後仍核對卡上完整檔案。
+
+新版 UP01 worker 在原有 EP 0x01 一次接收最多 16,320 bytes 的二進位資料。每塊都指定
+絕對位址並帶 CRC；回覆遺失時，主機先查 worker 最後收下的區塊，再決定是否重送。
+主機每次送大封包前都會確認目前 worker 支援 UP01；舊版 worker 會自動沿用經過核對的
+`echo` 路徑。第一次更新舊卡仍走舊路徑；新 BIN 開機且換上新版 daemon 後才會啟用高速上傳。
+實際 USB 速度與硬體時序尚待相機驗證。
 
 ## 絕對不要暫存到配置範圍之外
 

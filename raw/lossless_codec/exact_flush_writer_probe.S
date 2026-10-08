@@ -42,7 +42,11 @@
 .equ HOOK_SITE,       0xC03A5490
 .equ HOOK_ORIG,       0xEB0BD652
 .equ REAL_FLUSH,      0xC069ADE0
-.equ STATE,           0xC0730600
+/* Claimed at run time; the default is the historical fixed address, which
+ * nothing declares ownership of. See probe_placement.py. */
+#ifndef STATE
+#define STATE 0xC0730600
+#endif
 .equ CLOCK,           0xC002B6E0
 
 .equ ENTERED_MAGIC,   0x52544E45       /* "ENTR" */
@@ -81,6 +85,25 @@
 .equ S_RET_HI,        0x50
 .equ S_ENTERED,       0x54
 .equ S_DONE,          0x58
+
+/* The frame object the writer is called WITH (r1, captured in S_ARG1). The
+ * copy-back design writes into frame[0x68], the buffer the writer hands us as
+ * seg[0], so the one thing it has to know is how many holders that buffer has
+ * at this moment. FUN_c0373dd0 copies the 0x68..0x128 block field for field
+ * when a clone is made, so a clone SHARES this pointer rather than getting its
+ * own allocation; FUN_c0374ee8 makes frame[0x1C0] of them and bumps
+ * frame[0x1114]. Whether that happens on the movie path was not settled by
+ * reading - two call sites, one gated on a mode and one not - so it is read
+ * here instead. Read-only: every one of these is a load. */
+.equ S_FR_KIND,       0x5C             /* frame[0x04]   capture kind         */
+.equ S_FR_BUF,        0x60             /* frame[0x68]   the RAW buffer       */
+.equ S_FR_HDR,        0x64             /* frame[0x128]  header bytes         */
+.equ S_FR_ID,         0x68             /* frame[0x10FC] frame id             */
+.equ S_FR_CLONES,     0x6C             /* frame[0x1110] clones made          */
+.equ S_FR_REFS,       0x70             /* frame[0x1114] reference count      */
+.equ S_FR_OWNER,      0x74             /* frame[0x1118] owner id, 0 = owner  */
+.equ S_FR_DUPCNT,     0x78             /* frame[0x1C0]  clones REQUESTED     */
+.equ S_FR_SEG_MATCH,  0x7C             /* 1 = frame[0x68] equals seg[0]      */
 
 .macro LDA reg, value
     movw    \reg, #:lower16:\value
@@ -180,6 +203,41 @@ probe_entry:
     cmp     r0, r2
     orreq   r3, r3, #FLAG_DNG_MAGIC
     str     r3, [r4, #S_SHAPE_FLAGS]
+
+    /* Frame reference survey. Loads only; nothing here writes the frame. */
+    ldr     r5, [r4, #S_ARG1]
+    cmp     r5, #0
+    beq     call_real
+    ldr     r0, [r5, #4]
+    str     r0, [r4, #S_FR_KIND]
+    LDA     r0, 0x68
+    ldr     r1, [r5, r0]
+    str     r1, [r4, #S_FR_BUF]
+    LDA     r0, 0x128
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_HDR]
+    LDA     r0, 0x10FC
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_ID]
+    LDA     r0, 0x1110
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_CLONES]
+    LDA     r0, 0x1114
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_REFS]
+    LDA     r0, 0x1118
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_OWNER]
+    LDA     r0, 0x1C0
+    ldr     r2, [r5, r0]
+    str     r2, [r4, #S_FR_DUPCNT]
+    /* Is the buffer the writer registered the same one the frame owns? If it
+     * is not, copy-back would be writing into something else entirely. */
+    ldr     r2, [r4, #S_NODE_BUF]
+    cmp     r1, r2
+    moveq   r0, #1
+    movne   r0, #0
+    str     r0, [r4, #S_FR_SEG_MATCH]
 
 call_real:
     /* Measure only the real, synchronous flush call. */

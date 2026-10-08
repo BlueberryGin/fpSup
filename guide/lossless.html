@@ -66,36 +66,10 @@
 
 <!-- 1. INSTALL -->
 <h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
-<ol class="steps">
-  <li>
-    <h3><span class="en">Check the camera</span><span class="zh">確認相機</span></h3>
-    <p class="en">SIGMA fp (not fp L) on firmware <b>Ver.5.02</b> exactly. <a href="../guide.html#firmware">How to check</a>.</p>
-    <p class="zh">SIGMA fp(不是 fp L),韌體必須剛好是 <b>Ver.5.02</b>。<a href="../guide.html#firmware">怎麼確認</a>。</p>
-  </li>
-  <li>
-    <h3><span class="en">Build the card in fpSup-Merge</span><span class="zh">在 fpSup-Merge 做卡</span></h3>
-    <p class="en"><a href="../tools/card-composer/?pick=lossless"><b>Open fpSup-Merge with fpSup-Lossless ticked</b></a>.
-    It can go on the same card as every other fpSup card, RAW-View included. With open gate,
-    use OG3K v0.2.8a / OG2K v0.1.5a or later. Tick what else you want, then download the zip.</p>
-    <p class="zh"><a href="../tools/card-composer/?pick=lossless"><b>打開已勾好 fpSup-Lossless 的 fpSup-Merge</b></a>。
-    它可以和其他所有 fpSup 卡放在同一張卡上,包括 RAW-View。搭配 open gate 時,
-    請用 OG3K v0.2.8a / OG2K v0.1.5a 或更新版。勾好其他想要的,然後下載 zip。</p>
-    <p class="note en">Fast Start 3 is an optional setting on that page. See
-    <a href="../guide.html">How to use fpSup</a>.</p>
-    <p class="note zh">Fast Start 3 是那個頁面上的選項。見
-    <a href="../guide.html">fpSup 怎麼用</a>。</p>
-  </li>
-  <li>
-    <h3><span class="en">Copy to the card and start the camera</span><span class="zh">複製到卡上並開機</span></h3>
-    <p class="en">Unzip. Copy <code>AutoRun.txt</code>, <code>fpSup.BIN</code> and the
-    <code>FPSUPUI</code> folder to the <b>top level</b> of the SD card the camera boots from, and
-    start the camera with the <b>USB cable unplugged</b>. All four boxes white means it loaded.
-    <a href="../guide.html#copy">Details</a>.</p>
-    <p class="zh">解壓縮。把 <code>AutoRun.txt</code>、<code>fpSup.BIN</code> 和
-    <code>FPSUPUI</code> 資料夾複製到相機開機用的 SD 卡<b>最上層</b>,<b>不插 USB 線</b>開機。
-    四格全白就是載入完成。<a href="../guide.html#copy">詳細說明</a>。</p>
-  </li>
-</ol>
+<p class="en">Tick <b>fpSup-Lossless</b> in fpSup-Merge, download, and put it on the card as the
+<a href="../tools/merge-v3/#install">install instructions on that page</a> say.</p>
+<p class="zh">在 fpSup-Merge 勾選 <b>fpSup-Lossless</b> 下載，照
+<a href="../tools/merge-v3/#install">頁上的安裝說明</a>放進卡。</p>
 
 <!-- 2. Use -->
 <h2 id="use"><span class="en">Use</span><span class="zh">使用</span></h2>
@@ -110,8 +84,10 @@
   <figcaption class="zh">SHOOT 選單裡的 <b>Lossless RAW</b> 列,選 <b>On</b>。</figcaption>
 </figure>
 <ul>
-  <li><span class="en">It starts <b>Off</b> at every power-on. Nothing is saved in the camera's
-  settings.</span><span class="zh">每次開機都從 <b>Off</b> 開始,相機設定裡不存任何東西。</span></li>
+  <li><span class="en">It starts <b>Off</b>. Your choice is kept across power-off in fpSup-Lossless's
+  own file on the card (<code>\fpSup\10LOSS.BIN</code>), never in the camera's settings.</span><span class="zh">預設是 <b>Off</b>。
+  你的選擇會存在卡上 fpSup-Lossless 自己的檔案裡(<code>\fpSup\10LOSS.BIN</code>),關機後保留;
+  相機設定裡不存任何東西。</span></li>
   <li><span class="en">When the codec cannot finish a frame in time, that frame is written
   uncompressed, exactly as the camera writes it today. A clip can therefore mix compressed and
   uncompressed frames; no frame is dropped to make room.</span><span class="zh">編碼器來不及壓完的畫格,
@@ -132,15 +108,28 @@ before you shoot something that matters.</div>
 <table>
   <thead><tr><th><span class="en">tested on the camera</span><span class="zh">已在相機上測過</span></th><th><span class="en">not tested</span><span class="zh">沒測過</span></th></tr></thead>
   <tbody>
-    <tr><td><span class="en">3K (OG3K) 12-bit 29.97p to SD: 84&ndash;87% of frames compressed, every
-        written frame decodes.</span><span class="zh">3K(OG3K)12-bit 29.97p 寫 SD:84~87% 的畫格被壓縮,
-        寫下的每一格都能解碼。</span></td>
-        <td><span class="en">This release card itself has not been booted.</span><span class="zh">這張發布卡本身還沒開機測過。</span></td></tr>
-    <tr><td><span class="en">3K 12-bit 48p to an SSD for 15 minutes: about half of the frames compressed
-        to the end, no stall.</span><span class="zh">3K 12-bit 48p 寫 SSD 15 分鐘:到最後約一半畫格被壓縮,沒有卡住。</span></td>
+    <tr><td><span class="en">3K (OG3K) 12-bit 29.97p to SD, several 10&ndash;15 s takes: 512&times;512 tiles,
+        about 92% of frames compressed, no stall.</span><span class="zh">3K(OG3K)12-bit 29.97p 寫 SD,
+        多段 10~15 秒:512&times;512 tile,約 92% 的畫格被壓縮,沒有卡住。</span></td>
+        <td><span class="en">In-camera playback and DaVinci Resolve with the new 512&times;512 tiles.</span><span class="zh">新的 512&times;512 tile 在機內回放與 DaVinci Resolve 中的表現。</span></td></tr>
+    <tr><td><span class="en">FHD 29.97p to SD with several tile sizes: every frame after the first
+        compressed, no stall.</span><span class="zh">FHD 29.97p 寫 SD、試過多種 tile 大小:第一格之後每一格都被壓縮,
+        沒有卡住。</span></td>
         <td><span class="en">UHD, 10-bit, and frame rates not listed here.</span><span class="zh">UHD、10-bit,以及這裡沒列的格率。</span></td></tr>
-    <tr><td><span class="en">FHD and 3K compressed clips play back in the camera.</span><span class="zh">FHD 與 3K 壓縮片段可在機內回放。</span></td>
+    <tr><td><span class="en">The 94-frame stop is fixed: FHD 24p and 59.94p takes of 771 and 1954 frames,
+        all compressed.</span><span class="zh">94 格就停的問題已修正:FHD 24p 與 59.94p 錄了 771 與 1954 格,全部壓縮。</span></td>
         <td><span class="en">Long SD takes past the camera's own auto-stop.</span><span class="zh">超過相機自動停止時間的長時間 SD 錄影。</span></td></tr>
+    <tr><td><span class="en">Loading, the menu row, ON/OFF remembered across restart, Lossless together
+        with OG3K on one card; a 512&times;512-tile 3K frame decodes on a computer to the full
+        3024&times;2010 picture.</span><span class="zh">載入、選單列、開關重開後仍保留、與 OG3K 同卡;
+        512&times;512 tile 的 3K 畫格在電腦上解出完整的 3024&times;2010 畫面。</span></td>
+        <td><span class="en">Saving the setting right before switching the camera off; the 100p + 10-bit
+        + Lossless freeze report; this release folder copied onto a fresh card as-is.</span><span class="zh">改完設定馬上關機時是否存得到;
+        100p + 10-bit + Lossless 的凍結回報;把這個發行資料夾原樣複製到新卡。</span></td></tr>
+    <tr><td><span class="en">Older card layout (v0.1.2test): 3K 12-bit 48p to an SSD for 15 minutes, and
+        compressed clips playing back in the camera.</span><span class="zh">舊卡片格式(v0.1.2test):3K 12-bit 48p 寫 SSD 15 分鐘,
+        以及壓縮片段在機內回放。</span></td>
+        <td></td></tr>
   </tbody>
 </table>
 </div>

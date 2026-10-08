@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>fpSup-ScreenFlip — how to use it | fpSup</title>
+<meta name="description" content="Flip the SIGMA fp's rear screen 180°, mirror it, or both — one choice per custom display mode, applied when you switch into that mode.">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ijigen.github.io/fpSup/guide/screenflip.html">
+<meta property="og:title" content="fpSup-ScreenFlip — how to use it">
+<meta property="og:description" content="Flip the SIGMA fp's rear screen 180°, mirror it, or both — one choice per custom display mode, applied when you switch into that mode.">
+<meta property="og:image" content="https://ijigen.github.io/fpSup/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="icon" href="../assets/favicon.ico" sizes="any">
+<link rel="icon" href="../assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../assets/site.css">
+<style>
+/* Diagrams: inline SVG drawn with the site's colour tokens, so they follow
+   light and dark mode. Diagram text uses the site's .en/.zh tspans. */
+.dia{margin:18px 0 8px; border:1px solid var(--line); border-radius:4px; background:var(--panel);
+  padding:14px 12px 10px}
+.dia svg{display:block; width:100%; height:auto; max-width:760px; margin:0 auto}
+.dia figcaption{font-size:.84rem; color:var(--dim); margin-top:8px}
+.dia .frame{fill:var(--paper); stroke:var(--line); stroke-width:2}
+.dia .bezel{fill:none; stroke:var(--dim); stroke-width:2}
+.dia .pic{fill:var(--sig-soft)}
+.dia .glyph{fill:var(--sig); font:600 64px var(--sans)}
+.dia .ui{fill:var(--ink); font:500 15px var(--mono)}
+.dia .lbl{fill:var(--ink); font:600 15px var(--sans)}
+.dia .sub{fill:var(--dim); font:400 13px var(--sans)}
+.dia .step{fill:var(--panel); stroke:var(--line); stroke-width:1.5}
+.dia .step.on{stroke:var(--sig); stroke-width:2.5}
+.dia .arrow{stroke:var(--dim); stroke-width:2; fill:none; marker-end:url(#ah)}
+.dia .ahead{fill:var(--dim)}
+.dia .hot{fill:var(--sig); font:600 13px var(--sans)}
+.path{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:14px 0; padding:0; list-style:none}
+.path li{font-family:var(--mono); font-size:.86rem; border:1px solid var(--line); border-radius:3px;
+  padding:5px 9px; background:var(--panel)}
+.path li.end{border-color:var(--sig); color:var(--sig); font-weight:600}
+.path .sep{border:none; background:none; padding:0 2px; color:var(--dim)}
+</style>
+</head>
+<body>
+
+<div class="langbar">
+  <div class="lang" role="group" aria-label="Language / 語言 / 语言">
+    <button type="button" data-set="en" aria-pressed="true">EN</button>
+    <button type="button" data-set="cn" aria-pressed="false">中</button>
+    <button type="button" data-set="zh" aria-pressed="false">繁</button>
+  </div>
+</div>
+<a class="back" href="../guide.html">&larr; <span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a>
+
+<header class="hero">
+  <h1>fpSup-ScreenFlip</h1>
+  <p class="lede en">Turns the rear screen <b>180°</b>, <b>mirrors</b> the picture, or both. Each custom
+  display mode keeps its own choice, and the screen changes <b>when you switch into that mode</b>.
+  Version <b>v0.1.0test</b> &mdash; a <b>test build</b>.</p>
+  <p class="lede zh">把背螢幕翻轉 <b>180°</b>、把影像<b>鏡像</b>,或兩者都做。每個自訂顯示模式各記一個選擇,
+  <b>切換進那個模式時</b>螢幕才改變。版本 <b>v0.1.0test</b> —— 這是<b>測試版</b>。</p>
+</header>
+
+<!-- 1. INSTALL: written once, on the merge page -->
+<h2 id="install"><span class="en">Install</span><span class="zh">安裝</span></h2>
+<p class="en">Tick <b>fpSup-ScreenFlip</b> in fpSup-Merge, download, and put it on the card as
+<a href="../tools/merge-v3/#install">the install steps on that page</a> say.</p>
+<p class="zh">在 fpSup-Merge 勾選 <b>fpSup-ScreenFlip</b> 下載,照<a href="../tools/merge-v3/#install">頁上的安裝說明</a>放進卡。</p>
+
+<!-- 2. WHERE -->
+<h2 id="where"><span class="en">Where the setting is</span><span class="zh">設定在哪裡</span></h2>
+<ul class="path en">
+  <li>MENU</li><li class="sep">&rsaquo;</li><li>SYSTEM, page 2</li><li class="sep">&rsaquo;</li>
+  <li>Display mode settings</li><li class="sep">&rsaquo;</li><li>Custom 1&ndash;4</li><li class="sep">&rsaquo;</li>
+  <li>More options</li><li class="sep">&rsaquo;</li><li>page 3, TOOLS</li><li class="sep">&rsaquo;</li>
+  <li class="end">5th row: Screen Flip</li>
+</ul>
+<ul class="path zh">
+  <li>MENU</li><li class="sep">&rsaquo;</li><li>SYSTEM 第 2 頁</li><li class="sep">&rsaquo;</li>
+  <li>模式設定</li><li class="sep">&rsaquo;</li><li>自訂 1–4</li><li class="sep">&rsaquo;</li>
+  <li>更多選項</li><li class="sep">&rsaquo;</li><li>第 3 頁 TOOLS</li><li class="sep">&rsaquo;</li>
+  <li class="end">第 5 列:Screen Flip</li>
+</ul>
+
+<figure class="dia">
+<svg viewBox="0 0 520 300" role="img" aria-labelledby="t-row">
+  <title id="t-row">TOOLS page with the Screen Flip row below Audio Meter</title>
+  <rect class="frame" x="10" y="10" width="500" height="280" rx="6"/>
+  <text class="sub" x="28" y="40">TOOLS</text>
+  <g class="ui">
+    <text x="28" y="80"><tspan class="en">Electronic Level</tspan><tspan class="zh">水平儀</tspan></text>
+    <text x="28" y="122"><tspan class="en">Brightness Level Monitor</tspan><tspan class="zh">亮度等級顯示屏</tspan></text>
+    <text x="28" y="164"><tspan class="en">Zebra</tspan><tspan class="zh">斑馬紋</tspan></text>
+    <text x="28" y="206"><tspan class="en">Audio Meter</tspan><tspan class="zh">音訊參數</tspan></text>
+  </g>
+  <rect x="18" y="222" width="484" height="40" rx="3" fill="none" stroke="var(--sig)" stroke-width="2.5"/>
+  <text class="lbl" x="28" y="248">Screen Flip</text>
+  <text class="hot" x="400" y="248">Off &#9662;</text>
+</svg>
+<figcaption class="en">The new fifth row. Its choices: Off, 180, Mirror, 180+Mirror.</figcaption>
+<figcaption class="zh">新增的第五列。選項:Off、180、Mirror、180+Mirror。</figcaption>
+</figure>
+
+<!-- 3. WHAT EACH CHOICE DOES -->
+<h2 id="choices"><span class="en">The four choices</span><span class="zh">四個選項</span></h2>
+<figure class="dia">
+<svg viewBox="0 0 760 250" role="img" aria-labelledby="t-four">
+  <title id="t-four">Off, 180, Mirror and 180+Mirror shown on a screen with a picture and a menu line</title>
+  <defs>
+    <!-- one screen: picture (the letter F) + a menu line (ISO 800) -->
+    <g id="scr">
+      <rect class="frame" x="0" y="0" width="160" height="112" rx="5"/>
+      <rect class="pic" x="10" y="10" width="140" height="70" rx="2"/>
+    </g>
+  </defs>
+  <!-- Off -->
+  <g transform="translate(20,30)">
+    <use href="#scr"/>
+    <text class="glyph" x="80" y="68" text-anchor="middle">F</text>
+    <text class="ui" x="12" y="102">ISO 800</text>
+  </g>
+  <!-- 180: picture and menu turned -->
+  <g transform="translate(205,30)">
+    <use href="#scr"/>
+    <g transform="rotate(180 80 56)">
+      <text class="glyph" x="80" y="68" text-anchor="middle">F</text>
+      <text class="ui" x="12" y="102">ISO 800</text>
+    </g>
+  </g>
+  <!-- Mirror: picture only, left-right -->
+  <g transform="translate(390,30)">
+    <use href="#scr"/>
+    <g transform="translate(160,0) scale(-1,1)">
+      <text class="glyph" x="80" y="68" text-anchor="middle">F</text>
+    </g>
+    <text class="ui" x="12" y="102">ISO 800</text>
+  </g>
+  <!-- 180+Mirror: picture flipped top-bottom, menu turned -->
+  <g transform="translate(575,30)">
+    <use href="#scr"/>
+    <g transform="translate(0,90) scale(1,-1)">
+      <text class="glyph" x="80" y="68" text-anchor="middle">F</text>
+    </g>
+    <g transform="rotate(180 80 56)">
+      <text class="ui" x="12" y="102">ISO 800</text>
+    </g>
+  </g>
+  <g class="lbl" text-anchor="middle">
+    <text x="100" y="175">Off</text><text x="285" y="175">180</text>
+    <text x="470" y="175">Mirror</text><text x="655" y="175">180+Mirror</text>
+  </g>
+  <g class="sub" text-anchor="middle">
+    <text x="100" y="198"><tspan class="en">as the camera</tspan><tspan class="zh">原樣</tspan></text>
+    <text x="285" y="198"><tspan class="en">picture + menus turned</tspan><tspan class="zh">影像與選單都轉</tspan></text>
+    <text x="285" y="216"><tspan class="en">touch follows</tspan><tspan class="zh">觸控跟著轉</tspan></text>
+    <text x="470" y="198"><tspan class="en">picture left-right</tspan><tspan class="zh">只有影像左右鏡像</tspan></text>
+    <text x="470" y="216"><tspan class="en">menus untouched</tspan><tspan class="zh">選單不動</tspan></text>
+    <text x="655" y="198"><tspan class="en">menus turned, picture</tspan><tspan class="zh">選單轉 180°,影像</tspan></text>
+    <text x="655" y="216"><tspan class="en">mirrored after the turn</tspan><tspan class="zh">轉完再鏡像</tspan></text>
+    <text x="655" y="234"><tspan class="en">touch follows</tspan><tspan class="zh">觸控跟著轉</tspan></text>
+  </g>
+</svg>
+<figcaption class="en">What the rear screen shows. The pink area is the picture, the line under it a
+menu item. Only the rear screen changes: HDMI and the recording are never flipped.</figcaption>
+<figcaption class="zh">背螢幕上看到的樣子。粉紅色是影像,下面那行是選單文字。只有背螢幕會變:
+HDMI 輸出與錄下的檔案都不會翻。</figcaption>
+</figure>
+
+<!-- 4. WHEN IT FLIPS -->
+<h2 id="when"><span class="en">When it flips</span><span class="zh">什麼時候翻</span></h2>
+<p class="en">Setting a value does <b>not</b> flip the screen. It flips when the camera <b>enters</b>
+that display mode.</p>
+<p class="zh">設定值<b>不會</b>讓螢幕翻轉。相機<b>切換進</b>那個顯示模式時才翻。</p>
+<figure class="dia">
+<svg viewBox="0 0 760 170" role="img" aria-labelledby="t-when">
+  <title id="t-when">Set Custom 2 to 180 in the menu: nothing changes. Press DISP into Custom 2: the screen turns. Press DISP into Custom 3: back to normal.</title>
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path class="ahead" d="M0 0L10 5L0 10z"/></marker></defs>
+  <g>
+    <rect class="step" x="10" y="20" width="200" height="110" rx="5"/>
+    <text class="lbl" x="110" y="52" text-anchor="middle"><tspan class="en">Menu: Custom 2</tspan><tspan class="zh">選單:自訂 2</tspan></text>
+    <text class="hot" x="110" y="76" text-anchor="middle">Screen Flip = 180</text>
+    <text class="sub" x="110" y="108" text-anchor="middle"><tspan class="en">screen stays as it is</tspan><tspan class="zh">螢幕不變</tspan></text>
+  </g>
+  <path class="arrow" d="M218 75H272"/>
+  <text class="sub" x="245" y="66" text-anchor="middle">DISP</text>
+  <g>
+    <rect class="step on" x="280" y="20" width="200" height="110" rx="5"/>
+    <text class="lbl" x="380" y="52" text-anchor="middle"><tspan class="en">Into Custom 2</tspan><tspan class="zh">切進自訂 2</tspan></text>
+    <text class="glyph" x="380" y="112" text-anchor="middle" transform="rotate(180 380 98)" style="font-size:44px">F</text>
+    <text class="hot" x="380" y="76" text-anchor="middle"><tspan class="en">turns 180°</tspan><tspan class="zh">翻轉 180°</tspan></text>
+  </g>
+  <path class="arrow" d="M488 75H542"/>
+  <text class="sub" x="515" y="66" text-anchor="middle">DISP</text>
+  <g>
+    <rect class="step" x="550" y="20" width="200" height="110" rx="5"/>
+    <text class="lbl" x="650" y="52" text-anchor="middle"><tspan class="en">Into Custom 3 (Off)</tspan><tspan class="zh">切進自訂 3(Off)</tspan></text>
+    <text class="glyph" x="650" y="112" text-anchor="middle" style="font-size:44px">F</text>
+    <text class="sub" x="650" y="76" text-anchor="middle"><tspan class="en">back to normal</tspan><tspan class="zh">恢復正常</tspan></text>
+  </g>
+</svg>
+<figcaption class="en">Entering a mode means: the DISP button, starting the camera, the STILL/CINE switch,
+or turning a custom off so the camera moves to the next one.</figcaption>
+<figcaption class="zh">「切換進」包括:DISP 鍵、開機、STILL/CINE 開關,或停用目前的自訂讓相機跳到下一個。</figcaption>
+</figure>
+
+<!-- 5. WHAT IS REMEMBERED -->
+<h2 id="kept"><span class="en">Eight choices, kept on the card</span><span class="zh">八個選擇,存在卡上</span></h2>
+<figure class="dia">
+<svg viewBox="0 0 520 150" role="img" aria-labelledby="t-grid">
+  <title id="t-grid">STILL and CINE each have Custom 1 to 4, each with its own choice; the fifth mode, LCD off, is never flipped</title>
+  <g class="lbl"><text x="20" y="60">STILL</text><text x="20" y="110">CINE</text></g>
+  <g class="sub" text-anchor="middle">
+    <text x="130" y="28">1</text><text x="210" y="28">2</text><text x="290" y="28">3</text><text x="370" y="28">4</text>
+    <text x="460" y="28"><tspan class="en">LCD off</tspan><tspan class="zh">LCD 關</tspan></text>
+  </g>
+  <g>
+    <rect class="step" x="95" y="38" width="70" height="34" rx="3"/><rect class="step on" x="175" y="38" width="70" height="34" rx="3"/>
+    <rect class="step" x="255" y="38" width="70" height="34" rx="3"/><rect class="step" x="335" y="38" width="70" height="34" rx="3"/>
+    <rect class="step" x="95" y="88" width="70" height="34" rx="3"/><rect class="step" x="175" y="88" width="70" height="34" rx="3"/>
+    <rect class="step on" x="255" y="88" width="70" height="34" rx="3"/><rect class="step" x="335" y="88" width="70" height="34" rx="3"/>
+  </g>
+  <g class="ui" text-anchor="middle">
+    <text x="130" y="61">Off</text><text x="210" y="61">180</text><text x="290" y="61">Off</text><text x="370" y="61">Off</text>
+    <text x="130" y="111">Off</text><text x="210" y="111">Off</text><text x="290" y="111" style="font-size:12px">180+Mir</text><text x="370" y="111">Off</text>
+  </g>
+  <g class="sub" text-anchor="middle"><text x="460" y="61">&mdash;</text><text x="460" y="111">&mdash;</text></g>
+</svg>
+<figcaption class="en">STILL and CINE each have their own Custom 1&ndash;4. The fifth display mode turns the
+screen off and is never flipped.</figcaption>
+<figcaption class="zh">STILL 與 CINE 各有自己的自訂 1–4。第五個顯示模式是關閉螢幕,不翻。</figcaption>
+</figure>
+<ul>
+  <li><span class="en">The choices are saved into <code>fpSup\40FLIP.BIN</code> itself, about a second after
+  you stop changing them, and never while recording. Nothing goes into the camera's own settings.</span>
+  <span class="zh">選擇存進 <code>fpSup\40FLIP.BIN</code> 檔案本身:停止更改約一秒後才存,錄影中不存。
+  相機自己的設定裡不寫任何東西。</span></li>
+  <li><span class="en">The row shows the choice of the custom mode you opened.</span>
+  <span class="zh">選單列顯示的是你打開的那個自訂模式的選擇。</span></li>
+</ul>
+
+<!-- 6. LIMITS -->
+<h2 id="limits"><span class="en">Limits</span><span class="zh">限制</span></h2>
+<ul>
+  <li><span class="en">Changed the custom mode you are in? Switch away and back once to see it.</span>
+  <span class="zh">改的是目前所在的自訂模式?切走再切回來一次才看得到。</span></li>
+  <li><span class="en">Plugging or unplugging HDMI puts the screen back to normal. Switch display mode once
+  to flip it again.</span><span class="zh">插拔 HDMI 會讓螢幕恢復正常。再切一次顯示模式就會翻回來。</span></li>
+  <li><span class="en">Only the rear screen. On the EVF it has no visible effect.</span>
+  <span class="zh">只作用在背螢幕。使用 EVF 時看不出效果。</span></li>
+  <li><span class="en">Other products on the same card that add menu text must come from the same generation
+  of fpSup-Merge (2026-10-07 or later); an older one is skipped at start.</span>
+  <span class="zh">同一張卡上會加選單文字的其他產品,必須是同一代 fpSup-Merge(2026-10-07 以後)做的;
+  較舊的會在開機時被略過。</span></li>
+</ul>
+
+<!-- 7. Tested / not tested -->
+<h2 id="tested"><span class="en">What is tested and what is not</span><span class="zh">測過什麼、沒測過什麼</span></h2>
+<div class="warn en"><b>This is a test build.</b> It has not been run on the camera as released.</div>
+<div class="warn zh"><b>這是測試版。</b>發布版本身還沒在相機上跑過。</div>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">tested on the camera</span><span class="zh">已在相機上測過</span></th><th><span class="en">not tested</span><span class="zh">沒測過</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">Development builds of the same design (2026-10-06/07): the row works; 180 and
+        180+Mirror flip when entering the mode and not when set.</span><span class="zh">同設計的開發版(2026-10-06/07):
+        選單列可用;180 與 180+Mirror 在切入模式時翻、設定時不翻。</span></td>
+        <td><span class="en">This release&rsquo;s own files.</span><span class="zh">本發布版的檔案本身。</span></td></tr>
+    <tr><td><span class="en">On one card with Lossless, Gyro, Open Gate 3K and RAW view: all loaded.</span>
+        <span class="zh">與 Lossless、陀螺儀、Open Gate 3K、RAW view 同卡:全部載入。</span></td>
+        <td><span class="en">Saving across a restart: the development builds never saved; fixed in this
+        release, not yet seen on the camera.</span><span class="zh">重開後保留:開發版從沒存成功;
+        本版已修,還沒在相機上看過。</span></td></tr>
+    <tr><td></td>
+        <td><span class="en">Mirror alone (picture only).</span><span class="zh">單獨 Mirror(只翻影像)。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 8. Remove -->
+<h2 id="remove"><span class="en">Remove</span><span class="zh">移除</span></h2>
+<p class="en">Delete <code>fpSup\40FLIP.BIN</code> and restart the camera; nothing was written to the camera&rsquo;s settings.</p>
+<p class="zh">刪掉 <code>fpSup\40FLIP.BIN</code> 後重開相機即可;相機設定裡沒有寫任何東西。</p>
+
+<!-- 9. Trouble -->
+<h2 id="trouble"><span class="en">If something does not work</span><span class="zh">如果有東西不能用</span></h2>
+<div class="scroll">
+<table>
+  <thead><tr><th><span class="en">what happens</span><span class="zh">發生什麼</span></th><th><span class="en">what to do</span><span class="zh">怎麼辦</span></th></tr></thead>
+  <tbody>
+    <tr><td><span class="en">No Screen Flip row on TOOLS</span><span class="zh">TOOLS 頁沒有 Screen Flip 列</span></td>
+        <td><span class="en">The card did not load, or another product on it is from an older generation.
+        See <a href="../guide.html#trouble">general problems</a>.</span><span class="zh">卡沒有載入,
+        或卡上有較舊一代的產品。見<a href="../guide.html#trouble">一般問題</a>。</span></td></tr>
+    <tr><td><span class="en">Set a value, nothing happened</span><span class="zh">設了值,沒反應</span></td>
+        <td><span class="en">Expected. Leave the menu and switch into that mode with DISP.</span>
+        <span class="zh">正常。離開選單,用 DISP 切進那個模式。</span></td></tr>
+    <tr><td><span class="en">Flip gone after plugging HDMI</span><span class="zh">插 HDMI 後翻轉不見了</span></td>
+        <td><span class="en">Switch display mode once.</span><span class="zh">切一次顯示模式。</span></td></tr>
+    <tr><td><span class="en">The camera does not respond</span><span class="zh">相機沒反應</span></td>
+        <td><span class="en">Take the battery out (USB unplugged). Bring what you saw to the
+        <a href="https://discord.gg/WVTCcpGUYC">Discord</a>.</span><span class="zh">把電池拿出來(不插 USB 線)。
+        把你看到的情況帶到 <a href="https://discord.gg/WVTCcpGUYC">Discord</a>。</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  <p><a href="../">fpSup</a> &middot; <a href="../guide.html"><span class="en">How to use fpSup</span><span class="zh">fpSup 怎麼用</span></a> &middot; <a href="../releases/fpsup-screenflip-v0.1.0test/README.txt">README.txt</a> &middot; <a href="https://discord.gg/WVTCcpGUYC">Discord</a></p>
+</footer>
+
+<script src="../assets/lang.js?v=7c49866d" defer></script>
+</body>
+</html>

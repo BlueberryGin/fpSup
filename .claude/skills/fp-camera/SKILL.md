@@ -3,6 +3,14 @@ name: fp-camera
 description: Talking to the SIGMA fp over the USB shell — starting the daemon, deploying code, asking the camera questions, running a recording test, and getting out of a freeze. Use whenever the work touches the live camera rather than the decompilation.
 ---
 
+> **設定區風險（2026-10-04 更新）**：原廠在 loader 前讀取持久設定；
+> 不支援的值可能使開機或選單失效，拔卡本身不會清除該值。使用者已指出現在有還原手段，
+> 因此不再把這類故障描述成不可恢復。上機前確認會保存的值、可能症狀及適用的還原流程；
+> 未確認還原條件時，優先把自訂狀態留在 RAM。240 fps 與 14-bit 的處理不同，
+> 詳見 `research/SETTINGS_AREA_FIRST_RULE.md`。
+> *(Stock firmware reads persistent settings before the loader. A recovery
+> method now exists; check its applicability before a live trial.)*
+
 # Working with the live fp
 
 Everything here was paid for. Where a rule has a reason, the reason is a thing
@@ -10,20 +18,9 @@ that went wrong on this camera.
 
 ## Before anything
 
-The shell talks over a Unix socket, so the daemon has to be up:
-
-```sh
-cd fpSup/fp_usb_shell
-(./fpshd >/tmp/fpshd.log 2>&1 &)          # socket /tmp/fpshd.sock
-```
-
-**But look at what is already on the socket first.** As of 2026-09-16 the daemon
-in use is `projects/fp-af-assist/diagnostics/fpshd-diag2`, not
-`fp_usb_shell/fpshd` — the user confirmed that is the newer one. It serves the
-same protocol, so `putfile.sh` works through it unchanged (`version` answered
-normally). Starting `./fpshd` on top of it would have produced the two-daemon
-`LIBUSB_ERROR_ACCESS` below, and taken the camera from whoever was already
-using it:
+The shell talks over `/tmp/fpshd.sock`. Inspect the running daemon and socket
+before starting one. A diagnostic daemon was in use on 2026-09-16, but that is
+historical evidence, not the current process identity. Check the actual owner:
 
 ```sh
 ps -o command= -p $(pgrep -f fpshd | head -1)   # which daemon, and whose project
@@ -34,14 +31,15 @@ ps -o command= -p $(pgrep -f fpshd | head -1)   # which daemon, and whose projec
 `ModuleNotFoundError: putfile` means the cwd moved; the tool resets it between
 calls more often than you expect.
 
-**Check for a daemon before starting one.** They do not replace each other --
-they compete for interface 0, and the loser gets `LIBUSB_ERROR_ACCESS`. Kill by
-PID; `pkill -f './fpshd'` has silently matched nothing and left two running
-while a third was started on top:
+**Check for a daemon before starting one.** They compete for interface 0 and
+the loser gets `LIBUSB_ERROR_ACCESS`. Inspect exact processes; if authorized
+to stop the current daemon, use its socket-level `QUIT` for clean release.
+`host/fpsh quit` forwards a firmware command and is not host `QUIT`. If a
+process must be stopped, identify the exact owned PID and verify exit before
+starting another. Do not kill every matching PID:
 
 ```sh
-pgrep -fl fpshd                      # expect nothing, or exactly one
-for p in $(pgrep -f fpshd); do kill -9 $p; done
+pgrep -fl fpshd                      # inspect identity and count
 ```
 
 Reading the state of play:
@@ -63,7 +61,9 @@ understood.
 
 ### Standing (the user's, not mine)
 
-- Every `mem read` needs explicit consent, each time, naming the addresses.
+- For a live `mem read`, name the addresses and purpose and follow the user's
+  current authorization. Honor a per-read restriction when the user has set
+  one; do not ask again for the same already-approved operation.
 - Never `dir` a clip folder. `dir \CINEMA` (the folder list) is fine.
 - Never `delCinemaDng`, `deloneimg`, `delall`.
 - Do not commit or push unless asked.
@@ -186,11 +186,9 @@ Before writing plumbing, check whether the shell already has the command.
 
 ## What this was written against
 
-The camera side is firmware Ver.5.02. The host side is `fpshd` **3.0.0**, and
-that is accurate — the daemon is unchanged since the tag `fp-usb-shell-v3.0.0`.
-The camera side and build tooling have moved a long way since without a version
-of their own, so `FPSHD_VERSION` tells you about the daemon and nothing else.
-The newest shell is local only.
+The camera side is firmware Ver.5.02. `FPSHD_VERSION` labels the host protocol;
+it does not prove which daemon binary is running or which worker/card build is
+loaded. Check the current process, source and build identity for those claims.
 
 If the shell changes, this can go stale without anything failing loudly. Check
 `FPSHD_VERSION` against this line when something here does not match what the

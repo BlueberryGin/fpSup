@@ -264,11 +264,11 @@ def trampoline():
     Assembled here rather than written in JavaScript for the same reason stage2
     is carried rather than rebuilt: the bytes a card runs should come from the
     assembler, once.  The page only appends the entry words and patches one --
-    see templates/entries.S for what that word is.
+    see asm/entries.S for what that word is.
     """
     sys.path.insert(0, str(SHELL_DIR))
     from armasm import assemble, symbols
-    src = SHELL_DIR / 'templates' / 'entries.S'
+    src = SHELL_DIR / 'asm' / 'entries.S'
     return assemble(src, []), symbols(src, [])['table']
 
 
@@ -322,7 +322,7 @@ NATIVE_UI_SECTIONS = {
     0xC0732700,  # runtime state
     0xC0732C84,  # UI code + selected-record table
     0xC0793060,  # private NBR pack
-    0xC05E5B58,  # string resolver hook
+    0xC05E5B58,  # string resolver: the hook (legacy) or its stock word (nested strings)
     0xC05E84D8,  # NBR loader hook
     0xC05E6400,  # NBU record hook
 }
@@ -763,7 +763,7 @@ def read_cap():
     What survives is a size: the loader reads at most MAXLEN bytes.
     """
     import re
-    src = (ROOT / 'fpSup' / 'fp_usb_shell' / 'templates' / 'loader.S').read_text()
+    src = (ROOT / 'fpSup' / 'fp_usb_shell' / 'asm' / 'loader.S').read_text()
     eq = dict(re.findall(r'\.equ\s+(\w+)\s*,\s*(0x[0-9A-Fa-f]+|\d+)', src))
     return int(eq['MAXLEN'], 0)
 

@@ -17,7 +17,7 @@ import putfile as P; print('0x%08X' % (P.mem_get(0xC3757A7C)[0] + 0x6000 + 0x7C)
 cd "$SHELL_DIR"
 ./load.py "$HERE/logger.S" \
     --entry gyro_hook --hook 0xC00D0794 \
-    --park-state "$PARK" --park-stub templates/park.S \
+    --park-state "$PARK" --park-stub asm/park.S \
     --park-resume writer_resume "$@"
 
 # The Gyroflow lens profile, as text, in the twelve kilobytes at the top of the

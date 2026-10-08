@@ -95,6 +95,30 @@ if HOOK_ARMED != 0xEB00333F:
     raise AssertionError(f"unexpected hook encoding 0x{HOOK_ARMED:08X}")
 
 
+def configure_placement(code: int, state: int, state_words: int = None) -> dict:
+    """Point this module at claimed addresses instead of the fixed defaults.
+
+    Every routine here reads CODE/STATE/HOOK_ARMED as module globals, and a
+    tool run is one process, so rebinding them once before anything is armed
+    keeps the reviewed arming transaction intact rather than threading an
+    address through twenty call sites. Call this before arming, never while a
+    probe is live: the restore path has to name the same site it armed.
+    """
+    global CODE, STATE, STATE_WORDS, HOOK_ARMED
+    if code & 3 or state & 3:
+        raise ProbeError("claimed placement must be word aligned")
+    if state_words is not None and state_words < STATE_WORDS:
+        raise ProbeError(
+            f"state block of {state_words} words is smaller than the "
+            f"{STATE_WORDS} this transaction records")
+    CODE = code
+    STATE = state
+    if state_words is not None:
+        STATE_WORDS = state_words
+    HOOK_ARMED = arm_bl(HOOK_SITE, code)
+    return {"code": CODE, "state": STATE, "armed_word": HOOK_ARMED}
+
+
 def load_assembler(fpsup: pathlib.Path) -> tuple[Callable[[pathlib.Path], bytes], Callable]:
     module_path = fpsup / "fp_usb_shell" / "armasm.py"
     if not module_path.is_file():

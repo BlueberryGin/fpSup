@@ -81,9 +81,10 @@ def latest():
                       f'so it is not on the site', file=sys.stderr)
             continue
         # Either name: a build writes fpSup.BIN, and every release published
-        # before 2026-09-19 carries VSHL.BIN as frozen bytes.
+        # before 2026-09-19 carries VSHL.BIN as frozen bytes.  A Loader v3
+        # release (tools/release_v3.py) carries fpSup/LOADER.BIN instead.
         if not (d / 'AutoRun.txt').exists() or not any(
-                (d / n).exists() for n in ('fpSup.BIN', 'VSHL.BIN')):
+                (d / n).exists() for n in ('fpSup.BIN', 'VSHL.BIN', 'fpSup/LOADER.BIN')):
             print(f'  skipping {d.name}: needs AutoRun.txt and the payload',
                   file=sys.stderr)
             continue

@@ -76,6 +76,7 @@ def bind(lib):
                      ct.c_uint32, ct.POINTER(Output)],
         'handoff': [ct.POINTER(Pipeline), ct.POINTER(Token), Handoff, ct.c_void_p],
         'stop': [ct.POINTER(Pipeline)],
+        'cancel_held': [ct.POINTER(Pipeline), ct.POINTER(Token), ct.c_uint32],
         'reap': [ct.POINTER(Pipeline), ct.POINTER(Token), ct.c_uint32, ct.c_uint32],
         'finish': [ct.POINTER(Pipeline), ct.c_uint32],
     }
@@ -403,6 +404,59 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(h.call('reap', ct.byref(f.token), 0, 1), BUSY)
         self.assertEqual(h.call('finish', 1), BUSY)
 
+    def cancel_held_scenario(self, lib):
+        h = Harness(lib)
+        f = h.frame(1)
+        self.assertEqual(h.arrive(f), (OK, SELECTED))
+        self.assertEqual(h.call('stop'), OK)
+        self.assertEqual(h.call('cancel_held', ct.byref(f.token), 1), OK)
+        self.assertEqual((h.p.phase, h.p.fault, h.p.active, h.p.stopping), (FREE, 0, 1, 1))
+        self.assertEqual(bytes(h.p.lease), bytes(Lease()))
+        self.assertEqual(bytes(h.p.output), bytes(Output()))
+        self.assertEqual(h.call('cancel_held', ct.byref(f.token), 1), INVALID)
+        self.assertEqual(h.call('finish', 1), OK)
+        self.assertEqual(h.call('begin'), OK)
+        self.assertEqual(h.p.take, 2)
+        self.assertEqual(h.arrive(h.frame(1)), (OK, SELECTED))
+
+    def test_cancel_never_submitted_held_lease_allows_the_next_take(self):
+        self.cancel_held_scenario(self.lib)
+
+    def cancel_proof_scenario(self, lib):
+        h = Harness(lib)
+        f = h.frame(1)
+        self.assertEqual(h.arrive(f), (OK, SELECTED))
+        for resolved in (0, 2):
+            before = bytes(h.p)
+            self.assertEqual(h.call('cancel_held', ct.byref(f.token), resolved), BUSY)
+            self.assertEqual(bytes(h.p), before)
+        for field in ('session', 'take', 'frame'):
+            bad = Token(f.token.session, f.token.take, f.token.frame)
+            setattr(bad, field, getattr(bad, field) + 1)
+            before = bytes(h.p)
+            self.assertEqual(h.call('cancel_held', ct.byref(bad), 1), INVALID)
+            self.assertEqual(bytes(h.p), before)
+        # Cancellation resolves this unstarted lease, not any existing fault.
+        h.p.fault = 55
+        self.assertEqual(h.call('cancel_held', ct.byref(f.token), 1), OK)
+        self.assertEqual((h.p.phase, h.p.fault, h.p.stopping), (FREE, 55, 0))
+
+    def test_cancel_held_requires_exact_identity_and_native_resolution(self):
+        self.cancel_proof_scenario(self.lib)
+
+    def cancel_phase_scenario(self, lib):
+        for phase in (FREE, ENCODING, READY, COMMITTING, RETAINED, READY_RAW):
+            h = Harness(lib)
+            f = h.frame(1)
+            self.assertEqual(h.arrive(f), (OK, SELECTED))
+            h.p.phase = phase
+            before = bytes(h.p)
+            self.assertEqual(h.call('cancel_held', ct.byref(f.token), 1), INVALID)
+            self.assertEqual(bytes(h.p), before)
+
+    def test_cancel_held_cannot_release_started_or_retained_work(self):
+        self.cancel_phase_scenario(self.lib)
+
     def test_stop_drains_existing_job_then_restarts_with_fresh_take(self):
         h = Harness(self.lib)
         f = h.select()
@@ -568,6 +622,17 @@ class PipelineTests(unittest.TestCase):
              '/* deliberately allow callback reentry */', self.reentrant_scenario),
             ('no-benefit-fault', 'p->phase = FPL_SLOT_READY_RAW;\n        return FPL_OK;',
              'return retain(p, FPL_INVALID);', self.no_benefit_scenario),
+            ('cancel-without-resolution', 'if (resolved != 1) return FPL_BUSY;',
+             '(void)resolved;', self.cancel_proof_scenario),
+            ('cancel-started-work',
+             'if (!ours(p, t) || p->phase != FPL_SLOT_HELD) return FPL_INVALID;\n'
+             '    if (resolved != 1)',
+             'if (!ours(p, t)) return FPL_INVALID;\n    if (resolved != 1)',
+             self.cancel_phase_scenario),
+            ('cancel-clears-fault',
+             'if (resolved != 1) return FPL_BUSY;\n    clear_slot(p);',
+             'if (resolved != 1) return FPL_BUSY;\n    p->fault = 0; clear_slot(p);',
+             self.cancel_proof_scenario),
         ]
         for name, old, new, scenario in mutations:
             with self.subTest(mutation=name):

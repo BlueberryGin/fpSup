@@ -10,7 +10,7 @@ first costs nothing when they are wrong.
 import argparse, sys
 
 from armasm import assemble
-from putfile import sh, mem_set, mem_get, put, CODE, CODE_END, P, ECHO_SLOT, ECHO_ORIG, HERE
+from putfile import sh, mem_set, mem_get, put, set_echo_handler, CODE, CODE_END, P, ECHO_SLOT, ECHO_ORIG, HERE
 
 P_FN, P_R0, P_R1, P_R2, P_R3, P_R10, P_RET, P_DONE, P_R4, P_R5 = (
     0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24)
@@ -22,22 +22,32 @@ _loaded = [False]
 def call(fn, r0=0, r1=0, r2=0, r3=0, r4=0, r5=0, r10=0, verbose=True):
     """Run `fn` once.  Returns (returned_ok, value)."""
     if not _loaded[0]:
-        code = assemble(HERE / 'templates' / 'callfn.S', [f'P=0x{P:08X}'])
+        code = assemble(HERE / 'asm' / 'callfn.S', [f'P=0x{P:08X}'])
         if CODE + len(code) > CODE_END:
             raise SystemExit('callfn does not fit')
         put(CODE, code, 'callfn')
         _loaded[0] = True
 
-    for off, val in ((P_FN, fn), (P_R0, r0), (P_R1, r1), (P_R2, r2),
-                     (P_R3, r3), (P_R4, r4), (P_R5, r5), (P_R10, r10),
-                     (P_RET, 0), (P_DONE, 0)):
-        mem_set(P + off, val & 0xFFFFFFFF)
+    # mem set drops whole commands without saying so.  A dropped P_FN leaves
+    # whatever was there -- zero in a fresh claim -- and the echo jumps to it:
+    # that froze the shell on 2026-10-06.  Nothing is armed until every
+    # parameter word reads back.
+    want = {P_FN: fn, P_R0: r0, P_R1: r1, P_R2: r2, P_R3: r3, P_R10: r10,
+            P_RET: 0, P_DONE: 0, P_R4: r4, P_R5: r5}
+    for _ in range(8):
+        for off, val in want.items():
+            mem_set(P + off, val & 0xFFFFFFFF)
+        got = mem_get(P, 10)
+        if all(got[off // 4] == (val & 0xFFFFFFFF) for off, val in want.items()):
+            break
+    else:
+        raise SystemExit(f'callfn parameters did not stick at 0x{P:08X}: {got}')
 
-    mem_set(ECHO_SLOT, CODE)
+    set_echo_handler(CODE)
     try:
         sh('echo', retries=0)
     finally:
-        mem_set(ECHO_SLOT, ECHO_ORIG)
+        set_echo_handler(ECHO_ORIG)
 
     st = mem_get(P + P_RET, 2)
     ret, done = (st + [None, None])[:2]

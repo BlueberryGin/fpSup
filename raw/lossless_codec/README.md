@@ -1,30 +1,59 @@
 # FHD hardware lossless-JPEG probe suite
 
+**Current entry, 2026-09-30:**
+[`PROGRESS_20260930.md`](../../../projects/lossless-sup/notes/PROGRESS_20260930.md).
+The status/commands below are historical. A synchronous probe wrote decodable
+DNGs on 9/29; a separate async experiment completed against owned synthetic
+input. Neither certifies the current integrated async/native-source/callback
+version. Source lifetime across batch flush, earlier-image/later-file identity,
+source-tail coverage and release still need closure. Do not bypass
+ownership gates or treat manually supplied handles as owned buffers.
+
+Builds follow [`SUP_BUILD_RULES.md`](../../SUP_BUILD_RULES.md). Notify the user
+before any camera test and obtain authorization for that run.
+
+**9/30 implementation update:** `inline_compress_driver.py arm` and direct
+`arm()` now refuse before any camera operation; there is no unsafe override.
+The old probe is retained as historical source, not a deployment route. Status
+now separates processed steps (`S_DONE`) from actual writebacks (`S_LATE`), and
+does not treat end-position, SOI or file length alone as decode/lossless proof.
+`test_native_writer_contract.py` executes the stock writer branches: a zero
+flush result is failure, observers do exist, and frame+0x1030 is a pathname,
+not a persistent writer. The original late-submit ledger is preserved with
+corrections in PROGRESS §10. New adaptive policy lives in `../../lossless/`;
+it still has no native adapter. No camera operation or installable build was
+performed in this increment.
+
 This directory keeps the staged SIGMA fp 5.02 experiments for connecting the
 live FHD CinemaDNG writer to the camera's fixed-function lossless-JPEG codec.
 It is a research probe suite, not a recording patch and not a flashable
 firmware image.
 
+Current product verdict, evidence corrections and research gates live in
+[`PROGRESS_20260930.md`](../../../projects/lossless-sup/notes/PROGRESS_20260930.md).
+Some detailed runbook text below is a historical description of the staged
+fixed-address probes; do not treat it as current memory ownership guidance.
+
 | Phase | Camera status | What it establishes |
 |---|---|---|
 | Exact writer arguments | **Passed, 2026-08-31** | The live writer seam and its FHD segment are identified |
 | Power/clock preflight | **Passed, 2026-08-31** | The exact writer task can balance the required domains while the codec is idle |
-| Scratch allocation | **Offline-verified; not yet run on camera** | A guarded, aligned 4 MiB DMA layout can be prepared |
-| Encode and measure | **Armable, never yet run on camera** | Consumes and frees the retained scratch; reports elapsed microseconds, per-tile sizes and release state |
+| Scratch allocation | **Passed live, 2026-09-21** | A guarded, aligned 4 MiB DMA allocation completed on camera; current output-capacity bound remains unsafe for unknown expansion |
+| Encode and measure | **Passed live one-shot and 8-frame burst, 2026-09-21** | Movie-path encode-to-RAM completed; output was discarded, actual tile was 512×512, and this is not sustained writer/card proof |
 | Exact final flush | **Offline-verified; not yet run on camera** | One-shot read-only capture of the completed writer list and synchronous flush result |
 
-The hardware codec exists and is reachable, and its stills-path rate is
-measured: 169.7 Mpix/s from one real 24.51 Mpix capture on 2026-08-30 (see
-`research/imaging-hw/notes/HW_LOSSLESS_JPEG_CODEC.md`). That is 3.4x the
-50 Mpix/s FHD 24p needs and short of the 199 Mpix/s UHD 24p needs. One sample,
-one busy scene; the spread is unmeasured. What this directory still has to
-establish is that the same engine can be driven **from inside the movie writer
-context** — never yet done — and sustained there frame after frame.
+The hardware codec has now completed one live movie-path encode and a short
+eight-frame burst. The measured `F_ENC` latency was 18.146 ms for the one-shot
+and 18.138–18.229 ms for the burst. Those values exclude init, size query,
+header construction, writer work and SD flush. The live probe used 512×512
+tiles; the 512×368 product target is not yet live-validated. The next blockers
+are safe output capacity, corrected tile-height wiring, exact flush timing,
+expanded-header writer integration and sustained end-to-end recording.
 
-中文摘要：已實機確認 FHD writer 交接點，以及該 task 能安全開關 codec 所需的
-power/clock；4 MiB scratch 與單張 encode 都已可上機安裝，但兩者都還沒真正跑過。
-靜態路徑的速度已量到 169.7 Mpix/s（FHD 24p 有 3.4 倍餘裕），錄影路徑則未知。
-這組工具只改 RAM，並不是未簽章 `.bin` 或可刷寫韌體。
+中文摘要：movie writer context 的單幀 encode-to-RAM 與 8-frame short burst 已實機成功，
+但輸出仍被丟棄，並未寫出 compressed DNG。18.138–18.229 ms 只量 `F_ENC`；正式
+512×368、最壞輸出容量、header/writer、SD flush、長跑與回放仍未成立。這組工具只改 RAM，
+並不是未簽章 `.bin` 或可刷寫韌體。
 
 ## Contents
 
@@ -34,7 +63,7 @@ power/clock；4 MiB scratch 與單張 encode 都已可上機安裝，但兩者�
 | `exact_writer_power_preflight.S` | Balance power and clock from the exact live writer context without calling the codec |
 | `exact_writer_scratch_preflight.S` | Allocate and guard the proposed 4 MiB DMA layout without calling the codec |
 | `single_frame_codec_probe.py` | Enforce the staged preconditions and keep live encode disabled |
-| `single_frame_encode_discard_probe.S` | PHASE=0/1 the reviewed offline design; PHASE=2 the armable consume-and-free encode |
+| `single_frame_encode_discard_probe.S` | PHASE=0/1 historical staged designs; PHASE=2 live one-shot consume-and-free; PHASE=3 bounded multi-frame encode burst |
 | `exact_flush_writer_probe.py` / `.S` | Guarded one-shot probe at the final SD flush; observes the exact writer/list shape without modifying it |
 | `test_*.py` | Verify assembly bounds, hook transaction order, proof gates, cleanup policy, and dry-run refusal |
 
@@ -74,7 +103,9 @@ Build and inspect without touching the camera:
 ./exact_dng_writer_probe.py arm --dry-run
 ```
 
-Live sequence, after `fpshd` is connected and `fpsh ping` works:
+The following fixed-address live sequence is retained as a historical transcript,
+not current deployment guidance. It must not be run without a reviewed dynamic
+cave lease, current cache-publication path and explicit camera-operation approval:
 
 ```sh
 ./exact_dng_writer_probe.py arm
@@ -160,10 +191,11 @@ segment. A complete result leaves `0x434F4C41` (`ALOC`) at `+0xD8`.
 
 If the scratch phase succeeds, the allocation is intentionally retained. The
 installer refuses another power or scratch preflight while it is retained,
-preventing a second 4 MiB allocation or loss of the only handle. A live
-encode/free consumer is **not implemented yet**; after a live scratch test,
-record the status and power-cycle the camera to reclaim the allocation. Do not
-load another template in between.
+preventing a second 4 MiB allocation or loss of the only handle. At the time
+this staged runbook was written, a live encode/free consumer did not exist;
+PHASE=2 and PHASE=3 now do, and their 2026-09-21 evidence supersedes that old
+status. The fixed-address sequence below remains historical and is not the
+approved next-run procedure.
 
 The common installer retains the exact probe's safety properties:
 
@@ -207,7 +239,8 @@ killed on 2026-08-30:
 `S_ENC_STARTED` is written *before* the call, so a hang that never returns is
 still visible in the state block afterwards.
 
-Live sequence, one stage per armed recording, after `fpsh ping` works:
+Historical fixed-address sequence, preserved only to explain the evidence
+provenance; do not execute it as a current runbook:
 
 ```sh
 ./single_frame_codec_probe.py preflight     # PPWR
@@ -224,7 +257,7 @@ Live sequence, one stage per armed recording, after `fpsh ping` works:
 `status` decodes a finished PHASE=2 result into elapsed microseconds (the tick
 is a free-running 1 MHz counter, so a wrap is a plain 32-bit subtraction),
 Mpix/s against the 41,708 us 24p frame budget, the summed compressed size and
-ratio, the twelve tile sizes, whether the source DNG was left byte-identical,
+ratio, the twelve tile sizes, whether the sampled source markers were unchanged,
 and whether the block was released. **One frame is not sustained throughput**,
 and a rate derived from a single tile set is not a worst case.
 
