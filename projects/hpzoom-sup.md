@@ -59,10 +59,13 @@ are captured in colour.
 - 16/16 emulated tests, including power-off write-back and chaining under and
   over another sup; a deliberate one-line mutation (`EVT_OK` 0x1C→0x1D) is
   caught.
-- On camera: the same logic (as the v2-style HpZoom card) daily-driven —
-  half-press magnify/unmagnify, B&W while magnified, colour captures, MF/AF
-  and AutoMag gating all verified live. The v3 sup build's own camera run is
-  reported in the PR description.
+- On camera (firmware 5.02): boot, half-press magnify/unmagnify, B&W while
+  magnified, colour still while magnified, and clean power-off/reboot verified
+  on the standalone test card from `build_v3_hpzoom.py --card`
+  (`20HPZOOM.BIN`, 1504 bytes, SHA-256
+  `2119f4fa364430238218ae1eb86d244ed121dda841e09bcea60b5121fa02d705`).
+  The same logic as the older v2-style HpZoom card has been daily-driven
+  longer: MF/AF and AutoMag gating verified live there.
 
 ### Not done
 
@@ -116,9 +119,12 @@ are captured in colour.
 
 - 16/16 模擬測試通過,含關機寫回、與其他 sup 的上下疊層;刻意改錯一行
   (`EVT_OK` 0x1C→0x1D)會被測試抓到。
-- 上機:相同邏輯的 v2 版本(HpZoom 卡)已日常使用——半按放大/取消、放大時黑
-  白、彩色拍攝、MF/AF 與自動放大的門檻皆已在實機驗證。v3 sup 本身的實機結果
-  記錄於 PR 說明。
+- 上機(韌體 5.02):以 `build_v3_hpzoom.py --card` 產生的獨立測試卡驗證開機、
+  半按放大/取消、放大時黑白、放大中拍攝仍為彩色、關機寫回與重新開機
+  (`20HPZOOM.BIN`,1504 bytes,SHA-256
+  `2119f4fa364430238218ae1eb86d244ed121dda841e09bcea60b5121fa02d705`)。
+  相同邏輯的 v2 版本(HpZoom 卡)已更長時間日常使用,MF/AF 與自動放大的
+  門檻皆在實機驗證。
 
 ### 尚未完成
 
