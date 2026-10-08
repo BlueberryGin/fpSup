@@ -145,6 +145,11 @@ tbody tr.hl td:first-child{font-style:normal}
 .pair .pair-k{font-family:var(--mono); font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; color:var(--sig); margin:0}
 .pair .pair-t{font-weight:600; font-size:1.05rem}
 @media (max-width:560px){ .pair{grid-template-columns:1fr} }
+/* The Gyroflow wordmark (gyroflow/gyroflow resources/logo_black.svg), drawn in the
+   text colour so it follows the theme. */
+.gf-logo{display:inline-block; width:7.1em; height:1.7em; vertical-align:-.48em; background:currentColor;
+  -webkit-mask:url(gyroflow-logo.svg) no-repeat left center/contain; mask:url(gyroflow-logo.svg) no-repeat left center/contain}
+.pair-t .gf-logo{color:var(--ink)}
 
 /* ---- tabs (no script): radio + label row, one panel shown -------------- */
 /* Inputs, labels and .tab panels are siblings, in the same order. */
