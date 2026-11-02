@@ -26,8 +26,9 @@ sys.path.insert(0, str(V3.parent))
 
 import test_v3 as T                                       # noqa: E402
 import build_v3_lexpo as L                                # noqa: E402
+import build_v3 as B                                      # noqa: E402
 
-from armasm import symbols                                # noqa: E402
+from armasm import assemble, symbols                      # noqa: E402
 from unicorn.arm_const import (UC_ARM_REG_SP, UC_ARM_REG_LR,   # noqa: E402
                                UC_ARM_REG_R0, UC_ARM_REG_R1)
 
@@ -142,10 +143,39 @@ class LExpoV3Tests(unittest.TestCase):
     # ---- the one-shot LV hook ----------------------------------------------
     def test_first_lv_frame_calls_the_wrapper_once_after_the_patch(self):
         cam = self.boot()
+        armed = cam.w(SITE_LV)                               # bl veneer
+        n = len(cam.calls)
         self.fire_lv(cam)
         self.assertEqual(cam.wraps, [(CTRL, 1, PATCHED)])
+        # self-disarm: stock word back, then D-cache clean -> I-cache invalidate
+        self.assertEqual(cam.w(SITE_LV), STOCK_LV)
+        self.assertEqual([c for c in cam.calls[n:] if c in ('DCACHE', 'ICACHE')],
+                         ['DCACHE', 'ICACHE'])
+        # lv_done still suppresses a second run if the site is armed again
+        cam.mu.mem_write(SITE_LV, struct.pack('<I', armed))
         self.fire_lv(cam)
         self.assertEqual(cam.wraps, [(CTRL, 1, PATCHED)])    # one-shot
+
+    def test_a_wrong_patch_word_at_the_site_keeps_the_hook_unarmed(self):
+        """The runtime guard: if 0xC007F324 does not hold this build's word --
+        another sup changed it, the firmware is unknown, or the patch did not
+        apply -- inner_entry claims nothing and arms nothing.  The sup still
+        loads and returns normally."""
+        inner = assemble(HERE.parent / 'lexpo' / 'lexpo_inner.S')
+        entry = symbols(HERE.parent / 'lexpo' / 'lexpo_inner.S')['inner_entry']
+        sup = B.patch_sup('LXPO', [], inner, entry, version=L.VERSION)
+        for wrong in (STOCK, OTHER_WORD):                # patch missing / rival word
+            with self.subTest(word=f'0x{wrong:08X}'):
+                files, dirs = T.card(('30LEXPO.BIN', sup))
+                cam = LExpoCamera(files, dirs, stale={SITE: wrong})
+                r0, sp = cam.boot()
+                self.assertEqual(sp, T.STACK - 0x1004)
+                self.assertEqual(cam.misaligned, [])
+                self.assertEqual(self.outcome(cam), 'LOADED')
+                self.assertEqual(cam.w(SITE), wrong)         # untouched, not repaired
+                self.assertEqual(cam.w(SITE_LV), STOCK_LV)   # hook never armed
+                self.assertEqual(cam.journal(), [])          # nothing claimed/written
+                self.assertEqual(cam.wraps, [])
 
     def test_hook_replays_the_displaced_instruction(self):
         """The applier's frame must still shrink by 0x64: after the hook
