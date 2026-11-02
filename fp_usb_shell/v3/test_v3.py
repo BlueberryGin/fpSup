@@ -32,7 +32,15 @@ CAVE_LOW = cave.CAVE_ARENA - 0x200
 HEAP, HEAP_SIZE = 0x45000000, 0x00800000
 STACK = 0x46000000
 DONE = 0x47000000
+PATHBUF = DONE + 0x200
 STAGING_GARBAGE = 0xDE
+
+SL_NOT_FOUND, SL_BUSY, SL_NOT_LAST = -4, -5, -6
+SL_BADARG = -3
+
+
+def s32(v):
+    return v - 0x100000000 if v & 0x80000000 else v
 
 F = dict(F_MGR=0xC0444658, F_VOL=0xC0444698, F_CTOR=0xC0365E90, F_OPEN=0xC0365FB0,
          F_READ=0xC0366060, F_CLOSE=0xC0366020, F_DTOR=0xC0365ED0,
@@ -52,17 +60,25 @@ SITE_A, SITE_B, SITE_C = 0xC050D4C8, 0xC03790B8, 0xC038C484
 NOP = 0xE1A00000
 
 # struct state, mirrored from sloader.c (checked by test_state_layout).
-SVC_BYTES = 44                       # version 3: + holder, self, done_at_start
-O_POFF, O_HEAP, O_JBASE, O_JCUR = 44, 56, 60, 64
-O_NCLAIMS = 72
-O_CLAIMS, CLAIM_BYTES, MAX_CLAIMS = 88, 12, 768
+SVC_BYTES = 56                       # version 6: + release, load_one, reload
+O_POFF, O_HEAP, O_JBASE, O_JCUR = 56, 68, 72, 76
+O_NCLAIMS = 84
+O_CLAIMS, CLAIM_BYTES, MAX_CLAIMS = 100, 12, 768
 O_NSUPS = O_CLAIMS + CLAIM_BYTES * MAX_CLAIMS
-O_SUPS, SUP_BYTES, MAX_SUPS = O_NSUPS + 4, 100, 32
+O_SUPS, SUP_BYTES, MAX_SUPS = O_NSUPS + 4, 112, 32
 O_NLOG = O_SUPS + SUP_BYTES * MAX_SUPS
 O_LOG, LOG_BYTES = O_NLOG + 4, 32
+O_RUNNING = O_LOG + LOG_BYTES * 96
+# struct sup fields, after name[40] id block state path[48]:
+O_SUP_ID, O_SUP_BLOCK, O_SUP_STATE = 40, 44, 48
+O_SUP_JMARK, O_SUP_CMARK, O_SUP_BLOCK_SIZE = 100, 104, 108
 L = {1: 'START', 2: 'NO_DIR', 3: 'SKIP_NAME', 4: 'TOO_MANY', 5: 'OPEN_FAIL',
      6: 'BAD_HEADER', 7: 'DUP_ID', 8: 'NO_MEMORY', 9: 'SHORT_READ', 10: 'LOADED',
-     11: 'RELEASED', 12: 'REPAIRED', 13: 'SUP', 14: 'DONE', 15: 'NO_POFF', 16: 'CONFLICT'}
+     11: 'RELEASED', 12: 'REPAIRED', 13: 'SUP', 14: 'DONE', 15: 'NO_POFF',
+     16: 'CONFLICT', 17: 'LISTED', 18: 'CLAIM', 19: 'DISABLED',
+     20: 'UNLOAD', 21: 'HOTLOAD'}
+# struct sl_svc (no button in the plain v3 build): release, load_one, reload.
+SVC_RELEASE, SVC_LOAD_ONE, SVC_RELOAD = 44, 48, 52
 
 
 def word(img, a):
@@ -104,6 +120,9 @@ class Camera:
         self.by_addr = {v: k for k, v in F.items()}
         self.now = 1_400_000
         self.error = None
+        self.fail_mem = False                    # simulate a failed resident alloc
+        self.fail_mem_at = None                  # or fail exactly one MEM_GET call
+        self.mem_get_calls = 0
         mu.hook_add(UC_HOOK_CODE, self._safe_hook)
 
     # --- plumbing ---------------------------------------------------------
@@ -173,6 +192,9 @@ class Camera:
         if name == 'MEM_HEAP':
             return self._ret(0x1234 if r0 == 0 else 0)
         if name == 'MEM_GET':
+            self.mem_get_calls += 1
+            if self.fail_mem or self.mem_get_calls == self.fail_mem_at:
+                return self._ret(0)
             return self._ret(self._alloc(r1))
         if name == 'MEM_FREE':
             self.freed.append(r1)
@@ -294,6 +316,26 @@ class Camera:
         vtbl = self.w(obj)
         return self.call(self.w(vtbl + 0xC), r0=obj, r1=4)
 
+    def sup(self, i, off):
+        return self.w(self.state() + O_SUPS + SUP_BYTES * i + off)
+
+    def svc(self, off, arg):
+        """Call one of the loader's service functions (version 5)."""
+        st = self.state()
+        fn = self.w(st + off)
+        assert fn, f'service at +{off} is null'
+        return self.call(fn & ~1, r0=st, r1=arg, thumb=bool(fn & 1))[0]
+
+    def release(self, sup_id):
+        return self.svc(SVC_RELEASE, sup_id)
+
+    def load_one(self, path):
+        self.mu.mem_write(PATHBUF, path.encode() + b'\0')
+        return self.svc(SVC_LOAD_ONE, PATHBUF)
+
+    def reload(self, sup_id):
+        return self.svc(SVC_RELOAD, sup_id)
+
 
 def card(*sups, extra=(), order=None):
     """{path: bytes} and {dir: [(name, attr, size)]}, in directory order."""
@@ -385,7 +427,7 @@ class LoaderV3Tests(unittest.TestCase):
         self.assertEqual([j[0] for j in cam.journal()], [SITE_A])
         self.assertEqual(cam.w(cam.state() + O_NCLAIMS), 1)
         st = cam.state()
-        blocks = [cam.w(st + O_SUPS + SUP_BYTES * i + 44) for i in range(2)]
+        blocks = [cam.sup(i, O_SUP_BLOCK) for i in range(2)]
         self.assertEqual(blocks[1], 0)
         self.assertGreater(len(cam.freed), 0)
 
@@ -590,12 +632,344 @@ class LoaderV3Tests(unittest.TestCase):
         self.assertEqual(cam.w(B.SL_SVC_AT), 0, 'SL_SVC_AT after the load')
         self.assertNotEqual(cam.w(B.SL_SVC_AT - 4), 0x1234, 'LOAD_DONE_US written at the end')
 
+    # --- service version 5/6: release / load_one / reload ------------------
+    TSTA, LXPO, NOPX = (struct.unpack('<I', b'TSTA')[0], struct.unpack('<I', b'LXPO')[0],
+                        struct.unpack('<I', b'NOPX')[0])
+
+    def hot_card(self):
+        """10A patches SITE_A; 30LEXPO is the LExpo shape: one exclusive patch
+        (SITE_B) and one CHAIN hook site (SITE_C).  30LEXPO sorts last, so it is
+        the LIFO top."""
+        early = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        late = test_sup('LXPO', self.rows((SITE_B, 2, NOP), (SITE_C, 1, NOP)))
+        return card(('10A.BIN', early), ('30LEXPO.BIN', late))
+
+    def test_release_last_sup_restores_its_sites_and_books(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (NOP, NOP, NOP))
+        self.assertEqual([j[0] for j in cam.journal()], [SITE_A, SITE_B, SITE_C])
+        self.assertEqual(cam.w(cam.state() + O_NCLAIMS), 3)
+        blk = cam.sup(1, O_SUP_BLOCK)
+        self.assertNotEqual(blk, 0)
+        self.assertEqual(s32(cam.release(self.LXPO)), 0)
+        # its two sites are stock; the earlier sup's is not touched
+        self.assertEqual(cam.w(SITE_A), NOP)
+        self.assertEqual(cam.w(SITE_B), self.stock[SITE_B])
+        self.assertEqual(cam.w(SITE_C), self.stock[SITE_C])
+        self.assertEqual([j[0] for j in cam.journal()], [SITE_A])
+        self.assertEqual(cam.w(cam.state() + O_NCLAIMS), 1)
+        self.assertEqual(cam.sup(1, O_SUP_BLOCK), 0)
+        self.assertEqual(cam.sup(1, O_SUP_BLOCK_SIZE), 0)
+        self.assertNotEqual(cam.sup(1, O_SUP_STATE), 0)          # SL_RELEASED
+        self.assertIn(blk, cam.freed)
+        self.assertNotEqual(cam.sup(0, O_SUP_BLOCK), 0)          # A untouched
+        self.assertEqual(cam.sup(0, O_SUP_STATE), 0)             # SL_KEEP
+        self.assertEqual([r for r in cam.log() if r[0] == 'UNLOAD'],
+                         [('UNLOAD', self.LXPO, blk, '30LEXPO.BIN')])
+        # the card's log has it too (code 0x14 = 20)
+        lines = cam.written['\\fpSup\\LOAD.LOG'].decode().rstrip(' \n').split('\n')
+        self.assertTrue(any(l.startswith('14 ') and l.endswith('30LEXPO.BIN')
+                            for l in lines), lines)
+
+    def test_load_one_reloads_the_last_sup_without_resetting_the_cave(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        old = cam.sup(1, O_SUP_BLOCK)
+        nsups = cam.w(cam.state() + O_NSUPS)
+        self.assertEqual(s32(cam.release(self.LXPO)), 0)
+        cam.put(cave.CAVE_BUMP, cave.CAVE_ARENA + 0x40)
+        self.assertEqual(s32(cam.load_one('\\fpSup\\30LEXPO.BIN')), 0)
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (NOP, NOP, NOP))
+        self.assertEqual(cam.w(cam.state() + O_NSUPS), nsups)    # slot reused
+        new = cam.sup(1, O_SUP_BLOCK)
+        self.assertNotEqual(new, 0)
+        self.assertNotEqual(new, old)                            # a fresh block
+        self.assertIn(old, cam.freed)
+        self.assertEqual(cam.w(cave.CAVE_BUMP), cave.CAVE_ARENA + 0x40)
+        hot = [r for r in cam.log() if r[0] == 'HOTLOAD']
+        self.assertEqual(len(hot), 1)
+        self.assertEqual(hot[0][1], new)
+        self.assertEqual([j[0] for j in cam.journal()],
+                         [SITE_A, SITE_B, SITE_C])
+        self.assertEqual(cam.sup(1, O_SUP_STATE), 0)
+
+    def test_ten_release_reload_cycles_stay_bounded(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        nsups = cam.w(cam.state() + O_NSUPS)
+        allocs = len(cam.allocs)
+        for i in range(10):
+            self.assertEqual(s32(cam.release(self.LXPO)), 0, f'cycle {i} release')
+            self.assertEqual(s32(cam.load_one('\\fpSup\\30LEXPO.BIN')), 0,
+                             f'cycle {i} reload')
+            self.assertEqual(cam.w(cam.state() + O_NSUPS), nsups)
+            self.assertEqual(cam.w(cave.CAVE_BUMP), cave.CAVE_ARENA)
+            self.assertEqual(cam.sup(1, O_SUP_STATE), 0)
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (NOP, NOP, NOP))
+        self.assertFalse([r for r in cam.log() if r[0] == 'NO_MEMORY'])
+        # scratch, sup block, and two log buffers per operation; all but the
+        # sup block are freed, and the sup table never grew.
+        self.assertLessEqual(len(cam.allocs) - allocs, 10 * 6)
+
+    def test_release_of_a_non_last_sup_is_refused(self):
+        early = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        late = test_sup('LXPO', self.rows((SITE_B, 2, NOP)))
+        cam = Camera(*card(('10A.BIN', early), ('30LEXPO.BIN', late)))
+        cam.boot()
+        st = cam.state()
+        before = ([j[:2] for j in cam.journal()], cam.w(st + O_NCLAIMS),
+                  cam.sup(0, O_SUP_BLOCK), cam.w(SITE_A))
+        self.assertEqual(s32(cam.release(self.TSTA)), SL_NOT_LAST)
+        self.assertEqual(([j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS), cam.sup(0, O_SUP_BLOCK),
+                          cam.w(SITE_A)), before)
+        self.assertEqual(cam.sup(0, O_SUP_STATE), 0)
+        self.assertNotIn('UNLOAD', [r[0] for r in cam.log()])
+
+    def test_release_of_an_unknown_id_is_not_found(self):
+        cam = Camera(*self.hot_card())
+        cam.boot()
+        st = cam.state()
+        before = ([j[:2] for j in cam.journal()], cam.w(st + O_NCLAIMS))
+        self.assertEqual(s32(cam.release(0x12345678)), SL_NOT_FOUND)
+        self.assertEqual(([j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS)), before)
+
+    def test_a_bad_replacement_bin_leaves_the_old_sup(self):
+        files, dirs = self.hot_card()
+        good = files['\\fpSup\\30LEXPO.BIN']
+        files['\\fpSup\\BADD.BIN'] = b'XXXX' + good[4:]     # bad magic
+        files['\\fpSup\\SHOR.BIN'] = good[:-4]              # truncated
+        cam = Camera(files, dirs)
+        cam.boot()
+        st = cam.state()
+        blk, nsups = cam.sup(1, O_SUP_BLOCK), cam.w(st + O_NSUPS)
+        for path in ('\\fpSup\\BADD.BIN', '\\fpSup\\SHOR.BIN'):
+            self.assertLess(s32(cam.load_one(path)), 0, path)
+            self.assertEqual(cam.sup(1, O_SUP_BLOCK), blk)
+            self.assertEqual(cam.sup(1, O_SUP_STATE), 0)
+            self.assertEqual(cam.w(st + O_NSUPS), nsups)
+            self.assertEqual((cam.w(SITE_B), cam.w(SITE_C)), (NOP, NOP))
+
+    def test_load_one_rejects_paths_outside_fpsup(self):
+        cam = Camera(*card())
+        cam.boot()
+        for path in ('\\fpSup\\..\\X.BIN', '\\other\\X.BIN', '\\fpSup\\X.TXT',
+                     '\\fpSup\\A\\B.BIN', '\\fpSup\\LOADER.BIN'):
+            self.assertEqual(s32(cam.load_one(path)), SL_BADARG, path)
+
+    def test_power_off_after_release_and_reload_writes_stock(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        self.assertEqual(s32(cam.release(self.LXPO)), 0)
+        cam.power_off()
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (self.stock[SITE_A], self.stock[SITE_B], self.stock[SITE_C]))
+        self.assertEqual(s32(cam.load_one('\\fpSup\\30LEXPO.BIN')), 0)
+        self.assertEqual((cam.w(SITE_B), cam.w(SITE_C)), (NOP, NOP))
+        cam.power_off()
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (self.stock[SITE_A], self.stock[SITE_B], self.stock[SITE_C]))
+
+    def test_services_refuse_while_an_entry_runs(self):
+        cam = Camera(*self.hot_card())
+        cam.boot()
+        st = cam.state()
+        cam.put(st + O_RUNNING, 1)
+        try:
+            self.assertEqual(s32(cam.load_one('\\fpSup\\30LEXPO.BIN')), SL_BUSY)
+            self.assertEqual(s32(cam.release(self.LXPO)), SL_BUSY)
+        finally:
+            cam.put(st + O_RUNNING, 0)
+
+    def test_book_pointer_is_permanent_and_zero_before_a_failed_load(self):
+        cam = Camera(*self.hot_card())
+        cam.boot()
+        self.assertEqual(cam.w(B.SL_BOOK_AT), cam.state())
+        self.assertEqual(cam.w(B.SL_SVC_AT), 0)
+        # a load that fails before the resident state exists clears the stale word
+        files, dirs = card()
+        cam = Camera(files, dirs)
+        cam.put(B.SL_BOOK_AT, 0xDEADBEEF)
+        cam.fail_mem = True
+        cam.boot()
+        self.assertEqual(cam.registered, [])             # sl_load never ran
+        self.assertEqual(cam.w(B.SL_BOOK_AT), 0)
+
+    def test_a_failed_init_leaves_the_book_pointer_zero(self):
+        # MEM_GET calls: 1 resident block, 2 journal, 3 scratch.  Failing 2 or
+        # 3 is after sl_boot cleared the word but before the table is
+        # published; a host must still read 0 and must not see a half-built
+        # table it could call reload into.
+        for fail_at in (2, 3):
+            with self.subTest(fail_at=fail_at):
+                files, dirs = card()
+                cam = Camera(files, dirs)
+                cam.put(B.SL_BOOK_AT, 0xDEADBEEF)
+                cam.fail_mem_at = fail_at
+                cam.boot()
+                self.assertEqual(cam.w(B.SL_BOOK_AT), 0)
+
+    def test_a_no_patch_sup_after_the_target_does_not_block_release(self):
+        a = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        n = test_sup('NOPX', [])
+        cam = Camera(*card(('10A.BIN', a), ('20N.BIN', n)))
+        cam.boot()
+        st = cam.state()
+        nblk = cam.sup(1, O_SUP_BLOCK)
+        self.assertEqual(s32(cam.release(self.TSTA)), 0)
+        self.assertEqual(cam.w(SITE_A), self.stock[SITE_A])
+        self.assertEqual(cam.sup(1, O_SUP_STATE), 0)     # the infra sup stays
+        self.assertEqual(cam.w(st + O_NCLAIMS), 0)
+        self.assertEqual(cam.journal(), [])
+        # releasing it later must not resurrect the books it pointed past
+        self.assertEqual(s32(cam.release(self.NOPX)), 0)
+        self.assertEqual(cam.journal(), [])
+        self.assertEqual(cam.w(st + O_NCLAIMS), 0)
+        self.assertIn(nblk, cam.freed)
+
+    def test_a_patching_sup_after_the_target_still_blocks_release(self):
+        a = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        b = test_sup('TSTB', self.rows((SITE_B, 2, 0xE1A01001)))
+        cam = Camera(*card(('10A.BIN', a), ('20B.BIN', b)))
+        cam.boot()
+        st = cam.state()
+        before = ((cam.w(SITE_A), cam.w(SITE_B)), [j[:2] for j in cam.journal()],
+                  cam.w(st + O_NCLAIMS), cam.sup(0, O_SUP_BLOCK))
+        self.assertEqual(s32(cam.release(self.TSTA)), SL_NOT_LAST)
+        self.assertEqual(((cam.w(SITE_A), cam.w(SITE_B)),
+                          [j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS), cam.sup(0, O_SUP_BLOCK)), before)
+
+    def test_a_patching_sup_beyond_a_no_patch_sup_still_blocks_release(self):
+        a = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        n = test_sup('NOPX', [])
+        b = test_sup('TSTB', self.rows((SITE_B, 2, 0xE1A01001)))
+        cam = Camera(*card(('10A.BIN', a), ('20N.BIN', n), ('30B.BIN', b)))
+        cam.boot()
+        st = cam.state()
+        before = ((cam.w(SITE_A), cam.w(SITE_B)), [j[:2] for j in cam.journal()],
+                  cam.w(st + O_NCLAIMS), cam.sup(0, O_SUP_BLOCK), cam.sup(1, O_SUP_STATE))
+        self.assertEqual(s32(cam.release(self.TSTA)), SL_NOT_LAST)
+        self.assertEqual(((cam.w(SITE_A), cam.w(SITE_B)),
+                          [j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS), cam.sup(0, O_SUP_BLOCK),
+                          cam.sup(1, O_SUP_STATE)), before)
+
+    def test_reload_reapplies_the_sup_from_its_path(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        st = cam.state()
+        old = cam.sup(1, O_SUP_BLOCK)
+        nsups = cam.w(st + O_NSUPS)
+        cam.put(cave.CAVE_BUMP, cave.CAVE_ARENA + 0x40)
+        self.assertEqual(s32(cam.reload(self.LXPO)), 0)
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (NOP, NOP, NOP))
+        self.assertEqual(cam.w(st + O_NSUPS), nsups)     # slot reused
+        new = cam.sup(1, O_SUP_BLOCK)
+        self.assertNotEqual(new, 0)
+        self.assertNotEqual(new, old)                    # fresh block
+        self.assertIn(old, cam.freed)
+        self.assertEqual(cam.w(cave.CAVE_BUMP), cave.CAVE_ARENA + 0x40)
+        self.assertEqual(cam.w(B.SL_SVC_AT), 0)
+        self.assertEqual(cam.w(B.SL_BOOK_AT), st)
+        self.assertEqual([j[0] for j in cam.journal()], [SITE_A, SITE_B, SITE_C])
+        self.assertEqual(cam.sup(1, O_SUP_STATE), 0)
+
+    def test_ten_reload_cycles_stay_bounded(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        st = cam.state()
+        nsups = cam.w(st + O_NSUPS)
+        allocs = len(cam.allocs)
+        for i in range(10):
+            self.assertEqual(s32(cam.reload(self.LXPO)), 0, f'cycle {i}')
+            self.assertEqual(cam.w(st + O_NSUPS), nsups)
+            self.assertEqual(cam.w(cave.CAVE_BUMP), cave.CAVE_ARENA)
+            self.assertEqual(cam.w(B.SL_SVC_AT), 0)
+        self.assertEqual((cam.w(SITE_A), cam.w(SITE_B), cam.w(SITE_C)),
+                         (NOP, NOP, NOP))
+        self.assertFalse([r for r in cam.log() if r[0] == 'NO_MEMORY'])
+        # validate scratch+block, release log, load scratch+block, load log
+        self.assertLessEqual(len(cam.allocs) - allocs, 10 * 9)
+
+    def test_reload_of_an_unknown_id_is_not_found(self):
+        cam = Camera(*self.hot_card())
+        cam.boot()
+        st = cam.state()
+        before = ([j[:2] for j in cam.journal()], cam.w(st + O_NCLAIMS))
+        self.assertEqual(s32(cam.reload(0x12345678)), SL_NOT_FOUND)
+        self.assertEqual(([j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS)), before)
+
+    def test_reload_of_a_bad_bin_leaves_the_old_sup(self):
+        files, dirs = self.hot_card()
+        cam = Camera(files, dirs)
+        cam.boot()
+        st = cam.state()
+        blk = cam.sup(1, O_SUP_BLOCK)
+        good = cam.files['\\fpSup\\30LEXPO.BIN']
+        cam.files['\\fpSup\\30LEXPO.BIN'] = b'XXXX' + good[4:]
+        self.assertLess(s32(cam.reload(self.LXPO)), 0)
+        self.assertEqual(cam.sup(1, O_SUP_BLOCK), blk)   # old block alive
+        self.assertEqual(cam.sup(1, O_SUP_STATE), 0)
+        self.assertEqual((cam.w(SITE_B), cam.w(SITE_C)), (NOP, NOP))
+        self.assertEqual([j[0] for j in cam.journal()], [SITE_A, SITE_B, SITE_C])
+        self.assertEqual(cam.w(st + O_NSUPS), 2)
+
+    def test_reload_of_a_non_releasable_sup_returns_not_last(self):
+        a = test_sup('TSTA', self.rows((SITE_A, 2, NOP)))
+        b = test_sup('TSTB', self.rows((SITE_B, 2, 0xE1A01001)))
+        cam = Camera(*card(('10A.BIN', a), ('20B.BIN', b)))
+        cam.boot()
+        st = cam.state()
+        before = ((cam.w(SITE_A), cam.w(SITE_B)), cam.sup(0, O_SUP_BLOCK),
+                  [j[:2] for j in cam.journal()], cam.w(st + O_NCLAIMS))
+        self.assertEqual(s32(cam.reload(self.TSTA)), SL_NOT_LAST)
+        self.assertEqual(((cam.w(SITE_A), cam.w(SITE_B)), cam.sup(0, O_SUP_BLOCK),
+                          [j[:2] for j in cam.journal()],
+                          cam.w(st + O_NCLAIMS)), before)
+
+    def test_load_one_sets_sl_svc_at_only_around_the_entry(self):
+        from armasm import assemble, symbols
+        src = HERE / 'test_svc3.S'
+        probe = B.make_sup(assemble(src) + struct.pack('<2I', SITE_A, self.stock[SITE_A]),
+                           B.SL_HEADER_LEN, 'PRB3')
+        files, dirs = card()
+        files['\\fpSup\\40P.BIN'] = probe                 # not listed by boot
+        cam = Camera(files, dirs)
+        cam.boot()
+        self.assertEqual(cam.w(B.SL_SVC_AT), 0)
+        self.assertEqual(s32(cam.load_one('\\fpSup\\40P.BIN')), 0)
+        blk = cam.sup(0, O_SUP_BLOCK)
+        seen = symbols(src)['seen'] + B.SL_HEADER_LEN
+        self.assertEqual(cam.w(blk + seen), cam.state())  # during the entry
+        self.assertEqual(cam.w(B.SL_SVC_AT), 0)           # and 0 after
+
     def test_state_layout(self):
         cam = Camera(*card())
         cam.boot()
         self.assertEqual(cam.log()[0][0], 'START')
         st = cam.state()
         self.assertEqual(cam.w(st), B.SL_SVC_VERSION)
+        self.assertEqual(cam.w(st), 6)
+        self.assertEqual((SVC_RELEASE, SVC_LOAD_ONE, SVC_RELOAD), (44, 48, 52))
+        self.assertNotEqual(cam.w(st + SVC_RELEASE), 0)
+        self.assertNotEqual(cam.w(st + SVC_LOAD_ONE), 0)
+        self.assertNotEqual(cam.w(st + SVC_RELOAD), 0)
+        self.assertEqual(cam.w(B.SL_BOOK_AT), st)
+        self.assertEqual(cam.w(B.SL_SVC_AT), 0)
         self.assertEqual(cam.w(st + O_POFF), st + O_POFF - 8)
 
 

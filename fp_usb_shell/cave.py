@@ -35,7 +35,10 @@ the same ones.  They cannot be allocated, and they are not the problem -- there
 are eight of them, they are declared here once, and the worker and this file are
 built from the same tree.
 """
-import fcntl
+try:
+    import fcntl
+except ImportError:          # native Windows: advisory locking is unavailable
+    fcntl = None
 import json
 import os
 import pathlib
@@ -181,7 +184,8 @@ def claim(name, size):
     REGISTER.parent.mkdir(parents=True, exist_ok=True)
     lock = REGISTER.with_suffix('.lock')
     with open(lock, 'w') as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(fh, fcntl.LOCK_EX)
         boot = boot_id()
         reg = _load()
         if reg.get('boot') != boot:

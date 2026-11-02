@@ -31,8 +31,9 @@ UI_DIR = SL_DIR + '\\UI'                    # the four-box frames: a folder, so 
 IMAGE = ROOT / 'out' / 'MAIN_c0000000.bin'
 SL_MAGIC = 0x31425346                         # "FSB1"
 SL_HEADER_LEN = 32
-SL_SVC_VERSION = 3                            # sloader.h; 3 = holder, self, SL_SVC_AT
+SL_SVC_VERSION = 6                            # sloader.h; 6 = release, load_one, reload
 SL_SVC_AT = 0xC072F6FC                        # sloader.h: &svc while entries run, else 0
+SL_BOOK_AT = 0xC072F6F0                       # sloader.h: &svc for the whole boot
 
 CFLAGS = ['--target=armv7a-none-eabi', '-mcpu=cortex-a9', '-mthumb', '-mfloat-abi=soft',
           '-mfpu=none', '-mstackrealign', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-jump-tables',
