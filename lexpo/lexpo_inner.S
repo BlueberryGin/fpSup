@@ -13,7 +13,8 @@
  * So: at sup-load time, claim the live-view applier site (0xC02BAD0C,
  * SL_CHAIN -- HpZoom layers the same site) and arm a ONE-SHOT hook.  The
  * first LV frame means the GUI is up; the hook calls the controller
- * accessor and the wrapper once, then passes through forever.  No load-time
+ * accessor and the wrapper once, writes the stock word back to the site and
+ * publishes D -> I, then passes through forever.  No load-time
  * rebuild on purpose: it would cache the widened context, the wrapper's
  * change gate would then see "no change", and the widget event would never
  * post.
@@ -31,8 +32,12 @@
 
 .equ SITE_LV,    0xC02BAD0C         /* live-view applier +4: sub sp, sp, #0x64 */
 .equ STOCK_LV,   0xE24DD064
+.equ SITE_PATCH, 0xC007F324         /* the movw ip, #0x96f4 site this sup patches */
+.equ PATCHED,    0xE309C6FC         /* movw ip, #0x96fc -- this build's word */
 .equ F_CTRL,     0xC049D448         /* () -> controller singleton 0xC3766ADC */
 .equ F_WRAP,     0xC049D6D0         /* (ctrl, mode): rebuild + list-changed event */
+.equ F_DCACHE,   0xC000E91C         /* D-cache clean/invalidate + barriers */
+.equ F_ICACHE,   0xC000EABC         /* whole I-cache invalidate + barriers */
 .equ VENEER_LDR, 0xE51FF004         /* ldr pc, [pc, #-4] */
 
 .macro LDA reg, value
@@ -53,8 +58,21 @@
 .endm
 
 inner_entry:                        @ (own = r0, svc = r1)
+    /* Runtime site guard: fp 5.02 only.  The same firmware runs on every
+     * body, but the state this sup finds is not guaranteed: another sup may
+     * have changed 0xC007F324, the image may be an old/unknown one, or the
+     * patch may not have applied.  Read the word back and continue only if
+     * it is ours; otherwise skip the claim/veneer/hook and return normally,
+     * writing nothing.  Adapting to the state actually present is safer than
+     * assuming this sup's patch landed. */
     push    {r4, r5, r10, lr}
     mov     r10, r1                     @ the service table
+
+    LDA     r0, SITE_PATCH
+    ldr     r0, [r0]                    @ what is at the patch site now
+    LDA     r1, PATCHED
+    cmp     r0, r1
+    bne     9f                          @ not our patch: arm nothing
 
     /* claim the LV site (CHAIN); refusal -> leave it stock, keep the patch */
     mov     r0, r10
@@ -131,6 +149,18 @@ lv_hook:
     mov     r1, #1                      @ mode 1: the stills standby list
     LDA     ip, F_WRAP
     blx     ip                          @ rebuild + list-changed event + re-sync
+    /* self-disarm: put the stock word back before the applier runs again.
+     * The power-off write-back is not guaranteed to reach this site (the
+     * pool may be reassigned next boot), so a branch left here would
+     * dangle.  Write, then publish D -> I.  lv_done stays set: even if the
+     * veneer is reached again, the body is a no-op. */
+    LDA     r1, SITE_LV
+    LDA     r2, STOCK_LV
+    str     r2, [r1]
+    LDA     ip, F_DCACHE
+    blx     ip
+    LDA     ip, F_ICACHE
+    blx     ip
 8:  pop     {r0, r1, r2, r3, ip, lr}
 lv_replay:
     sub     sp, sp, #0x64               @ displaced
