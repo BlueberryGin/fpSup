@@ -197,6 +197,61 @@ class LExpoV3Tests(unittest.TestCase):
         self.fire_lv(cam, until=LOWER)                       # reached the layer
         self.assertEqual(len(cam.wraps), 1)                  # ours ran first
 
+    # ---- service version 5: the real sup, released and loaded again --------
+    def test_release_and_reload_the_real_sup(self):
+        """Both sites are in LExpo's journal slice: patch_sup claims SITE and
+        inner_entry claims SITE_LV, so the generic release restores both.  A
+        release after the hook has self-disarmed writes stock again, which is
+        idempotent."""
+        sup_id = struct.unpack('<I', L.SUP_ID.encode())[0]
+        cam = self.boot()
+        self.assertEqual(cam.w(SITE), PATCHED)
+        self.assertEqual(len(cam.journal()), 2)              # SITE + SITE_LV
+        bump = cam.w(T.cave.CAVE_BUMP)
+
+        self.assertEqual(T.s32(cam.release(sup_id)), 0)
+        self.assertEqual(cam.w(SITE), STOCK)
+        self.assertEqual(cam.w(SITE_LV), STOCK_LV)
+        self.assertEqual(cam.journal(), [])
+        self.assertEqual(cam.w(T.cave.CAVE_BUMP), bump)      # release places nothing
+
+        self.assertEqual(T.s32(cam.load_one('\\fpSup\\30LEXPO.BIN')), 0)
+        self.assertEqual(cam.w(SITE), PATCHED)
+        self.assertNotEqual(cam.w(SITE_LV), STOCK_LV)        # armed again
+        self.assertEqual(len(cam.journal()), 2)
+        self.assertGreaterEqual(cam.w(T.cave.CAVE_BUMP), bump)  # not reset
+
+        self.fire_lv(cam)                                    # self-disarms
+        self.assertEqual(cam.w(SITE_LV), STOCK_LV)
+        self.assertEqual(T.s32(cam.release(sup_id)), 0)      # idempotent restore
+        self.assertEqual((cam.w(SITE), cam.w(SITE_LV)), (STOCK, STOCK_LV))
+
+        cam.power_off()
+        self.assertEqual((cam.w(SITE), cam.w(SITE_LV)), (STOCK, STOCK_LV))
+
+    def test_reload_the_real_sup(self):
+        """reload() validates the file first, then releases and loads it again:
+        the patch and the armed one-shot hook come back without a reboot."""
+        sup_id = struct.unpack('<I', L.SUP_ID.encode())[0]
+        cam = self.boot()
+        bump = cam.w(T.cave.CAVE_BUMP)
+        self.assertEqual(cam.w(SITE), PATCHED)
+
+        self.assertEqual(T.s32(cam.reload(sup_id)), 0)
+        self.assertEqual(cam.w(SITE), PATCHED)
+        self.assertNotEqual(cam.w(SITE_LV), STOCK_LV)        # a new hook armed
+        self.assertEqual(len(cam.journal()), 2)
+        self.assertGreaterEqual(cam.w(T.cave.CAVE_BUMP), bump)  # not reset
+
+        self.fire_lv(cam)                                    # self-disarms
+        self.assertEqual(cam.w(SITE_LV), STOCK_LV)
+        self.assertEqual(T.s32(cam.reload(sup_id)), 0)       # reloads stock too
+        self.assertEqual(cam.w(SITE), PATCHED)
+        self.assertNotEqual(cam.w(SITE_LV), STOCK_LV)
+
+        cam.power_off()
+        self.assertEqual((cam.w(SITE), cam.w(SITE_LV)), (STOCK, STOCK_LV))
+
 
 if __name__ == '__main__':
     unittest.main()

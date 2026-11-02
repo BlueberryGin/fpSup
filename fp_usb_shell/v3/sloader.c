@@ -30,6 +30,11 @@ typedef uint8_t u8;
 #error "CAVE_BUMP, CAVE_ARENA, CAVE_ARENA_END and LOAD_DONE_US come from build_v3.py"
 #endif
 
+/* struct sup.state.  SL_KEEP and SL_RELEASE are also the entry's answers; a
+ * slot whose block has been given back is SL_RELEASED (internal: only "kept",
+ * "in this load" and "given back" need telling apart). */
+enum { SL_RELEASED = 2 };
+
 /* --- firmware ------------------------------------------------------------ */
 #define FW(addr, type) ((type)(uintptr_t)(addr))
 #define tick_us()        FW(0xC002B6E0, u32 (*)(void))()
@@ -64,6 +69,9 @@ typedef uint8_t u8;
 #define NAME_MAX     40u       /* the longest name a sup file may have         */
 #define JOURNAL_BYTES 0x8000u  /* stock bytes + 8 per range; res-lab is ~20 KB  */
 #define MAX_BLOCK    0x01000000u
+/* release(): how long an in-flight frame may take to leave a hook before the
+ * sup's block is freed.  Phase 1 has no per-site quiesce handshake. */
+#define RELEASE_QUIESCE_US 100000u
 
 /* Scratch, freed before the first sup runs.  The file object is "about 3 KiB"
  * (loader.S); 4 KiB is what loader.S gives it. */
@@ -81,6 +89,8 @@ enum {
     L_DUP_ID, L_NO_MEMORY, L_SHORT_READ, L_LOADED, L_RELEASED, L_REPAIRED,
     L_SUP, L_DONE, L_NO_POFF, L_CONFLICT, L_LISTED, L_CLAIM,
     L_DISABLED,           /* SL_ALLSUPS: its sup_id is on LOADER.BIN's list */
+    L_UNLOAD,             /* release(): supers and block, appended (v5)   */
+    L_HOTLOAD,            /* load_one(): a sup loaded after sl_load       */
 };
 
 /* \fpSup\LOAD.LOG: one line per record, "cc aaaaaaaa bbbbbbbb text", padded to
@@ -99,7 +109,9 @@ enum {
 struct cand { char name[NAME_MAX]; u32 size; };
 struct claim { u32 addr, len; u8 kind, sup, res, pad; };
 struct sup { char name[NAME_MAX]; u32 id; void *block; u32 state;
-             char path[NAME_MAX + 8]; };  /* resident: entry's r2 */
+             char path[NAME_MAX + 8];       /* resident: entry's r2 */
+             u32 jmark, cmark;              /* release()'s slice of the books */
+             u32 block_size; };             /* as allocated, for the log     */
 struct logrec { u32 code, a, b; char text[20]; };
 
 struct strings {          /* from sloader_entry.S                              */
@@ -124,6 +136,7 @@ struct state {
     u32 nlog;
     struct logrec log[MAX_LOG];
     u32 running;                       /* 1 while a sup's entry runs           */
+    const struct strings *str;         /* resident strings, for load_one()     */
 #ifdef SL_ALLSUPS
     /* Appended: the fields above keep their places (test_v3 mirrors them).
      * LOADER.BIN as read (its own bytes and the disabled list after the code,
@@ -162,6 +175,11 @@ static int ncmp(const char *a, const char *b)   /* case-insensitive strcmp     *
     }
 }
 static void publish(void) { dcache(); icache(); }
+
+/* Defined with the log file, below.  The hot-load services rewrite LOAD.LOG
+ * when they finish so a release/reload is visible on the card, not only in the
+ * resident records the next boot would throw away. */
+static void write_log(struct state *st, const struct strings *str);
 
 static void logrec(struct state *st, u32 code, u32 a, u32 b, const char *text)
 {
@@ -347,6 +365,73 @@ static void undo_current(struct state *st)
     publish();
 }
 
+/* Hand a kept sup back after sl_load has returned (service version 5).  The
+ * same journal/claim undo that undo_current does for a sup returning
+ * SL_RELEASE, but addressed by id and performed against that sup's marks.
+ *
+ * The journal and registry are truncated from the sup's marks, so a kept sup
+ * loaded after it may stay only if it added nothing: the first kept sup after
+ * the target must start at the current end of both books.  That lets an
+ * infrastructure sup (e.g. HOTL) load on top of managed modules without
+ * blocking their release, while a later patching sup still refuses.  A
+ * released sup stays in sups[] as SL_RELEASED, which is what lets load_one
+ * reuse the last slot instead of growing the table. */
+static int svc_release(const struct sl_svc *svc, u32 sup_id)
+{
+    struct state *st = (struct state *)svc;
+    int idx = -1, next = -1;
+    if (st->running) return SL_BUSY;
+    for (u32 i = 0; i < st->nsups; i++)
+        if (st->sups[i].state == SL_KEEP && st->sups[i].id == sup_id) {
+            idx = (int)i;
+            break;
+        }
+    if (idx < 0) return SL_NOT_FOUND;
+    for (u32 i = (u32)idx + 1; i < st->nsups; i++)
+        if (st->sups[i].state == SL_KEEP) {
+            next = (int)i;
+            break;
+        }
+    if (next >= 0 && (st->sups[next].jmark != (u32)(uintptr_t)st->jcur
+                      || st->sups[next].cmark != st->nclaims))
+        return SL_NOT_LAST;
+
+    struct sup *sp = &st->sups[idx];
+    u32 block = (u32)(uintptr_t)sp->block;
+    /* Every range this sup was the first to claim goes back to the stock bytes
+     * it gave.  A site the sup already restored itself (LExpo's one-shot hook
+     * disarms on its first frame) receives the same stock word again, so the
+     * restore is idempotent. */
+    for (u32 *e = (u32 *)(uintptr_t)sp->jmark; e < st->jcur && e[0]; e += 2 + e[1] / 4)
+        copy((void *)(uintptr_t)e[0], e + 2, e[1]);
+    st->jcur = (u32 *)(uintptr_t)sp->jmark;
+    st->jcur[0] = 0;
+    st->nclaims = sp->cmark;
+    /* The kept sups above the target added nothing (checked above); their marks
+     * pointed at the old end, which has just moved back.  Keep them at the new
+     * end so a later release of one cannot resurrect truncated journal bytes. */
+    for (u32 i = (u32)idx + 1; i < st->nsups; i++)
+        if (st->sups[i].state == SL_KEEP) {
+            st->sups[i].jmark = (u32)(uintptr_t)st->jcur;
+            st->sups[i].cmark = st->nclaims;
+        }
+    publish();
+    /* The site is stock; let a frame that may still be inside the hook leave
+     * it before its code is freed.  Bounded: a phase 1 release does not wait on
+     * a handshake. */
+    u32 t0 = tick_us();
+    while ((u32)(tick_us() - t0) < RELEASE_QUIESCE_US)
+        ;
+    if (sp->block) mem_free(st->heap, sp->block);
+    sp->block = 0;
+    sp->state = SL_RELEASED;
+    sp->block_size = 0;
+    logrec(st, L_UNLOAD, sup_id, block, sp->name);
+    publish();
+    if (st->str) write_log(st, st->str);
+    return SL_OK;
+}
+
 /* --- directory ----------------------------------------------------------- */
 static int wanted(const char *name, const char *self)
 {
@@ -356,6 +441,30 @@ static int wanted(const char *name, const char *self)
     if (ext[0] != '.' || upper(ext[1]) != 'B' || upper(ext[2]) != 'I' || upper(ext[3]) != 'N')
         return 0;
     return ncmp(name, self) != 0;
+}
+
+/* The path load_one() accepts: the loader's own directory, then one .BIN name
+ * with no separator, no ".." and no trailing junk.  It has to fit the sup's
+ * resident path string.  `name` is NAME_MAX bytes. */
+static int parse_sup_path(const struct strings *str, const char *path, char *name)
+{
+    if (!path) return 0;
+    u32 d = slen(str->dir), n = slen(path);
+    if (n <= d + 1 || n >= NAME_MAX + 8) return 0;
+    for (u32 i = 0; i < d; i++)
+        if (upper(path[i]) != upper(str->dir[i])) return 0;
+    if (path[d] != '\\') return 0;
+    const char *nm = path + d + 1;
+    u32 m = slen(nm);
+    if (!m || m >= NAME_MAX) return 0;
+    for (u32 i = 0; i < m; i++) {
+        char c = nm[i];
+        if (c == '\\' || c == '/' || c == ':' || c < 0x20 || c > 0x7E) return 0;
+        if (c == '.' && i + 1 < m && nm[i + 1] == '.') return 0;
+    }
+    if (!wanted(nm, str->self)) return 0;            /* .BIN, not LOADER.BIN */
+    copy(name, nm, m + 1);
+    return 1;
 }
 
 /* The firmware gives the names in directory order -- the order they were
@@ -433,81 +542,249 @@ static u32 read_file(u8 *s, const char *path, void *buf, u32 want)
 
 typedef int (*sup_entry)(void *block, const struct sl_svc *svc, const char *path);
 
-static void load_one(struct state *st, u8 *s, const struct strings *str, const struct cand *c)
+/* Every condition load_cand has always applied to a header.  `file_len` is the
+ * size the caller expects the file to be: the directory's for a boot load, the
+ * header's own for load_one (the whole-file read below is what proves it). */
+static int header_ok(const struct sl_header *h, u32 got, u32 file_len)
 {
-    char *path = make_path(s, str, c->name);
+    u32 ent = h->entry_off & ~1u;
+    return got == sizeof *h && h->magic == SL_MAGIC && h->header_len == SL_HEADER_LEN
+        && h->file_len == file_len && h->file_len >= SL_HEADER_LEN
+        && h->block_size >= h->file_len && h->block_size <= MAX_BLOCK
+        && ent >= SL_HEADER_LEN && ent < h->file_len
+        && ((h->entry_off & 1) || !(ent & 3))
+        && h->min_svc <= SL_SVC_VERSION;
+}
+
+/* Read and validate a file exactly as enter_sup would, without keeping
+ * anything: reload() uses this before it touches the loaded sup, so a bad BIN
+ * leaves the old one in place.  It also proves the file is the length its
+ * header says, which is the part load_one can only check by reading it whole. */
+static int check_sup_file(struct state *st, const char *path)
+{
+    u8 *s = mem_get(st->heap, SCRATCH_BYTES);
+    if (!s) { logrec(st, L_NO_MEMORY, SCRATCH_BYTES, 0, path); return SL_FULL; }
+    zero(s, SCRATCH_BYTES);
     struct sl_header *h = (struct sl_header *)(s + S_HDR);
     zero(h, sizeof *h);
     u32 got = read_file(s, path, h, sizeof *h);
-    if (got == 0xFFFFFFFFu) { logrec(st, L_OPEN_FAIL, 0, 0, c->name); return; }
-    u32 ent = h->entry_off & ~1u;
-    if (got != sizeof *h || h->magic != SL_MAGIC || h->header_len != SL_HEADER_LEN
-        || h->file_len != c->size || h->file_len < SL_HEADER_LEN
-        || h->block_size < h->file_len || h->block_size > MAX_BLOCK
-        || ent < SL_HEADER_LEN || ent >= h->file_len
-        || (!(h->entry_off & 1) && (ent & 3)) || h->min_svc > SL_SVC_VERSION) {
-        logrec(st, L_BAD_HEADER, h->magic, got, c->name);
-        return;
+    if (got == 0xFFFFFFFFu) {
+        logrec(st, L_OPEN_FAIL, 0, 0, path);
+        mem_free(st->heap, s);
+        return SL_BADARG;
+    }
+    u32 len = h->file_len;
+    if (!header_ok(h, got, len)) {
+        logrec(st, L_BAD_HEADER, h->magic, got, path);
+        mem_free(st->heap, s);
+        return SL_BADARG;
+    }
+    u8 *tmp = mem_get(st->heap, h->block_size);
+    if (!tmp) {
+        logrec(st, L_NO_MEMORY, h->block_size, 0, path);
+        mem_free(st->heap, s);
+        return SL_FULL;
+    }
+    got = read_file(s, path, tmp, len);
+    if (got != len || *(u32 *)tmp != SL_MAGIC) {
+        logrec(st, L_SHORT_READ, len, got, path);
+        mem_free(st->heap, tmp);
+        mem_free(st->heap, s);
+        return SL_BADARG;
+    }
+    mem_free(st->heap, tmp);
+    mem_free(st->heap, s);
+    return SL_OK;
+}
+
+/* Read, validate, place and enter one sup.  `file_len` is the size the caller
+ * knows it should be; `block_out`, if not 0, receives the block on SL_KEEP.
+ * On anything else everything this call allocated has been freed and every
+ * claim/journal entry it made undone, so no other sup is disturbed.  Returns
+ * SL_OK, a negative result, or the entry's own value (normally SL_RELEASE). */
+static int enter_sup(struct state *st, u8 *s, const struct strings *str,
+                     const char *name, const char *path, u32 file_len, u8 **block_out)
+{
+    (void)str;
+    struct sl_header *h = (struct sl_header *)(s + S_HDR);
+    zero(h, sizeof *h);
+    u32 got = read_file(s, path, h, sizeof *h);
+    if (got == 0xFFFFFFFFu) { logrec(st, L_OPEN_FAIL, 0, 0, name); return SL_BADARG; }
+    if (!header_ok(h, got, file_len)) {
+        logrec(st, L_BAD_HEADER, h->magic, got, name);
+        return SL_BADARG;
     }
 #ifdef SL_ALLSUPS
     if (st->dis)
         for (u32 i = 0; i < st->dis[1] && i < DS_MAX; i++)
             if (st->dis[2 + i] == h->sup_id) {
-                logrec(st, L_DISABLED, h->sup_id, 0, c->name);
-                return;
+                logrec(st, L_DISABLED, h->sup_id, 0, name);
+                return SL_CONFLICT;
             }
 #endif
+    /* A kept sup with this id excludes another.  A released slot with the same
+     * id may be reused, but only when it is the last sups[] entry: that is the
+     * slot a LIFO release left at the top, and reusing it keeps ten reload
+     * cycles from growing the table.  Anything else appends while there is
+     * room. */
+    int idx = -1, append = 0;
     for (u32 i = 0; i < st->nsups; i++)
         if (st->sups[i].id == h->sup_id && st->sups[i].state == SL_KEEP) {
-            logrec(st, L_DUP_ID, h->sup_id, 0, c->name);
-            return;
+            logrec(st, L_DUP_ID, h->sup_id, 0, name);
+            return SL_CONFLICT;
         }
-    if (st->nsups >= MAX_SUPS) return;
+    if (st->nsups) {
+        struct sup *top = &st->sups[st->nsups - 1];
+        if (top->state == SL_RELEASED && top->id == h->sup_id)
+            idx = (int)(st->nsups - 1);
+    }
+    if (idx < 0) {
+        if (st->nsups >= MAX_SUPS) { logrec(st, L_TOO_MANY, st->nsups, 0, name); return SL_FULL; }
+        idx = (int)st->nsups;
+        append = 1;
+    }
     u32 size = h->block_size, len = h->file_len, entry_off = h->entry_off, id = h->sup_id;
     u8 *block = mem_get(st->heap, size);
-    if (!block) { logrec(st, L_NO_MEMORY, size, 0, c->name); return; }
+    if (!block) { logrec(st, L_NO_MEMORY, size, 0, name); return SL_FULL; }
     got = read_file(s, path, block, len);
     if (got != len || ((struct sl_header *)block)->magic != SL_MAGIC) {
-        logrec(st, L_SHORT_READ, len, got, c->name);
+        logrec(st, L_SHORT_READ, len, got, name);
         mem_free(st->heap, block);
-        return;
+        return SL_BADARG;
     }
     zero(block + len, size - len);
     publish();
 
-    struct sup *sp = &st->sups[st->nsups];
-    copy(sp->name, c->name, slen(c->name) + 1);
+    if (append) st->nsups++;
+    struct sup *sp = &st->sups[idx];
+    copy(sp->name, name, slen(name) + 1);
     copy(sp->path, path, slen(path) + 1);    /* "\\fpSup\\" + a name < NAME_MAX */
     sp->id = id; sp->block = block; sp->state = SL_RELEASE;
-    st->cur = st->nsups++;
-    st->jmark = (u32)(uintptr_t)st->jcur;
-    st->cmark = st->nclaims;
+    sp->block_size = size;
+    sp->jmark = (u32)(uintptr_t)st->jcur;
+    sp->cmark = st->nclaims;
+    st->cur = (u32)idx;
+    st->jmark = sp->jmark;
+    st->cmark = sp->cmark;
     st->running = 1;
     int r = ((sup_entry)(uintptr_t)((u32)(uintptr_t)block + entry_off))(block, &st->svc, sp->path);
     st->running = 0;
     if (r == SL_KEEP) {
         sp->state = SL_KEEP;
-        logrec(st, L_LOADED, (u32)(uintptr_t)block, size, c->name);
+        logrec(st, L_LOADED, (u32)(uintptr_t)block, size, name);
         /* What each range holds now that the sup has written it: the first
          * word, so a patch that did not take shows in the log. */
         for (u32 i = st->cmark; i < st->nclaims; i++)
             if (!st->claims[i].res)
                 logrec(st, L_CLAIM, st->claims[i].addr,
                        *(volatile u32 *)(uintptr_t)st->claims[i].addr, 0);
-    } else {
-        undo_current(st);
-        mem_free(st->heap, block);
-        sp->block = 0;
-        logrec(st, L_RELEASED, (u32)r, 0, c->name);
+        if (block_out) *block_out = block;
+        return SL_OK;
     }
+    undo_current(st);
+    mem_free(st->heap, block);
+    sp->block = 0;
+    sp->state = SL_RELEASED;
+    sp->block_size = 0;
+    logrec(st, L_RELEASED, (u32)r, 0, name);
     publish();
+    return r == SL_RELEASE ? SL_RELEASE : SL_CONFLICT;
+}
+
+static void load_cand(struct state *st, u8 *s, const struct strings *str, const struct cand *c)
+{
+    char *path = make_path(s, str, c->name);
+    enter_sup(st, s, str, c->name, path, c->size, 0);
+}
+
+/* Service version 5: load one file now, without listing, without resetting
+ * CAVE_BUMP, and without touching the sups already loaded.  The caller has
+ * already checked st->running; enter_sup holds the same claim/journal append
+ * rules the boot load uses, so the power-off write-back still covers it. */
+static int svc_load_one(const struct sl_svc *svc, const char *path)
+{
+    struct state *st = (struct state *)svc;
+    char name[NAME_MAX];
+    u8 *block = 0;
+    if (st->running) return SL_BUSY;
+    if (!parse_sup_path(st->str, path, name)) return SL_BADARG;
+    u8 *s = mem_get(st->heap, SCRATCH_BYTES);
+    if (!s) { logrec(st, L_NO_MEMORY, SCRATCH_BYTES, 0, name); return SL_FULL; }
+    zero(s, SCRATCH_BYTES);
+    struct sl_header *h = (struct sl_header *)(s + S_HDR);
+    zero(h, sizeof *h);
+    u32 got = read_file(s, path, h, sizeof *h);
+    if (got == 0xFFFFFFFFu) {
+        logrec(st, L_OPEN_FAIL, 0, 0, name);
+        mem_free(st->heap, s);
+        return SL_BADARG;
+    }
+    /* The expected length is the header's own; enter_sup reads the header
+     * again and checks every load_cand rule against it, including that the
+     * whole-file read returns exactly file_len bytes. */
+    u32 file_len = h->file_len;
+    if (got != sizeof *h || h->magic != SL_MAGIC || h->header_len != SL_HEADER_LEN
+        || file_len < SL_HEADER_LEN || file_len > MAX_BLOCK) {
+        logrec(st, L_BAD_HEADER, h->magic, got, name);
+        mem_free(st->heap, s);
+        return SL_BADARG;
+    }
+    /* As while the boot entries run, code not handed the table finds it here. */
+    *(volatile u32 *)(uintptr_t)SL_SVC_AT = (u32)(uintptr_t)&st->svc;
+    publish();
+    int r = enter_sup(st, s, st->str, name, path, file_len, &block);
+    *(volatile u32 *)(uintptr_t)SL_SVC_AT = 0;
+    mem_free(st->heap, s);
+    if (r != SL_OK) return r;
+    logrec(st, L_HOTLOAD, (u32)(uintptr_t)block, file_len, name);
+    write_log(st, st->str);
+    return SL_OK;
+}
+
+/* Service version 6: replace a loaded sup in place.  The file at the sup's own
+ * path is read and checked first; only then is the old sup released, so a bad
+ * BIN leaves it loaded and patched.  After a successful release a failed load
+ * is a real failure -- the old sup is gone -- and is logged and returned as
+ * such, never reported as success. */
+static int svc_reload(const struct sl_svc *svc, u32 sup_id)
+{
+    struct state *st = (struct state *)svc;
+    char path[NAME_MAX + 8];
+    int idx = -1, next = -1, r;
+    if (st->running) return SL_BUSY;
+    for (u32 i = 0; i < st->nsups; i++)
+        if (st->sups[i].state == SL_KEEP && st->sups[i].id == sup_id) {
+            idx = (int)i;
+            break;
+        }
+    if (idx < 0) return SL_NOT_FOUND;
+    for (u32 i = (u32)idx + 1; i < st->nsups; i++)
+        if (st->sups[i].state == SL_KEEP) {
+            next = (int)i;
+            break;
+        }
+    if (next >= 0 && (st->sups[next].jmark != (u32)(uintptr_t)st->jcur
+                      || st->sups[next].cmark != st->nclaims))
+        return SL_NOT_LAST;
+    copy(path, st->sups[idx].path, slen(st->sups[idx].path) + 1);
+    r = check_sup_file(st, path);
+    if (r != SL_OK) {
+        if (st->str) write_log(st, st->str);
+        return r;
+    }
+    r = svc_release(svc, sup_id);
+    if (r != SL_OK) return r;
+    r = svc_load_one(svc, path);
+    if (r != SL_OK && st->str)
+        write_log(st, st->str);           /* load_one's failure record */
+    return r;
 }
 
 #ifdef SL_ALLSUPS
 /* The built-in page (allsups.c), entered last as the sup "LOADER.BIN".  Its
  * data file starts with a table whose words 1..2 say how long the file is
- * (pack offset + pack length).  The entering below is load_one's, repeated:
- * load_one stays byte for byte what the v3 releases carry (LOADER.BIN
+ * (pack offset + pack length).  The entering below is load_cand's, repeated:
+ * load_cand stays byte for byte what the v3 releases carry (LOADER.BIN
  * 41f3218a..., sigmafp-re-45 2026-10-07) until the page ships; then the two
  * become one function. */
 static int allsups_entry(u8 *data, const struct sl_svc *svc);
@@ -539,9 +816,12 @@ static void load_builtin(struct state *st, u8 *s, const struct strings *str)
     copy(sp->name, name, slen(name) + 1);
     copy(sp->path, path, slen(path) + 1);
     sp->id = ALLSUPS_MAGIC; sp->block = block; sp->state = SL_RELEASE;
+    sp->block_size = len;
     st->cur = st->nsups++;
-    st->jmark = (u32)(uintptr_t)st->jcur;
-    st->cmark = st->nclaims;
+    sp->jmark = (u32)(uintptr_t)st->jcur;
+    sp->cmark = st->nclaims;
+    st->jmark = sp->jmark;
+    st->cmark = sp->cmark;
     st->running = 1;
     int r = allsups_entry(block, &st->svc);
     st->running = 0;
@@ -556,6 +836,7 @@ static void load_builtin(struct state *st, u8 *s, const struct strings *str)
         undo_current(st);
         mem_free(st->heap, block);
         sp->block = 0;
+        sp->block_size = 0;
         logrec(st, L_RELEASED, (u32)r, 0, name);
     }
     publish();
@@ -609,6 +890,7 @@ static void write_log(struct state *st, const struct strings *str)
 static u32 sl_load(struct state *st, const struct strings *str)
 {
     *(volatile u32 *)(uintptr_t)CAVE_BUMP = CAVE_ARENA;   /* every boot: stage2's rule */
+    st->str = str;                          /* load_one() reads the directory rule from it */
     st->svc.version = SL_SVC_VERSION;
     st->svc.boot_id = tick_us();
     st->svc.claim = svc_claim;
@@ -620,6 +902,9 @@ static u32 sl_load(struct state *st, const struct strings *str)
     st->svc.holder = svc_holder;
     st->svc.self = svc_self;
     st->svc.done_at_start = *(volatile u32 *)(uintptr_t)LOAD_DONE_US;
+    st->svc.release = svc_release;
+    st->svc.load_one = svc_load_one;
+    st->svc.reload = svc_reload;
 #ifdef SL_ALLSUPS
     st->svc.button = svc_button;
 #endif
@@ -643,6 +928,11 @@ static u32 sl_load(struct state *st, const struct strings *str)
     u8 *s = mem_get(st->heap, SCRATCH_BYTES);
     if (!s) { logrec(st, L_NO_MEMORY, SCRATCH_BYTES, 0, 0); return 0; }
     zero(s, SCRATCH_BYTES);
+    /* Every allocation the state needs has succeeded, and nothing has run
+     * yet: publish the table for the rest of the boot.  Any failure above
+     * left this word 0 (sl_boot clears it before it can fail). */
+    *(volatile u32 *)(uintptr_t)SL_BOOK_AT = (u32)(uintptr_t)&st->svc;
+    dcache();
     u32 n = list_dir(st, s, str);
     logrec(st, L_LISTED, n, 0, 0);
     /* The table where code that is not handed it can find it (SL_SVC_AT),
@@ -650,7 +940,7 @@ static u32 sl_load(struct state *st, const struct strings *str)
     *(volatile u32 *)(uintptr_t)SL_SVC_AT = (u32)(uintptr_t)&st->svc;
     publish();
     for (u32 i = 0; i < n; i++)
-        load_one(st, s, str, &((struct cand *)(s + S_CANDS))[i]);
+        load_cand(st, s, str, &((struct cand *)(s + S_CANDS))[i]);
 #ifdef SL_ALLSUPS
     load_builtin(st, s, str);           /* last: it lists what the others did */
 #endif
@@ -682,6 +972,10 @@ typedef u32 (*run_fn)(struct state *, const struct strings *);
  * `vbin` the file the loader read, whose +0x0C says how long the code is. */
 u32 sl_boot(const u8 *vbin, u32 unhook, u32 base, const struct strings *str)
 {
+    /* A table pointer from the last boot must not outlive a load that fails
+     * before the resident state exists.  sl_load puts the real one back. */
+    *(volatile u32 *)(uintptr_t)SL_BOOK_AT = 0;
+    dcache();
     u32 code = *(const u32 *)(vbin + 12);
     u32 state_at = (code + 7) & ~7u;
     void *heap = mem_heap(0);                       /* class 0, USER */

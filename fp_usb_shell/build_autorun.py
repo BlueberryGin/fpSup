@@ -1095,6 +1095,10 @@ if args.loader:
         entry = 0
     binblob = struct.pack('<4sIII', b'VBIN', len(secs), entry, len(body)) + table + body
     binpath = DEST.parent / args.bin_name
+    # A bin-name with a directory part (fpSup\LOADER.BIN) needs that directory
+    # on Windows, where pathlib splits it and the parent is not DEST.parent;
+    # POSIX treats the name as one file, so this is a no-op there.
+    binpath.parent.mkdir(parents=True, exist_ok=True)
     # Match fpSup-Merge: retain 32 KiB output for existing small cards, and pad
     # larger cards to the loader's read cap. Padding is not a payload limit.
     # The loader now owns a separate staging buffer, not a shared-pool window.
